@@ -1,18 +1,21 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { handle } from '$lib/state/handle.svelte';
+	import { page } from '$app/state';
 	import { feed } from '$lib/state/feed.svelte';
 	import FeedGrid from '$lib/components/FeedGrid.svelte';
 	import HandleForm from '$lib/components/HandleForm.svelte';
 
+	// the URL is the source of truth: /?actor=handle — shareable walls
+	const actor = $derived(page.url.searchParams.get('actor'));
+
 	$effect(() => {
-		const actor = handle.current;
+		const current = actor;
 		// untrack: reset mutates feed state; tracking it would loop this effect
-		if (actor) untrack(() => feed.reset(actor));
+		if (current) untrack(() => feed.reset(current));
 	});
 </script>
 
-{#if handle.current}
+{#if actor}
 	<main class="pb-8">
 		<FeedGrid />
 	</main>

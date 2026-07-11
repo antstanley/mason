@@ -2,20 +2,20 @@ import { browser } from "$app/environment";
 
 const STORAGE_KEY = "mason:handle";
 
-class HandleState {
-  current = $state<string | null>(browser ? localStorage.getItem(STORAGE_KEY) : null);
+/** The URL (?actor=) is the source of truth for whose wall is showing —
+ *  this only remembers the last handle to prefill the landing form. */
+class LastHandle {
+  value = $state<string>(browser ? (localStorage.getItem(STORAGE_KEY) ?? "") : "");
 
-  set(raw: string) {
-    const cleaned = raw.trim().replace(/^@/, "").toLowerCase();
-    if (!cleaned) return;
-    this.current = cleaned;
-    if (browser) localStorage.setItem(STORAGE_KEY, cleaned);
-  }
-
-  clear() {
-    this.current = null;
-    if (browser) localStorage.removeItem(STORAGE_KEY);
+  remember(handle: string) {
+    this.value = handle;
+    if (browser) localStorage.setItem(STORAGE_KEY, handle);
   }
 }
 
-export const handle = new HandleState();
+export const lastHandle = new LastHandle();
+
+/** Normalize user input: strip @, trim, lowercase. */
+export function cleanHandle(raw: string): string {
+  return raw.trim().replace(/^@/, "").toLowerCase();
+}

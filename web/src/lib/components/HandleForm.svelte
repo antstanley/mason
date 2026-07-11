@@ -1,11 +1,15 @@
 <script lang="ts">
-	import { handle } from '$lib/state/handle.svelte';
+	import { goto } from '$app/navigation';
+	import { cleanHandle, lastHandle } from '$lib/state/handle.svelte';
 
-	let value = $state('');
+	let value = $state(lastHandle.value);
 
 	function submit(event: SubmitEvent) {
 		event.preventDefault();
-		handle.set(value);
+		const handle = cleanHandle(value);
+		if (!handle) return;
+		lastHandle.remember(handle);
+		void goto(`/?actor=${encodeURIComponent(handle)}`);
 	}
 </script>
 
