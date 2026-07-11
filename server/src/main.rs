@@ -1,9 +1,15 @@
 mod algo;
+mod cache;
 mod config;
 mod error;
 mod fixtures;
+mod http;
 mod model;
 mod routes;
+mod sources;
+mod state;
+
+use std::sync::Arc;
 
 use tracing_subscriber::EnvFilter;
 
@@ -16,11 +22,13 @@ async fn main() {
         .init();
 
     let config = config::Config::from_env();
-    let app = routes::router();
+    let port = config.port;
+    let state = Arc::new(state::AppState::new(config));
+    let app = routes::router(state);
 
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", config.port))
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
         .expect("failed to bind");
-    tracing::info!("mortar mixing on port {}", config.port);
+    tracing::info!("mortar mixing on port {port}");
     axum::serve(listener, app).await.expect("server error");
 }

@@ -3,9 +3,10 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
 
-#[derive(Debug, thiserror::Error)]
-#[allow(dead_code)] // constructed from M1 when real sources land
+#[derive(Debug, thiserror::Error, Clone)]
 pub enum AppError {
+    #[error("missing required parameter: {0}")]
+    BadRequest(&'static str),
     #[error("actor not found: {0}")]
     ActorNotFound(String),
     #[error("upstream error: {0}")]
@@ -15,6 +16,7 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code) = match &self {
+            AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::ActorNotFound(_) => (StatusCode::NOT_FOUND, "actor_not_found"),
             AppError::Upstream(_) => (StatusCode::BAD_GATEWAY, "upstream"),
         };
