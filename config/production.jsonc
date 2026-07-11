@@ -3,7 +3,8 @@
 {
 	"region": "eu-west-1",
 	"siteName": "mason",
-	// "domain": "mason.example.com", // set + re-bootstrap for a custom domain (prints ACM CNAMEs)
+	// domain is not committed — CI injects it from the production environment's
+	// PRODUCTION_DOMAIN secret (--domain); pass it the same way at bootstrap
 	"githubRepo": "antstanley/mason", // provisions the GitHub OIDC deploy role at bootstrap
 
 	// mason is a SvelteKit SPA in a monorepo subdirectory

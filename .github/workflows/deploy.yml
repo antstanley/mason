@@ -13,7 +13,7 @@ env:
 jobs:
   production:
     runs-on: ubuntu-latest
-    environment: production # role trusts this environment; gate approvals here
+    environment: production # holds AWS_ACCOUNT_ID + PRODUCTION_DOMAIN secrets; gate approvals here
     steps:
       - uses: actions/checkout@v4
 
@@ -49,8 +49,14 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/production-mason-gh
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/production-mason-gh
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy to production
-        run: cd web && pnpm exec blogwright deploy production
+        env:
+          PRODUCTION_DOMAIN: ${{ secrets.PRODUCTION_DOMAIN }}
+        # --domain only when the secret is set; otherwise the CloudFront
+        # default domain serves the site
+        run: |
+          cd web
+          pnpm exec blogwright deploy production ${PRODUCTION_DOMAIN:+--domain "$PRODUCTION_DOMAIN"}

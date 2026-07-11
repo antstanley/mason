@@ -79,10 +79,14 @@ invalidations. Config lives in `config/{production,preview}.jsonc`
 One-time setup with AWS credentials:
 
 ```sh
-just bootstrap                # production bucket/CDN/OIDC role
-just bootstrap-preview        # shared PR-preview stack — set `domain` in
-                              #   config/preview.jsonc first (Route53 zone)
-gh variable set AWS_ACCOUNT_ID --body <your-account-id>
+just bootstrap                             # production bucket/CDN/OIDC role
+just bootstrap-preview preview.example.com # shared PR-preview stack (Route53 zone)
+
+# per-environment GitHub secrets (domains never live in the repo):
+gh secret set AWS_ACCOUNT_ID --env production --body <account-id>
+gh secret set AWS_ACCOUNT_ID --env preview --body <account-id>
+gh secret set PREVIEW_DOMAIN --env preview --body preview.example.com
+gh secret set PRODUCTION_DOMAIN --env production --body example.com  # optional
 ```
 
 Then CI (GitHub-OIDC — no stored keys):
