@@ -49,6 +49,25 @@ pub fn init_config(steam_proxy_base: Option<String>) {
     });
 }
 
+/// Snapshot of the warm caches as JSON — the service worker stores this in
+/// IndexedDB after serving a page, so a reaped SW instance wakes up warm.
+#[wasm_bindgen]
+pub async fn export_caches() -> Result<String, JsValue> {
+    let state = state();
+    let bundle = mortar_core::persist::export(&state.caches).await;
+    serde_json::to_string(&bundle).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Restore a previously exported bundle. Anything unparseable or stale is
+/// silently discarded — it's only a cache.
+#[wasm_bindgen]
+pub async fn import_caches(json: String) {
+    if let Ok(bundle) = serde_json::from_str(&json) {
+        let state = state();
+        mortar_core::persist::import(&state.caches, bundle).await;
+    }
+}
+
 /// One feed page as a JSON string (FeedResponse). Errors throw a JSON string
 /// `{"status": u16, "error": code, "message": ...}` so the service worker
 /// can build a Response with the right status.

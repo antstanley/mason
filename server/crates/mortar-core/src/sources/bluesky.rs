@@ -2,7 +2,7 @@
 //! feeds mapped into bricks. All URLs are built from `Config::appview_base`
 //! so wiremock tests can stand in for the real network.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::http::{Bucket, Http, HttpError};
 use crate::model::{
@@ -11,12 +11,13 @@ use crate::model::{
 use crate::sources::steam;
 
 /// One author's posts plus the Steam games they were talking about.
+#[derive(Serialize, Deserialize, Clone)]
 pub struct AuthorYield {
     pub bricks: Vec<Brick>,
     pub steam_appids: Vec<u64>,
 }
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Follow {
     pub did: String,

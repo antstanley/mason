@@ -10,6 +10,7 @@ pub mod feed;
 pub mod fixtures;
 pub mod http;
 pub mod model;
+pub mod persist;
 pub mod platform;
 pub mod sources;
 pub mod state;

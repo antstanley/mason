@@ -9,6 +9,14 @@ use std::time::Duration;
 
 pub use web_time::{Instant, SystemTime};
 
+/// Wall-clock now in unix milliseconds (works on wasm via web-time).
+pub fn unix_now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn spawn<F>(future: F)
 where

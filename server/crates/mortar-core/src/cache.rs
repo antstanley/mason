@@ -15,6 +15,7 @@ use crate::platform::Instant;
 use crate::sources::bluesky::{AuthorYield, Follow};
 
 /// One author's standard.site yield.
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct StdDocs {
     pub bricks: Vec<Brick>,
     /// post URIs suppressed via bskyPostRef — the blog card wins
@@ -75,6 +76,37 @@ impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
             },
         );
         (value, true)
+    }
+
+    /// Live entries as (key, unwrapped value, absolute unix-ms expiry) —
+    /// Instants don't survive process death, wall-clock timestamps do.
+    pub async fn export_map<T>(&self, unwrap: impl Fn(&V) -> T) -> Vec<(K, T, u64)> {
+        let now = Instant::now();
+        let now_unix = crate::platform::unix_now_ms();
+        let entries = self.entries.lock().await;
+        entries
+            .iter()
+            .filter(|(_, e)| e.expires_at > now)
+            .map(|(k, e)| {
+                let remaining = e.expires_at.saturating_duration_since(now);
+                (
+                    k.clone(),
+                    unwrap(&e.value),
+                    now_unix + remaining.as_millis() as u64,
+                )
+            })
+            .collect()
+    }
+
+    /// Restore exported entries, dropping anything already expired.
+    pub async fn import_map<T>(&self, entries: Vec<(K, T, u64)>, wrap: impl Fn(T) -> V) {
+        let now_unix = crate::platform::unix_now_ms();
+        for (key, value, expires_unix) in entries {
+            if expires_unix > now_unix {
+                let ttl = Duration::from_millis(expires_unix - now_unix);
+                self.insert_with_ttl(key, wrap(value), ttl).await;
+            }
+        }
     }
 
     pub async fn insert_with_ttl(&self, key: K, value: V, ttl: Duration) {
