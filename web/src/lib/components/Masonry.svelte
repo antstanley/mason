@@ -11,7 +11,6 @@
 	} = $props();
 
 	let container = $state<HTMLElement | null>(null);
-	let colEls: HTMLElement[] = [];
 	let colCount = $state(0);
 	let columns = $state<Brick[][]>([]);
 	let placedCount = 0;
@@ -24,11 +23,16 @@
 		return 4;
 	}
 
+	// Measure columns through the live DOM, not element bindings: the keyed
+	// each reuses surviving column divs across rebuilds, so bind:this refs
+	// captured in an array go permanently stale after a column-count change
+	// (the bug where the wall never left single-column mode).
 	function shortestColumn(): number {
 		let best = 0;
 		let bestHeight = Infinity;
 		for (let i = 0; i < colCount; i++) {
-			const h = colEls[i]?.offsetHeight ?? 0;
+			const el = container?.children[i] as HTMLElement | undefined;
+			const h = el?.offsetHeight ?? 0;
 			if (h < bestHeight) {
 				bestHeight = h;
 				best = i;
@@ -62,7 +66,6 @@
 
 	function rebuild(n: number) {
 		colCount = n;
-		colEls = [];
 		columns = Array.from({ length: n }, () => []);
 		placedCount = 0;
 		void tick().then(() => void placePending());
@@ -94,7 +97,7 @@
 
 <div bind:this={container} class="flex items-start gap-5">
 	{#each { length: colCount } as _, i (i)}
-		<div bind:this={colEls[i]} class="flex min-w-0 flex-1 flex-col gap-5">
+		<div class="flex min-w-0 flex-1 flex-col gap-5">
 			{#each columns[i] as item (item.id)}
 				<div class="animate-brick-in">
 					{@render brick(item)}
