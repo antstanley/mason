@@ -1,0 +1,20 @@
+// blogwright deployment config — mason production
+// (region is an assumption: change it before running `blogwright bootstrap`)
+{
+	"region": "eu-west-1",
+	"siteName": "mason",
+	// "domain": "mason.example.com", // set + re-bootstrap for a custom domain (prints ACM CNAMEs)
+	"githubRepo": "antstanley/mason", // provisions the GitHub OIDC deploy role at bootstrap
+
+	// mason is a SvelteKit SPA in a monorepo subdirectory
+	"spa": true,
+	"paths": {
+		"app": "web",
+		"dist": "web/build"
+	},
+
+	// The wasm feed engine is built in CI (Rust + wasm-pack stay out of the
+	// MicroVM image) and zipped into the deploy source despite being gitignored.
+	// Run `just wasm` before any local `blogwright deploy`.
+	"sourceInclude": ["web/src/lib/mortar-wasm/pkg"]
+}

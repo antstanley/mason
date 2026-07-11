@@ -1,6 +1,12 @@
 {
 	"$schema": "https://unpkg.com/knip@latest/schema.json",
-	"entry": ["src/routes/**/+*.{svelte,ts}"],
+	"entry": [
+		"src/routes/**/+*.{svelte,ts}"
+	],
 	"project": "src/**/*.{svelte,ts}",
-	"ignoreDependencies": ["playwright-core", "tailwindcss"]
+	"ignoreDependencies": [
+		"playwright-core",
+		"tailwindcss",
+		"blogwright"
+	]
 }

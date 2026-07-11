@@ -1,0 +1,103 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write # GitHub OIDC → blogwright deploy roles, no stored keys
+  contents: read
+
+env:
+  AWS_REGION: eu-west-1 # keep in sync with config/*.jsonc
+
+jobs:
+  # every push to main → staging (role trusts refs/heads/main)
+  staging:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain (wasm32)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      # heavy toolchain work happens here, not in the builder MicroVM —
+      # the pkg rides into the deploy zip via config sourceInclude
+      - name: Build wasm feed engine
+        run: |
+          cd server && wasm-pack build crates/mortar-wasm --target web --no-pack \
+            --out-dir ../../../web/src/lib/mortar-wasm/pkg
+
+      - name: Install web deps
+        run: cd web && pnpm install --frozen-lockfile
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/staging-mason-gh
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to staging
+        run: cd web && pnpm exec blogwright deploy staging
+
+  # manual dispatch → production (role trusts the `production` environment)
+  production:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain (wasm32)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Build wasm feed engine
+        run: |
+          cd server && wasm-pack build crates/mortar-wasm --target web --no-pack \
+            --out-dir ../../../web/src/lib/mortar-wasm/pkg
+
+      - name: Install web deps
+        run: cd web && pnpm install --frozen-lockfile
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/production-mason-gh
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to production
+        run: cd web && pnpm exec blogwright deploy production

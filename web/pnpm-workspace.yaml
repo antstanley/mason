@@ -1,2 +1,11 @@
 allowBuilds:
-  esbuild: true
+  # core-js's postinstall only prints a funding banner — skip it
+  core-js: false
+ignoredBuiltDependencies:
+  - core-js
+# blogwright is our own tooling (github.com/antstanley/blogwright) — exempt it
+# from the minimum-release-age quarantine so fresh releases install same-day.
+minimumReleaseAgeExclude:
+  - blogwright
+  - blogwright-core
+  - blogwright-pds

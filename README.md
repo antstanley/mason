@@ -65,3 +65,27 @@ just clean        # reclaim the cargo target dir (~3GB)
 ```
 
 Try actor `demo` for an offline fixture wall.
+
+## Deploy (AWS via blogwright)
+
+The static local-mode build deploys to S3 + CloudFront with
+[blogwright](https://github.com/antstanley/blogwright): the repo is zipped
+(wasm pkg included via `sourceInclude` — Rust/wasm-pack stay in CI, out of
+the builder MicroVM), built in a Lambda MicroVM (`pnpm install && pnpm build`
+in `web/`), and synced with ETag-diffed uploads + minimal CloudFront
+invalidations. Config lives in `config/{production,staging}.jsonc`
+(`spa: true`, `paths: { app: "web", dist: "web/build" }`).
+
+One-time setup with AWS credentials:
+
+```sh
+just bootstrap staging        # creates bucket/CDN/OIDC role per env
+just bootstrap production
+gh variable set AWS_ACCOUNT_ID --body <your-account-id>
+```
+
+Then CI (`.github/workflows/deploy.yml`, GitHub-OIDC — no stored keys):
+every push to `main` deploys **staging**; a manual workflow dispatch
+(gated by the `production` GitHub environment) deploys **production**.
+`just deploy <env>` does the same from a laptop. `blogwright status`,
+`history`, `logs <hash>`, and `rollback <hash>` cover day-2 operations.

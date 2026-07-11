@@ -44,6 +44,14 @@ fmt-check:
 guard-autoplay:
     ! git grep -n 'autoplay' web/src
 
+# deploy to AWS via blogwright (S3 + CloudFront, MicroVM build)
+deploy env='production': wasm
+    cd web && pnpm exec blogwright deploy {{env}}
+
+# one-time infra creation per environment (needs AWS credentials)
+bootstrap env='production':
+    cd web && pnpm exec blogwright bootstrap {{env}}
+
 # reclaim disk (cargo target grows to ~3GB)
 clean:
     cd server && cargo clean

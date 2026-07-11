@@ -7,4 +7,7 @@ dist/
 .env
 .env.*
 !.env.example
+# web/.env holds only the public build-mode flag (no secrets) and the
+# MicroVM deploy build needs it present
+!web/.env
 .DS_Store
