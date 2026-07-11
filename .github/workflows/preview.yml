@@ -1,0 +1,83 @@
+name: preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  id-token: write # GitHub OIDC → preview-mason-gh role, no stored keys
+  contents: read
+
+env:
+  AWS_REGION: eu-west-1 # keep in sync with config/preview.jsonc
+
+jobs:
+  deploy:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain (wasm32)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      # heavy toolchain work happens here, not in the builder MicroVM —
+      # the pkg rides into the deploy zip via config sourceInclude
+      - name: Build wasm feed engine
+        run: |
+          cd server && wasm-pack build crates/mortar-wasm --target web --no-pack \
+            --out-dir ../../../web/src/lib/mortar-wasm/pkg
+
+      - name: Install web deps
+        run: cd web && pnpm install --frozen-lockfile
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/preview-mason-gh
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy preview
+        run: cd web && pnpm exec blogwright preview deploy pr-${{ github.event.number }}
+
+  destroy:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install web deps
+        run: cd web && pnpm install --frozen-lockfile
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/preview-mason-gh
+          aws-region: ${{ env.AWS_REGION }}
+
+      # teardown is a prefix delete — no build needed
+      - name: Destroy preview
+        run: cd web && pnpm exec blogwright preview destroy pr-${{ github.event.number }}

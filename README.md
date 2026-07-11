@@ -73,19 +73,24 @@ The static local-mode build deploys to S3 + CloudFront with
 (wasm pkg included via `sourceInclude` — Rust/wasm-pack stay in CI, out of
 the builder MicroVM), built in a Lambda MicroVM (`pnpm install && pnpm build`
 in `web/`), and synced with ETag-diffed uploads + minimal CloudFront
-invalidations. Config lives in `config/{production,staging}.jsonc`
+invalidations. Config lives in `config/{production,preview}.jsonc`
 (`spa: true`, `paths: { app: "web", dist: "web/build" }`).
 
 One-time setup with AWS credentials:
 
 ```sh
-just bootstrap staging        # creates bucket/CDN/OIDC role per env
-just bootstrap production
+just bootstrap                # production bucket/CDN/OIDC role
+just bootstrap-preview        # shared PR-preview stack — set `domain` in
+                              #   config/preview.jsonc first (Route53 zone)
 gh variable set AWS_ACCOUNT_ID --body <your-account-id>
 ```
 
-Then CI (`.github/workflows/deploy.yml`, GitHub-OIDC — no stored keys):
-every push to `main` deploys **staging**; a manual workflow dispatch
-(gated by the `production` GitHub environment) deploys **production**.
-`just deploy <env>` does the same from a laptop. `blogwright status`,
-`history`, `logs <hash>`, and `rollback <hash>` cover day-2 operations.
+Then CI (GitHub-OIDC — no stored keys):
+
+- **PR previews** (`preview.yml`): every PR deploys to
+  `https://pr-<n>.<preview-domain>` on open/update and is torn down on
+  close — one shared distribution, so a preview is just an S3 prefix.
+- **Production** (`deploy.yml`): manual workflow dispatch, gated by the
+  `production` GitHub environment. `just deploy` does the same from a
+  laptop. `blogwright status`, `history`, `logs <hash>`, and
+  `rollback <hash>` cover day-2 operations.

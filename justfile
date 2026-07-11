@@ -48,9 +48,13 @@ guard-autoplay:
 deploy env='production': wasm
     cd web && pnpm exec blogwright deploy {{env}}
 
-# one-time infra creation per environment (needs AWS credentials)
+# one-time infra creation (needs AWS credentials)
 bootstrap env='production':
     cd web && pnpm exec blogwright bootstrap {{env}}
+
+# one-time PR-preview stack creation — set `domain` in config/preview.jsonc first
+bootstrap-preview:
+    cd web && pnpm exec blogwright preview bootstrap
 
 # reclaim disk (cargo target grows to ~3GB)
 clean:

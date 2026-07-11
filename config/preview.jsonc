@@ -1,0 +1,17 @@
+// blogwright PR-preview stack — one shared distribution serves every PR at
+// https://pr-<n>.<domain>. Set `domain` to a Route53 hosted zone you control
+// (wildcard cert + DNS are created automatically), then run once:
+//   just bootstrap-preview
+{
+	"region": "eu-west-1",
+	"siteName": "mason",
+	// "domain": "preview.mason.example.com", // REQUIRED before preview bootstrap
+	"githubRepo": "antstanley/mason",
+
+	"spa": true,
+	"paths": {
+		"app": "web",
+		"dist": "web/build"
+	},
+	"sourceInclude": ["web/src/lib/mortar-wasm/pkg"]
+}
