@@ -1,34 +1,44 @@
 <script lang="ts">
 	import type { VideoBrick } from '$lib/types';
+	import { player } from '$lib/state/player.svelte';
 	import BrickShell from '../BrickShell.svelte';
 	import AuthorChip from '../AuthorChip.svelte';
+	import VideoPlayer from '../VideoPlayer.svelte';
 
 	let { brick }: { brick: VideoBrick } = $props();
 
-	// Poster + play button only — the <video> element is mounted on click
-	// (VideoPlayer, M3). Videos never play on their own.
+	// The <video> element does not exist until the user clicks — the Wall
+	// never plays anything on its own.
 	let playRequested = $state(false);
+
+	const ratio = $derived(
+		brick.aspectRatio ? `${brick.aspectRatio.width} / ${brick.aspectRatio.height}` : '16 / 9'
+	);
+
+	// if another card starts playing, collapse this one back to its poster
+	$effect(() => {
+		if (playRequested && player.activeId !== brick.id) playRequested = false;
+	});
 </script>
 
 <BrickShell accent="video">
 	<div class="relative">
-		{#if brick.poster}
-			<img
-				src={brick.poster}
-				alt=""
-				loading="lazy"
-				class="w-full object-cover"
-				style:aspect-ratio={brick.aspectRatio
-					? `${brick.aspectRatio.width} / ${brick.aspectRatio.height}`
-					: '16 / 9'}
-			/>
+		{#if playRequested}
+			<VideoPlayer id={brick.id} playlist={brick.playlist} poster={brick.poster} aspectRatio={ratio} />
 		{:else}
-			<div class="aspect-video w-full bg-brick-video/20"></div>
-		{/if}
-		{#if !playRequested}
+			{#if brick.poster}
+				<img src={brick.poster} alt="" loading="lazy" class="w-full object-cover" style:aspect-ratio={ratio} />
+			{:else}
+				<div class="w-full bg-brick-video/20" style:aspect-ratio={ratio}></div>
+			{/if}
 			<button
 				type="button"
-				onclick={() => (playRequested = true)}
+				onclick={() => {
+					// claim synchronously so the collapse effect below never
+					// sees this card as a loser of its own click
+					player.claim(brick.id);
+					playRequested = true;
+				}}
 				class="absolute inset-0 grid cursor-pointer place-items-center"
 				aria-label="Play video"
 			>
@@ -38,20 +48,17 @@
 					▶
 				</span>
 			</button>
-		{:else}
-			<!-- M3 replaces this with the HLS VideoPlayer -->
-			<div class="absolute inset-0 grid place-items-center bg-kiln/80 p-4 text-center">
-				<p class="text-sm font-semibold text-chalk">player lands in M3 🧱</p>
-			</div>
 		{/if}
 		<span
-			class="absolute top-2 left-2 rounded-full bg-kiln/75 px-2.5 py-0.5 text-[0.7rem] font-bold text-chalk"
+			class="pointer-events-none absolute top-2 left-2 rounded-full bg-kiln/75 px-2.5 py-0.5 text-[0.7rem] font-bold text-chalk"
 		>
 			{brick.source === 'steam' ? '🎮 Steam' : '🦋 Bluesky'}
 		</span>
 	</div>
 	<div class="flex flex-col gap-3 p-4">
-		<p class="font-display leading-tight font-bold">{brick.title}</p>
+		{#if brick.title}
+			<p class="font-display leading-tight font-bold">{brick.title}</p>
+		{/if}
 		{#if brick.game}
 			<p class="text-sm opacity-70">{brick.game.name}</p>
 		{/if}

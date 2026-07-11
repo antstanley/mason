@@ -3,7 +3,8 @@
 	"workspaces": {
 		"web": {
 			"entry": ["src/routes/**/+*.{svelte,ts}", "src/hooks*.ts"],
-			"project": "src/**/*.{svelte,ts}"
+			"project": "src/**/*.{svelte,ts}",
+			"ignoreDependencies": ["playwright-core"]
 		}
 	},
 	"ignore": ["server/**"]
