@@ -29,7 +29,7 @@
 			autocapitalize="none"
 			autocorrect="off"
 			spellcheck="false"
-			class="min-w-0 flex-1 rounded-full border-2 border-ink/20 bg-chalk px-5 py-3 font-semibold outline-none transition-colors focus:border-pop-pink"
+			class="min-w-0 flex-1 rounded-full border-2 border-ink/20 bg-chalk px-5 dark:border-chalk/20 dark:bg-kiln py-3 font-semibold outline-none transition-colors focus:border-pop-pink"
 		/>
 		<button
 			type="submit"

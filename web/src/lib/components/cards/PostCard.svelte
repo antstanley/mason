@@ -23,7 +23,7 @@
 			<p class="text-[0.95rem] leading-snug">{brick.text}</p>
 		{/if}
 		{#if brick.external}
-			<div class="rounded-xl border border-ink/10 bg-plaster-deep/50 p-3">
+			<div class="rounded-xl border border-ink/10 bg-plaster-deep/50 p-3 dark:border-chalk/10 dark:bg-kiln-deep/60">
 				<p class="truncate text-sm font-semibold">{brick.external.title}</p>
 				<p class="line-clamp-2 text-xs opacity-70">{brick.external.description}</p>
 			</div>

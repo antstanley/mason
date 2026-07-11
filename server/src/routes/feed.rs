@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
 use axum::Json;
+use axum::extract::{Query, State};
 use serde::Deserialize;
 
 use crate::algo::cursor::{self, Cursor};
@@ -48,7 +48,10 @@ pub async fn feed(
             offset: offset + items.len(),
         })
     });
-    Ok(Json(FeedResponse { items, cursor: next }))
+    Ok(Json(FeedResponse {
+        items,
+        cursor: next,
+    }))
 }
 
 async fn resolve_actor(state: &Arc<AppState>, actor: &str) -> Result<String, AppError> {
@@ -78,7 +81,11 @@ fn demo_page(offset: usize) -> FeedResponse {
     let items: Vec<_> = pool.iter().skip(offset).take(PAGE_SIZE).cloned().collect();
     let next_offset = offset + items.len();
     let cursor = (next_offset < pool.len()).then(|| {
-        cursor::encode(&Cursor { snapshot: "fixture".into(), seed: 0, offset: next_offset })
+        cursor::encode(&Cursor {
+            snapshot: "fixture".into(),
+            seed: 0,
+            offset: next_offset,
+        })
     });
     FeedResponse { items, cursor }
 }

@@ -21,10 +21,10 @@ pub fn extract_appids(fragments: impl IntoIterator<Item = impl AsRef<str>>) -> V
         while let Some(at) = rest.find(MARKER) {
             rest = &rest[at + MARKER.len()..];
             let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-            if let Ok(id) = digits.parse::<u64>() {
-                if !appids.contains(&id) {
-                    appids.push(id);
-                }
+            if let Ok(id) = digits.parse::<u64>()
+                && !appids.contains(&id)
+            {
+                appids.push(id);
             }
         }
     }
@@ -43,7 +43,9 @@ pub async fn get_trailers(
     let mut body: serde_json::Map<String, serde_json::Value> =
         http.get_json(&url, Bucket::Unmetered).await?;
 
-    let Some(entry) = body.remove(&appid.to_string()) else { return Ok(Vec::new()) };
+    let Some(entry) = body.remove(&appid.to_string()) else {
+        return Ok(Vec::new());
+    };
     let entry: AppEntry = match serde_json::from_value(entry) {
         Ok(e) => e,
         Err(e) => {
@@ -51,7 +53,9 @@ pub async fn get_trailers(
             return Ok(Vec::new());
         }
     };
-    let Some(data) = entry.data.filter(|_| entry.success) else { return Ok(Vec::new()) };
+    let Some(data) = entry.data.filter(|_| entry.success) else {
+        return Ok(Vec::new());
+    };
 
     Ok(data
         .movies
@@ -67,7 +71,10 @@ pub async fn get_trailers(
                 title: movie.name.clone(),
                 poster: movie.thumbnail.clone().map(force_https),
                 playlist: force_https(movie.hls_h264.clone().unwrap_or_default()),
-                aspect_ratio: Some(AspectRatio { width: 16, height: 9 }),
+                aspect_ratio: Some(AspectRatio {
+                    width: 16,
+                    height: 9,
+                }),
                 source: VideoSource::Steam,
                 game: Some(GameInfo {
                     appid,
@@ -117,7 +124,9 @@ pub async fn get_featured(http: &Http, store_base: &str) -> Result<Vec<u64>, Htt
 
 fn force_https(url: String) -> String {
     // the storefront still hands out http:// URLs sometimes
-    url.strip_prefix("http://").map(|rest| format!("https://{rest}")).unwrap_or(url)
+    url.strip_prefix("http://")
+        .map(|rest| format!("https://{rest}"))
+        .unwrap_or(url)
 }
 
 #[derive(Deserialize)]
@@ -186,8 +195,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let bricks =
-            get_trailers(&Http::new(), &server.uri(), 570, "2026-07-11T00:00:00Z").await.unwrap();
+        let bricks = get_trailers(&Http::new(), &server.uri(), 570, "2026-07-11T00:00:00Z")
+            .await
+            .unwrap();
         assert_eq!(bricks.len(), 1);
         match &bricks[0] {
             Brick::Video(v) => {
@@ -196,7 +206,15 @@ mod tests {
                 assert_eq!(v.poster.as_deref(), Some("https://t/2.jpg"));
                 assert_eq!(v.source, VideoSource::Steam);
                 assert_eq!(v.game.as_ref().unwrap().name, "Dota 2");
-                assert!(v.game.as_ref().unwrap().header_image.as_deref().unwrap().starts_with("https://"));
+                assert!(
+                    v.game
+                        .as_ref()
+                        .unwrap()
+                        .header_image
+                        .as_deref()
+                        .unwrap()
+                        .starts_with("https://")
+                );
             }
             other => panic!("expected video brick, got {other:?}"),
         }
@@ -213,8 +231,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let bricks =
-            get_trailers(&Http::new(), &server.uri(), 999, "2026-07-11T00:00:00Z").await.unwrap();
+        let bricks = get_trailers(&Http::new(), &server.uri(), 999, "2026-07-11T00:00:00Z")
+            .await
+            .unwrap();
         assert!(bricks.is_empty());
     }
 }

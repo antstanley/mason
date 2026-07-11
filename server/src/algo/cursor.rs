@@ -1,5 +1,5 @@
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 
 /// Opaque pagination cursor. Carries the seed so an evicted snapshot can be
@@ -32,7 +32,11 @@ mod tests {
 
     #[test]
     fn roundtrip() {
-        let c = Cursor { snapshot: "abc123".into(), seed: 42, offset: 96 };
+        let c = Cursor {
+            snapshot: "abc123".into(),
+            seed: 42,
+            offset: 96,
+        };
         assert_eq!(decode(&encode(&c)), Some(c));
     }
 

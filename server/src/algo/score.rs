@@ -21,7 +21,9 @@ pub fn created_at(brick: &Brick) -> Option<DateTime<Utc>> {
         Brick::Blog(b) => &b.published_at,
         Brick::Video(b) => &b.created_at,
     };
-    DateTime::parse_from_rfc3339(raw).ok().map(|t| t.with_timezone(&Utc))
+    DateTime::parse_from_rfc3339(raw)
+        .ok()
+        .map(|t| t.with_timezone(&Utc))
 }
 
 pub fn author_key(brick: &Brick) -> &str {
@@ -79,7 +81,9 @@ mod tests {
     }
 
     fn now() -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-07-11T00:00:00Z").unwrap().with_timezone(&Utc)
+        DateTime::parse_from_rfc3339("2026-07-11T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc)
     }
 
     #[test]
@@ -118,7 +122,7 @@ mod tests {
     }
 
     #[test]
-    fn unparseable_timestamp_sinks_to_bottom()  {
+    fn unparseable_timestamp_sinks_to_bottom() {
         let bad = post("not-a-date", 1000, 0);
         let ok = post("2026-07-01T00:00:00Z", 0, 0);
         assert!(grout(&ok, now()) > grout(&bad, now()));

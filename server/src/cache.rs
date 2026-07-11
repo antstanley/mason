@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use moka::future::Cache;
 use moka::Expiry;
+use moka::future::Cache;
 
 use crate::algo::snapshot::Snapshot;
 use crate::model::Brick;

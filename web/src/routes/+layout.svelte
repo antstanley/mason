@@ -28,7 +28,7 @@
 				<button
 					type="button"
 					onclick={() => handle.clear()}
-					class="cursor-pointer rounded-full border-2 border-ink/15 px-3 py-1 font-semibold transition-colors hover:border-pop-pink hover:text-pop-pink"
+					class="cursor-pointer rounded-full border-2 border-ink/15 px-3 dark:border-chalk/20 py-1 font-semibold transition-colors hover:border-pop-pink hover:text-pop-pink"
 				>
 					switch
 				</button>

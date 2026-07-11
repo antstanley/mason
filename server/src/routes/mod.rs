@@ -3,8 +3,8 @@ mod health;
 
 use std::sync::Arc;
 
-use axum::routing::get;
 use axum::Router;
+use axum::routing::get;
 use tower_http::trace::TraceLayer;
 
 use crate::state::AppState;

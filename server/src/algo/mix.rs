@@ -43,7 +43,11 @@ fn jitter(seed: u64, id: &str) -> f64 {
 fn need(wall_counts: &[usize; KINDS], laid: usize) -> [f64; KINDS] {
     let mut need = [0.0; KINDS];
     for k in 0..KINDS {
-        let actual = if laid == 0 { 0.0 } else { wall_counts[k] as f64 / laid as f64 };
+        let actual = if laid == 0 {
+            0.0
+        } else {
+            wall_counts[k] as f64 / laid as f64
+        };
         need[k] = TARGET[k] / (actual + 0.05);
     }
     need
@@ -65,8 +69,12 @@ pub fn lay_next(
         return None;
     }
 
-    let recent_authors: Vec<&str> =
-        wall.iter().rev().take(AUTHOR_WINDOW).map(score::author_key).collect();
+    let recent_authors: Vec<&str> = wall
+        .iter()
+        .rev()
+        .take(AUTHOR_WINDOW)
+        .map(score::author_key)
+        .collect();
     let mut counts = [0usize; KINDS];
     for brick in wall {
         counts[kind_index(brick)] += 1;
@@ -128,7 +136,9 @@ mod tests {
     use std::collections::HashSet;
 
     fn now() -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-07-11T00:00:00Z").unwrap().with_timezone(&Utc)
+        DateTime::parse_from_rfc3339("2026-07-11T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc)
     }
 
     fn author(n: usize) -> Author {
@@ -166,7 +176,11 @@ mod tests {
             title: "t".into(),
             description: None,
             cover_image: None,
-            publication: Publication { name: "p".into(), url: String::new(), icon: None },
+            publication: Publication {
+                name: "p".into(),
+                url: String::new(),
+                icon: None,
+            },
             tags: vec![],
             published_at: ts(i),
         })

@@ -45,3 +45,11 @@ body {
   color: var(--color-ink);
   font-family: var(--font-sans);
 }
+
+/* kiln mode — fired dark clay */
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: var(--color-kiln-deep);
+    color: var(--color-chalk);
+  }
+}

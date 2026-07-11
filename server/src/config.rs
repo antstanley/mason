@@ -17,11 +17,17 @@ impl Config {
             port: env_or("PORT", 8787),
             appview_base: env_or("APPVIEW_BASE", "https://public.api.bsky.app".to_string()),
             plc_base: env_or("PLC_BASE", "https://plc.directory".to_string()),
-            steam_store_base: env_or("STEAM_STORE_BASE", "https://store.steampowered.com".to_string()),
+            steam_store_base: env_or(
+                "STEAM_STORE_BASE",
+                "https://store.steampowered.com".to_string(),
+            ),
         }
     }
 }
 
 fn env_or<T: std::str::FromStr>(key: &str, default: T) -> T {
-    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }

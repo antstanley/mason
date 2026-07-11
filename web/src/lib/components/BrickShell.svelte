@@ -19,7 +19,7 @@
 </script>
 
 <article
-	class="group overflow-hidden rounded-card border-2 bg-chalk shadow-brick transition-all duration-200 hover:-translate-y-1 hover:rotate-[0.6deg] hover:shadow-brick-lift {accentClass}"
+	class="group overflow-hidden rounded-card border-2 bg-chalk shadow-brick transition-all duration-200 hover:-translate-y-1 hover:rotate-[0.6deg] hover:shadow-brick-lift dark:bg-kiln {accentClass}"
 >
 	{#if href}
 		<a {href} target="_blank" rel="noopener noreferrer" class="block">

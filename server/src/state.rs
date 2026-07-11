@@ -10,6 +10,10 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: Config) -> Self {
-        Self { config, http: Http::new(), caches: Caches::new() }
+        Self {
+            config,
+            http: Http::new(),
+            caches: Caches::new(),
+        }
     }
 }

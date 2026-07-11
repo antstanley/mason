@@ -1,6 +1,6 @@
+use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde_json::json;
 
 #[derive(Debug, thiserror::Error, Clone)]
@@ -20,6 +20,10 @@ impl IntoResponse for AppError {
             AppError::ActorNotFound(_) => (StatusCode::NOT_FOUND, "actor_not_found"),
             AppError::Upstream(_) => (StatusCode::BAD_GATEWAY, "upstream"),
         };
-        (status, Json(json!({ "error": code, "message": self.to_string() }))).into_response()
+        (
+            status,
+            Json(json!({ "error": code, "message": self.to_string() })),
+        )
+            .into_response()
     }
 }

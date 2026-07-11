@@ -58,7 +58,10 @@ pub async fn get_documents(
         // repos without the collection 400 on some PDS implementations —
         // that's just "no blog here"
         Err(HttpError::Status(400 | 404)) => {
-            return Ok(StandardSiteYield { bricks: Vec::new(), suppressed_posts: Vec::new() });
+            return Ok(StandardSiteYield {
+                bricks: Vec::new(),
+                suppressed_posts: Vec::new(),
+            });
         }
         Err(e) => return Err(e),
     };
@@ -66,8 +69,12 @@ pub async fn get_documents(
     let mut bricks = Vec::new();
     let mut suppressed_posts = Vec::new();
     for envelope in listing.records {
-        let Some(doc) = parse_document(envelope.value) else { continue };
-        let Some(site) = doc.site.clone() else { continue };
+        let Some(doc) = parse_document(envelope.value) else {
+            continue;
+        };
+        let Some(site) = doc.site.clone() else {
+            continue;
+        };
         let publication = fetch_publication(http, &pds, &author.did, &site).await;
         let url = canonical_url(&doc, &publication);
         if let Some(uri) = doc.bsky_post_ref.as_ref().and_then(|r| r.uri(&author.did)) {
@@ -79,16 +86,21 @@ pub async fn get_documents(
             author: author.clone(),
             title: doc.title,
             description: doc.description.filter(|d| !d.is_empty()),
-            cover_image: doc
-                .cover_image
-                .and_then(|blob| blob.link())
-                .map(|cid| format!("{pds}/xrpc/com.atproto.sync.getBlob?did={}&cid={cid}", author.did)),
+            cover_image: doc.cover_image.and_then(|blob| blob.link()).map(|cid| {
+                format!(
+                    "{pds}/xrpc/com.atproto.sync.getBlob?did={}&cid={cid}",
+                    author.did
+                )
+            }),
             publication,
             tags: doc.tags,
             published_at: doc.published_at,
         }));
     }
-    Ok(StandardSiteYield { bricks, suppressed_posts })
+    Ok(StandardSiteYield {
+        bricks,
+        suppressed_posts,
+    })
 }
 
 #[derive(Deserialize)]
@@ -152,7 +164,11 @@ struct BlobRef {
 
 impl BlobRef {
     fn link(&self) -> Option<String> {
-        self.reference.as_ref()?.get("$link")?.as_str().map(String::from)
+        self.reference
+            .as_ref()?
+            .get("$link")?
+            .as_str()
+            .map(String::from)
     }
 }
 
@@ -172,16 +188,15 @@ fn parse_document(value: serde_json::Value) -> Option<DocumentRecord> {
     }
 }
 
-async fn fetch_publication(
-    http: &Http,
-    pds: &str,
-    fallback_repo: &str,
-    site: &str,
-) -> Publication {
+async fn fetch_publication(http: &Http, pds: &str, fallback_repo: &str, site: &str) -> Publication {
     // site may be a plain https URL — publication is implied
     if let Some(rest) = site.strip_prefix("https://") {
         let host = rest.split('/').next().unwrap_or(rest);
-        return Publication { name: host.to_string(), url: site.to_string(), icon: None };
+        return Publication {
+            name: host.to_string(),
+            url: site.to_string(),
+            icon: None,
+        };
     }
 
     // at://repo/site.standard.publication/rkey (repo may be handle or did)
@@ -203,11 +218,22 @@ async fn fetch_publication(
     let url = format!(
         "{pds}/xrpc/com.atproto.repo.getRecord?repo={repo}&collection=site.standard.publication&rkey={rkey}"
     );
-    match http.get_json::<RecordResponse>(&url, Bucket::Unmetered).await {
-        Ok(r) => Publication { name: r.value.name, url: r.value.url, icon: None },
+    match http
+        .get_json::<RecordResponse>(&url, Bucket::Unmetered)
+        .await
+    {
+        Ok(r) => Publication {
+            name: r.value.name,
+            url: r.value.url,
+            icon: None,
+        },
         Err(e) => {
             tracing::debug!("publication fetch failed for {site}: {e}");
-            Publication { name: "blog".into(), url: String::new(), icon: None }
+            Publication {
+                name: "blog".into(),
+                url: String::new(),
+                icon: None,
+            }
         }
     }
 }
@@ -294,9 +320,18 @@ mod tests {
             .mount(&server)
             .await;
 
-        let result = get_documents(&Http::new(), &server.uri(), &author()).await.unwrap();
-        assert_eq!(result.bricks.len(), 1, "malformed record must be skipped, not fatal");
-        assert_eq!(result.suppressed_posts, vec!["at://did:plc:blogger/app.bsky.feed.post/xpost"]);
+        let result = get_documents(&Http::new(), &server.uri(), &author())
+            .await
+            .unwrap();
+        assert_eq!(
+            result.bricks.len(),
+            1,
+            "malformed record must be skipped, not fatal"
+        );
+        assert_eq!(
+            result.suppressed_posts,
+            vec!["at://did:plc:blogger/app.bsky.feed.post/xpost"]
+        );
         match &result.bricks[0] {
             Brick::Blog(b) => {
                 assert_eq!(b.title, "Why bricks?");
@@ -321,7 +356,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let result = get_documents(&Http::new(), &server.uri(), &author()).await.unwrap();
+        let result = get_documents(&Http::new(), &server.uri(), &author())
+            .await
+            .unwrap();
         assert!(result.bricks.is_empty());
     }
 
@@ -345,7 +382,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let result = get_documents(&Http::new(), &server.uri(), &author()).await.unwrap();
+        let result = get_documents(&Http::new(), &server.uri(), &author())
+            .await
+            .unwrap();
         match &result.bricks[0] {
             Brick::Blog(b) => {
                 assert_eq!(b.publication.name, "plain.example.com");

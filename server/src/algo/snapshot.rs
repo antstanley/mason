@@ -13,8 +13,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use chrono::Utc;
 use futures::stream::{self, StreamExt};
-use rand::seq::SliceRandom;
 use rand::SeedableRng;
+use rand::seq::SliceRandom;
 use rand_chacha::ChaCha8Rng;
 use tokio::sync::{Mutex, Notify};
 use xxhash_rust::xxh3::xxh3_64_with_seed;
@@ -112,7 +112,10 @@ pub async fn get_or_build(
     state
         .caches
         .snapshots
-        .try_get_with(id_key, async move { build(state_bg, did_owned, seed, id).await })
+        .try_get_with(
+            id_key,
+            async move { build(state_bg, did_owned, seed, id).await },
+        )
         .await
         .map_err(|e: Arc<AppError>| match e.as_ref() {
             AppError::ActorNotFound(a) => AppError::ActorNotFound(a.clone()),
@@ -281,13 +284,22 @@ pub async fn get_page(snapshot: &Snapshot, offset: usize, size: usize) -> (Vec<B
             let wanted = offset + size;
             if inner.wall.len() < wanted && !inner.pool.is_empty() {
                 let missing = wanted - inner.wall.len();
-                mix::lay(&mut inner.pool, &mut inner.wall, missing, snapshot.seed, Utc::now());
+                mix::lay(
+                    &mut inner.pool,
+                    &mut inner.wall,
+                    missing,
+                    snapshot.seed,
+                    Utc::now(),
+                );
             }
             let exhausted = !inner.warming && inner.pool.is_empty();
             if inner.wall.len() >= wanted || exhausted {
                 let end = wanted.min(inner.wall.len());
-                let items =
-                    inner.wall.get(offset.min(end)..end).map(<[Brick]>::to_vec).unwrap_or_default();
+                let items = inner
+                    .wall
+                    .get(offset.min(end)..end)
+                    .map(<[Brick]>::to_vec)
+                    .unwrap_or_default();
                 let has_more = !inner.pool.is_empty() || inner.warming;
                 return (items, has_more);
             }
@@ -297,8 +309,11 @@ pub async fn get_page(snapshot: &Snapshot, offset: usize, size: usize) -> (Vec<B
             // serve a short page rather than hang; scroll retries
             let guard = snapshot.inner.lock().await;
             let end = (offset + size).min(guard.wall.len());
-            let items =
-                guard.wall.get(offset.min(end)..end).map(<[Brick]>::to_vec).unwrap_or_default();
+            let items = guard
+                .wall
+                .get(offset.min(end)..end)
+                .map(<[Brick]>::to_vec)
+                .unwrap_or_default();
             return (items, guard.warming || !guard.pool.is_empty());
         }
         let _ = tokio::time::timeout(remaining, snapshot.progress.notified()).await;
@@ -316,7 +331,9 @@ async fn get_follows_cached(
         .caches
         .follows
         .try_get_with(did.to_string(), async move {
-            bluesky::get_follows(http, &base, &did_owned).await.map(Arc::new)
+            bluesky::get_follows(http, &base, &did_owned)
+                .await
+                .map(Arc::new)
         })
         .await
         .map_err(|e: Arc<crate::http::HttpError>| AppError::Upstream(e.to_string()))
@@ -335,7 +352,10 @@ async fn author_feed_cached(state: &Arc<AppState>, author_did: &str) -> Arc<Auth
                 Err(e) => {
                     // a single author failing must never sink the wall
                     tracing::debug!("author feed {did_owned} failed: {e}");
-                    Arc::new(AuthorYield { bricks: Vec::new(), steam_appids: Vec::new() })
+                    Arc::new(AuthorYield {
+                        bricks: Vec::new(),
+                        steam_appids: Vec::new(),
+                    })
                 }
             }
         })
@@ -425,12 +445,16 @@ async fn sample_cohort(
         .collect();
 
     let chosen: HashSet<&str> = cohort.iter().map(|a| a.did.as_str()).collect();
-    let mut rest: Vec<&bluesky::Follow> =
-        follows.iter().filter(|f| !chosen.contains(f.did.as_str())).collect();
+    let mut rest: Vec<&bluesky::Follow> = follows
+        .iter()
+        .filter(|f| !chosen.contains(f.did.as_str()))
+        .collect();
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     rest.shuffle(&mut rng);
     cohort.extend(
-        rest.into_iter().take(COHORT_SIZE.saturating_sub(cohort.len())).map(Author::from),
+        rest.into_iter()
+            .take(COHORT_SIZE.saturating_sub(cohort.len()))
+            .map(Author::from),
     );
     cohort
 }
@@ -450,7 +474,10 @@ async fn std_docs_cached(state: &Arc<AppState>, author: &Author) -> Arc<StdDocs>
                 }),
                 Err(e) => {
                     tracing::debug!("standard.site fetch for {} failed: {e}", author.did);
-                    Arc::new(StdDocs { bricks: Vec::new(), suppressed_posts: Vec::new() })
+                    Arc::new(StdDocs {
+                        bricks: Vec::new(),
+                        suppressed_posts: Vec::new(),
+                    })
                 }
             }
         })
@@ -463,8 +490,17 @@ async fn record_activity(state: &Arc<AppState>, viewer: &str, mut yielding: Vec<
     }
     if let Some(previous) = state.caches.activity.get(viewer).await {
         let fresh: HashSet<String> = yielding.iter().cloned().collect();
-        yielding.extend(previous.iter().filter(|d| !fresh.contains(d.as_str())).cloned());
+        yielding.extend(
+            previous
+                .iter()
+                .filter(|d| !fresh.contains(d.as_str()))
+                .cloned(),
+        );
     }
     yielding.truncate(300);
-    state.caches.activity.insert(viewer.to_string(), Arc::new(yielding)).await;
+    state
+        .caches
+        .activity
+        .insert(viewer.to_string(), Arc::new(yielding))
+        .await;
 }

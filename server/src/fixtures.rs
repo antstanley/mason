@@ -20,12 +20,30 @@ const POST_TEXTS: &[&str] = &[
 ];
 
 const BLOG_TITLES: &[(&str, &str)] = &[
-    ("Why I moved my blog to the Atmosphere", "Owning your words means owning the records too. A migration story with surprisingly few regrets."),
-    ("Masonry layouts: a love letter", "Fifteen years of CSS hacks, and we still measure column heights by hand. Here's why that's okay."),
-    ("The quiet joy of small protocols", "Not everything needs to be a platform. Sometimes a lexicon and a dream is enough."),
-    ("Building a feed algorithm nobody hates", "Recency, diversity, and a little seeded chaos. What I learned mixing three content types into one wall."),
-    ("Notes on digital gardening", "Blogs are back, but weirder this time. A tour of the new indie publishing stack."),
-    ("HLS everywhere: how video quietly standardized", "From Steam trailers to social clips, everything is an m3u8 now."),
+    (
+        "Why I moved my blog to the Atmosphere",
+        "Owning your words means owning the records too. A migration story with surprisingly few regrets.",
+    ),
+    (
+        "Masonry layouts: a love letter",
+        "Fifteen years of CSS hacks, and we still measure column heights by hand. Here's why that's okay.",
+    ),
+    (
+        "The quiet joy of small protocols",
+        "Not everything needs to be a platform. Sometimes a lexicon and a dream is enough.",
+    ),
+    (
+        "Building a feed algorithm nobody hates",
+        "Recency, diversity, and a little seeded chaos. What I learned mixing three content types into one wall.",
+    ),
+    (
+        "Notes on digital gardening",
+        "Blogs are back, but weirder this time. A tour of the new indie publishing stack.",
+    ),
+    (
+        "HLS everywhere: how video quietly standardized",
+        "From Steam trailers to social clips, everything is an m3u8 now.",
+    ),
 ];
 
 const GAME_NAMES: &[&str] = &[
@@ -52,13 +70,21 @@ fn author(i: usize) -> Author {
         did: format!("did:plc:fixture{i}"),
         handle: handle.into(),
         display_name: Some(name.into()),
-        avatar: Some(format!("https://picsum.photos/seed/avatar{}/96/96", i % HANDLES.len())),
+        avatar: Some(format!(
+            "https://picsum.photos/seed/avatar{}/96/96",
+            i % HANDLES.len()
+        )),
     }
 }
 
 fn created_at(i: usize) -> String {
     // Deterministic timestamps marching backwards from a fixed anchor
-    format!("2026-07-{:02}T{:02}:{:02}:00Z", 10 - (i / 24).min(9), 23 - (i % 24), (i * 7) % 60)
+    format!(
+        "2026-07-{:02}T{:02}:{:02}:00Z",
+        10 - (i / 24).min(9),
+        23 - (i % 24),
+        (i * 7) % 60
+    )
 }
 
 /// The full fixture pool: 120 bricks, roughly 70/15/15 post/blog/video.
@@ -77,7 +103,8 @@ fn brick(i: usize) -> Brick {
                 author: author(i),
                 title: title.into(),
                 description: Some(desc.into()),
-                cover_image: (i % 40 != 10).then(|| format!("https://picsum.photos/seed/cover{i}/800/500")),
+                cover_image: (i % 40 != 10)
+                    .then(|| format!("https://picsum.photos/seed/cover{i}/800/500")),
                 publication: Publication {
                     name: "The Daily Brick".into(),
                     url: "https://example.com/blog".into(),
@@ -89,25 +116,40 @@ fn brick(i: usize) -> Brick {
         }
         // 3 videos per 20: alternate bluesky / steam
         6 | 13 | 19 => {
-            let steam = i % 2 == 0;
+            let steam = i.is_multiple_of(2);
             let game = GAME_NAMES[i % GAME_NAMES.len()];
             Brick::Video(VideoBrick {
                 id: format!("fixture-video-{i}"),
                 url: format!("https://example.com/video/{i}"),
                 author: (!steam).then(|| author(i)),
-                title: if steam { format!("{game} — Launch Trailer") } else { POST_TEXTS[i % POST_TEXTS.len()].into() },
+                title: if steam {
+                    format!("{game} — Launch Trailer")
+                } else {
+                    POST_TEXTS[i % POST_TEXTS.len()].into()
+                },
                 poster: Some(format!("https://picsum.photos/seed/poster{i}/800/450")),
                 playlist: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8".into(),
-                aspect_ratio: Some(AspectRatio { width: 16, height: 9 }),
-                source: if steam { VideoSource::Steam } else { VideoSource::Bluesky },
-                game: steam.then(|| GameInfo { appid: 400 + i as u64, name: game.into(), header_image: None }),
+                aspect_ratio: Some(AspectRatio {
+                    width: 16,
+                    height: 9,
+                }),
+                source: if steam {
+                    VideoSource::Steam
+                } else {
+                    VideoSource::Bluesky
+                },
+                game: steam.then(|| GameInfo {
+                    appid: 400 + i as u64,
+                    name: game.into(),
+                    header_image: None,
+                }),
                 created_at: created_at(i),
                 like_count: (i as u64 * 13) % 500,
             })
         }
         // everything else: posts, some with images
         _ => {
-            let with_image = i % 3 == 0;
+            let with_image = i.is_multiple_of(3);
             Brick::Post(PostBrick {
                 id: format!("fixture-post-{i}"),
                 url: format!("https://bsky.app/profile/fixture/post/{i}"),
@@ -121,7 +163,10 @@ fn brick(i: usize) -> Brick {
                     vec![ImageEmbed {
                         src: format!("https://picsum.photos/seed/img{i}/800/{h}"),
                         alt: "fixture image".into(),
-                        aspect_ratio: Some(AspectRatio { width: 800, height: h }),
+                        aspect_ratio: Some(AspectRatio {
+                            width: 800,
+                            height: h,
+                        }),
                     }]
                 } else {
                     vec![]

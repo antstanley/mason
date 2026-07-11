@@ -5,7 +5,9 @@
 use serde::Deserialize;
 
 use crate::http::{Bucket, Http, HttpError};
-use crate::model::{AspectRatio, Author, Brick, ExternalEmbed, ImageEmbed, PostBrick, VideoBrick, VideoSource};
+use crate::model::{
+    AspectRatio, Author, Brick, ExternalEmbed, ImageEmbed, PostBrick, VideoBrick, VideoSource,
+};
 use crate::sources::steam;
 
 /// One author's posts plus the Steam games they were talking about.
@@ -71,11 +73,7 @@ pub async fn get_follows(http: &Http, base: &str, did: &str) -> Result<Vec<Follo
 /// One author's recent posts as bricks. Replies excluded upstream; reposts
 /// (reason != null) dropped here so nothing is double-counted. Steam store
 /// links are mined from post text, richtext facets, and link cards.
-pub async fn get_author_feed(
-    http: &Http,
-    base: &str,
-    did: &str,
-) -> Result<AuthorYield, HttpError> {
+pub async fn get_author_feed(http: &Http, base: &str, did: &str) -> Result<AuthorYield, HttpError> {
     let url = format!(
         "{base}/xrpc/app.bsky.feed.getAuthorFeed?actor={did}&limit=30&filter=posts_no_replies"
     );
@@ -104,7 +102,10 @@ pub async fn get_author_feed(
             Some(brick)
         })
         .collect();
-    Ok(AuthorYield { bricks, steam_appids })
+    Ok(AuthorYield {
+        bricks,
+        steam_appids,
+    })
 }
 
 /// URIs from `app.bsky.richtext.facet#link` features — link text in posts is
@@ -112,11 +113,21 @@ pub async fn get_author_feed(
 fn facet_link_uris(facets: &[serde_json::Value]) -> Vec<String> {
     facets
         .iter()
-        .flat_map(|f| f.get("features").and_then(|x| x.as_array()).into_iter().flatten())
+        .flat_map(|f| {
+            f.get("features")
+                .and_then(|x| x.as_array())
+                .into_iter()
+                .flatten()
+        })
         .filter(|feature| {
             feature.get("$type").and_then(|t| t.as_str()) == Some("app.bsky.richtext.facet#link")
         })
-        .filter_map(|feature| feature.get("uri").and_then(|u| u.as_str()).map(String::from))
+        .filter_map(|feature| {
+            feature
+                .get("uri")
+                .and_then(|u| u.as_str())
+                .map(String::from)
+        })
         .collect()
 }
 
@@ -214,7 +225,10 @@ struct ExternalView {
 
 impl From<AspectRatioView> for AspectRatio {
     fn from(v: AspectRatioView) -> Self {
-        AspectRatio { width: v.width, height: v.height }
+        AspectRatio {
+            width: v.width,
+            height: v.height,
+        }
     }
 }
 
@@ -327,7 +341,10 @@ mod tests {
             "thumbnail": "https://video.bsky.app/thumb.jpg",
             "aspectRatio": {"width": 16, "height": 9}
         });
-        let mut repost = post_json("at://did:plc:bb/app.bsky.feed.post/2", serde_json::Value::Null);
+        let mut repost = post_json(
+            "at://did:plc:bb/app.bsky.feed.post/2",
+            serde_json::Value::Null,
+        );
         repost["reason"] = serde_json::json!({"$type": "app.bsky.feed.defs#reasonRepost"});
 
         Mock::given(method("GET"))
@@ -339,13 +356,17 @@ mod tests {
             .mount(&server)
             .await;
 
-        let AuthorYield { bricks, .. } =
-            get_author_feed(&Http::new(), &server.uri(), "did:plc:aa").await.unwrap();
+        let AuthorYield { bricks, .. } = get_author_feed(&Http::new(), &server.uri(), "did:plc:aa")
+            .await
+            .unwrap();
         assert_eq!(bricks.len(), 1, "repost must be dropped");
         match &bricks[0] {
             Brick::Video(v) => {
                 assert_eq!(v.playlist, "https://video.bsky.app/hls/playlist.m3u8");
-                assert_eq!(v.poster.as_deref(), Some("https://video.bsky.app/thumb.jpg"));
+                assert_eq!(
+                    v.poster.as_deref(),
+                    Some("https://video.bsky.app/thumb.jpg")
+                );
                 assert_eq!(v.aspect_ratio.unwrap().width, 16);
                 assert_eq!(v.source, VideoSource::Bluesky);
             }
@@ -373,7 +394,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let follows = get_follows(&Http::new(), &server.uri(), "did:plc:aa").await.unwrap();
+        let follows = get_follows(&Http::new(), &server.uri(), "did:plc:aa")
+            .await
+            .unwrap();
         assert_eq!(follows.len(), 2);
         assert_eq!(follows[1].did, "did:plc:cc");
     }
@@ -395,7 +418,9 @@ mod tests {
             .mount(&server)
             .await;
 
-        let did = resolve_handle(&Http::new(), &server.uri(), "a.test").await.unwrap();
+        let did = resolve_handle(&Http::new(), &server.uri(), "a.test")
+            .await
+            .unwrap();
         assert_eq!(did, "did:plc:aa");
     }
 }
