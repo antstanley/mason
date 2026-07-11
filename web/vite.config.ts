@@ -1,4 +1,4 @@
-import adapter from '@sveltejs/adapter-auto';
+import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
@@ -12,11 +12,17 @@ export default defineConfig({
 				runes: ({ filename }) =>
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
-
-			// adapter-auto only supports some environments, see https://svelte.dev/docs/kit/adapter-auto for a list.
-			// If your environment is not supported, or you settled on a specific environment, switch out the adapter.
-			// See https://svelte.dev/docs/kit/adapters for more information about adapters.
-			adapter: adapter()
+			// pure static SPA in both modes; local mode's feed engine is the
+			// wasm service worker, server mode calls mortar over CORS
+			adapter: adapter({ fallback: 'index.html' }),
+			serviceWorker: {
+				// registered manually in +layout.svelte, local mode only
+				register: false
+			}
 		})
-	]
+	],
+	optimizeDeps: {
+		// wasm-pack output must reach the browser untouched
+		exclude: ['$lib/mortar-wasm/pkg']
+	}
 });

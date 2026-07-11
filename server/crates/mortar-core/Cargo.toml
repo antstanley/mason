@@ -1,0 +1,34 @@
+[package]
+name = "mortar-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+futures.workspace = true
+tracing.workspace = true
+reqwest = { version = "0.12", features = ["json"], default-features = false }
+governor = "0.10"
+rand = "0.9"
+rand_chacha = "0.9"
+base64 = "0.22"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+web-time = "1"
+tokio = { version = "1", features = ["sync", "macros"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "gzip"], default-features = false }
+tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures = "0.4"
+gloo-timers = { version = "0.4", features = ["futures"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+wiremock = "0.6"
+pretty_assertions = "1"

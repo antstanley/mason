@@ -11,18 +11,32 @@ follows.
 | 📝 blogs | [standard.site](https://standard.site) documents (Leaflet, pckt.blog, Offprint, WordPress…) | tangerine |
 | 🎬 video | Bluesky native video + Steam trailers — both HLS, always click-to-play, **never autoplay** | violet |
 
-## Architecture
+## Two build modes, one Rust engine
 
 ```
-web/     SvelteKit · Svelte 5 runes · Tailwind v4 · TypeScript 7 · oxlint · oxfmt · knip
-server/  "mortar" — Rust · axum · moka · governor · cargo-nextest
+web/                     SvelteKit SPA · Svelte 5 runes · Tailwind v4 · TS 7 · oxlint · oxfmt · knip
+server/crates/
+  mortar-core/           the feed engine — compiles native AND wasm32
+  mortar-server/         native axum binary (server mode, future auth work)
+  mortar-wasm/           the same engine for the browser
 ```
 
-The SvelteKit app proxies `/api/feed` to **mortar**, which builds a per-user
-**snapshot**: resolve handle → fetch follows → sample a cohort of 100 authors
-(60 known-active + 40 seeded exploration) → fan out under a global rate
-limiter with a first-paint threshold (respond at 40 authors or 3 s) → keep
-filling in the background.
+**local mode (default — no server at all):** mortar compiles to wasm and runs
+inside a service worker that intercepts `/api/feed`. The static site deploys
+anywhere; your browser talks directly to the public AppView, plc.directory,
+and each author's PDS (all CORS-open). Nobody's server sees whose feed you
+browse, and every user spends their own rate-limit budget.
+*Limitation:* Steam's storefront API has no CORS headers, so trailer bricks
+are absent in local mode (set a proxy via `init_config` to restore them).
+Module service workers required: Chrome 91+, Safari 15+, Firefox 147+.
+
+**server mode:** set `PUBLIC_MASON_SERVER_URL` in `web/.env` and the same SPA
+calls a native mortar over CORS — the path for future authenticated features.
+
+Either way, mortar builds a per-user **snapshot**: resolve handle → fetch
+follows → sample a cohort of 100 authors (60 known-active + 40 seeded
+exploration) → fan out under a global rate limiter with a first-paint
+threshold (respond at 40 authors or 3 s) → keep filling in the background.
 
 Bricks are laid by the **grout score**: within-kind recency decay
 (posts 24 h · blogs 7 d · trailers 30 d) × log engagement, then a
@@ -32,16 +46,22 @@ score. Author-diversity window of 8, deterministic seeded jitter, opaque
 `{snapshot, seed, offset}` cursor: endless scroll is stable and duplicate-free,
 and every refresh is a fresh wall.
 
-Everything is in-memory (moka TTL caches) — no database. The `sources/`
-boundary is the v2 seam for a Jetstream + SQLite upgrade.
+Everything is in-memory (hand-rolled TTL caches — wasm-compatible) — no
+database. The `sources/` boundary is the v2 seam for a Jetstream + SQLite
+upgrade. A killed service worker (browsers reap them after ~30 s idle) is
+just cache eviction: the cursor carries the seed, so the wall rebuilds
+deterministically.
 
 ## Run it
 
 ```sh
-just dev        # mortar on :8787 + vite on :5173
-just test       # cargo nextest + typecheck
-just lint       # oxlint + knip + clippy
+just dev          # LOCAL mode: wasm SW + vite on :5173 — no server
+just build        # fully static site in web/build/
+just dev-server   # server mode: native mortar :8787 + SPA against it
+just test         # cargo nextest + typecheck
+just lint         # oxlint + knip + clippy
 just guard-autoplay   # the video rule, enforced
+just clean        # reclaim the cargo target dir (~3GB)
 ```
 
 Try actor `demo` for an offline fixture wall.

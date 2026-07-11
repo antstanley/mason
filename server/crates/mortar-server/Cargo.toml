@@ -1,0 +1,19 @@
+[package]
+name = "mortar-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "mortar"
+path = "src/main.rs"
+
+[dependencies]
+mortar-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["trace", "timeout", "compression-gzip", "cors"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

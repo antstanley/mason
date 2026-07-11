@@ -1,8 +1,7 @@
-use std::sync::Arc;
+//! The feed entrypoint shared by both fronts: the axum route and the wasm
+//! service worker are thin wrappers around `handle_feed`.
 
-use axum::Json;
-use axum::extract::{Query, State};
-use serde::Deserialize;
+use std::sync::Arc;
 
 use crate::algo::cursor::{self, Cursor};
 use crate::algo::snapshot;
@@ -13,33 +12,27 @@ use crate::model::FeedResponse;
 use crate::sources::bluesky;
 use crate::state::AppState;
 
-const PAGE_SIZE: usize = 24;
+pub const PAGE_SIZE: usize = 24;
 
-#[derive(Deserialize)]
-pub struct FeedParams {
-    pub actor: Option<String>,
-    pub cursor: Option<String>,
-}
-
-pub async fn feed(
-    State(state): State<Arc<AppState>>,
-    Query(params): Query<FeedParams>,
-) -> Result<Json<FeedResponse>, AppError> {
-    let actor = params.actor.ok_or(AppError::BadRequest("actor"))?;
-    let decoded = params.cursor.as_deref().and_then(cursor::decode);
+pub async fn handle_feed(
+    state: &Arc<AppState>,
+    actor: &str,
+    cursor: Option<&str>,
+) -> Result<FeedResponse, AppError> {
+    let decoded = cursor.and_then(cursor::decode);
 
     // offline demo wall, kept from M0
     if actor == "demo" {
-        return Ok(Json(demo_page(decoded.map(|c| c.offset).unwrap_or(0))));
+        return Ok(demo_page(decoded.map(|c| c.offset).unwrap_or(0)));
     }
 
-    let did = resolve_actor(&state, &actor).await?;
+    let did = resolve_actor(state, actor).await?;
     let (seed, offset) = match decoded {
         Some(c) => (c.seed, c.offset),
         None => (snapshot::fresh_seed(&did), 0),
     };
 
-    let snap = snapshot::get_or_build(&state, &did, seed).await?;
+    let snap = snapshot::get_or_build(state, &did, seed).await?;
     let (items, has_more) = snapshot::get_page(&snap, offset, PAGE_SIZE).await;
     let next = has_more.then(|| {
         cursor::encode(&Cursor {
@@ -48,32 +41,31 @@ pub async fn feed(
             offset: offset + items.len(),
         })
     });
-    Ok(Json(FeedResponse {
+    Ok(FeedResponse {
         items,
         cursor: next,
-    }))
+    })
 }
 
 async fn resolve_actor(state: &Arc<AppState>, actor: &str) -> Result<String, AppError> {
     if actor.starts_with("did:") {
         return Ok(actor.to_string());
     }
-    let http = &state.http;
-    let base = state.config.appview_base.clone();
-    let handle = actor.to_string();
-    state
-        .caches
-        .did
-        .try_get_with(actor.to_string(), async move {
-            bluesky::resolve_handle(http, &base, &handle).await
-        })
-        .await
-        .map_err(|e: Arc<HttpError>| match e.as_ref() {
-            HttpError::Status(400) | HttpError::Status(404) => {
-                AppError::ActorNotFound(actor.to_string())
-            }
-            other => AppError::Upstream(other.to_string()),
-        })
+    if let Some(did) = state.caches.did.get(&actor.to_string()).await {
+        return Ok(did);
+    }
+    match bluesky::resolve_handle(&state.http, &state.config.appview_base, actor).await {
+        Ok(did) => {
+            state
+                .caches
+                .did
+                .insert(actor.to_string(), did.clone())
+                .await;
+            Ok(did)
+        }
+        Err(HttpError::Status(400 | 404)) => Err(AppError::ActorNotFound(actor.to_string())),
+        Err(e) => Err(AppError::Upstream(e.to_string())),
+    }
 }
 
 fn demo_page(offset: usize) -> FeedResponse {

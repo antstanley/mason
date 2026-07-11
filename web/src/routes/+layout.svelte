@@ -1,9 +1,20 @@
 <script lang="ts">
 	import '../app.css';
+	import { browser } from '$app/environment';
 	import favicon from '$lib/assets/favicon.svg';
+	import { localMode } from '$lib/api';
 	import { handle } from '$lib/state/handle.svelte';
 
 	let { children } = $props();
+
+	// local mode: the wasm service worker IS the feed server.
+	// Always type module: the wasm-bindgen glue contains `import.meta`,
+	// which a classic script rejects at parse time. Module SWs are
+	// everywhere in 2026 (Chrome 91+, Safari 15+, Firefox 147+).
+	$effect(() => {
+		if (!browser || !localMode || !('serviceWorker' in navigator)) return;
+		void navigator.serviceWorker.register('/service-worker.js', { type: 'module' });
+	});
 </script>
 
 <svelte:head>

@@ -35,14 +35,31 @@ pub enum Bucket {
     Unmetered,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn make_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .user_agent("mason-mortar/0.1 (atproto discovery wall; https://github.com)")
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("reqwest client builds")
+}
+
+/// The browser owns the user agent, TLS, and timeouts on wasm.
+#[cfg(target_arch = "wasm32")]
+fn make_client() -> reqwest::Client {
+    reqwest::Client::new()
+}
+
+impl Default for Http {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Http {
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::builder()
-                .user_agent("mason-mortar/0.1 (atproto discovery wall; https://github.com)")
-                .timeout(Duration::from_secs(10))
-                .build()
-                .expect("reqwest client builds"),
+            client: make_client(),
             appview_bucket: RateLimiter::direct(
                 Quota::per_second(NonZeroU32::new(10).expect("nonzero"))
                     .allow_burst(NonZeroU32::new(40).expect("nonzero")),
@@ -63,7 +80,7 @@ impl Http {
                 Ok(r) => r,
                 Err(e) if attempt < 2 => {
                     tracing::debug!("transport error on {url}: {e}, retrying");
-                    tokio::time::sleep(backoff(attempt, None)).await;
+                    crate::platform::sleep(backoff(attempt, None)).await;
                     continue;
                 }
                 Err(e) => return Err(e.into()),
@@ -80,7 +97,7 @@ impl Http {
                     .and_then(|v| v.to_str().ok())
                     .and_then(|v| v.parse::<u64>().ok());
                 tracing::debug!("{status} from {url}, backing off (attempt {attempt})");
-                tokio::time::sleep(backoff(attempt, retry_after)).await;
+                crate::platform::sleep(backoff(attempt, retry_after)).await;
                 continue;
             }
             return Err(HttpError::Status(status.as_u16()));

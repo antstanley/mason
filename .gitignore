@@ -1,5 +1,6 @@
 node_modules/
 target/
+web/src/lib/mortar-wasm/pkg/
 .svelte-kit/
 build/
 dist/
