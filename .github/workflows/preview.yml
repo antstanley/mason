@@ -15,6 +15,7 @@ jobs:
   deploy:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
+    environment: preview # holds AWS_ACCOUNT_ID + PREVIEW_DOMAIN secrets
     steps:
       - uses: actions/checkout@v4
 
@@ -50,15 +51,18 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/preview-mason-gh
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/preview-mason-gh
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy preview
-        run: cd web && pnpm exec blogwright preview deploy pr-${{ github.event.number }}
+        run: >
+          cd web && pnpm exec blogwright preview deploy pr-${{ github.event.number }}
+          --domain ${{ secrets.PREVIEW_DOMAIN }}
 
   destroy:
     if: github.event.action == 'closed'
     runs-on: ubuntu-latest
+    environment: preview
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -75,7 +79,7 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/preview-mason-gh
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/preview-mason-gh
           aws-region: ${{ env.AWS_REGION }}
 
       # teardown is a prefix delete — no build needed

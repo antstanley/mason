@@ -1,11 +1,11 @@
 // blogwright PR-preview stack — one shared distribution serves every PR at
-// https://pr-<n>.<domain>. Set `domain` to a Route53 hosted zone you control
-// (wildcard cert + DNS are created automatically), then run once:
-//   just bootstrap-preview
+// https://pr-<n>.<domain>. The domain is deliberately NOT committed here:
+// CI passes it as `--domain ${{ secrets.PREVIEW_DOMAIN }}`, and the one-time
+// `blogwright preview bootstrap --domain <fqdn>` does the same locally.
+// (It must be a Route53 hosted zone; wildcard cert + DNS are automatic.)
 {
 	"region": "eu-west-1",
 	"siteName": "mason",
-	// "domain": "preview.mason.example.com", // REQUIRED before preview bootstrap
 	"githubRepo": "antstanley/mason",
 
 	"spa": true,

@@ -52,9 +52,9 @@ deploy env='production': wasm
 bootstrap env='production':
     cd web && pnpm exec blogwright bootstrap {{env}}
 
-# one-time PR-preview stack creation — set `domain` in config/preview.jsonc first
-bootstrap-preview:
-    cd web && pnpm exec blogwright preview bootstrap
+# one-time PR-preview stack creation (domain = Route53 hosted zone, not committed)
+bootstrap-preview domain:
+    cd web && pnpm exec blogwright preview bootstrap --domain {{domain}}
 
 # reclaim disk (cargo target grows to ~3GB)
 clean:
