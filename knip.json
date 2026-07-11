@@ -1,0 +1,10 @@
+{
+	"$schema": "https://unpkg.com/knip@latest/schema.json",
+	"workspaces": {
+		"web": {
+			"entry": ["src/routes/**/+*.{svelte,ts}", "src/hooks*.ts"],
+			"project": "src/**/*.{svelte,ts}"
+		}
+	},
+	"ignore": ["server/**"]
+}

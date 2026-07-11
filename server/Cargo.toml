@@ -1,0 +1,29 @@
+[package]
+name = "mortar"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "timeout", "compression-gzip", "cors"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "gzip"], default-features = false }
+moka = { version = "0.12", features = ["future"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.9"
+rand_chacha = "0.9"
+governor = "0.10"
+futures = "0.3"
+base64 = "0.22"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+wiremock = "0.6"
+pretty_assertions = "1"
