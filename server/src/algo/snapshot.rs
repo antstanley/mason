@@ -23,7 +23,8 @@ use super::mix;
 use crate::cache::StdDocs;
 use crate::error::AppError;
 use crate::model::{Author, Brick};
-use crate::sources::{bluesky, standardsite};
+use crate::sources::bluesky::AuthorYield;
+use crate::sources::{bluesky, standardsite, steam};
 use crate::state::AppState;
 
 /// Sampled authors per snapshot — never fan out to the whole follow graph.
@@ -34,10 +35,28 @@ const KNOWN_ACTIVE: usize = 60;
 const FIRST_PAINT_AUTHORS: usize = 40;
 /// …or this much time has passed, whichever comes first.
 const FIRST_PAINT_DEADLINE: Duration = Duration::from_secs(3);
-/// Hard cap on bricks held per snapshot.
-const SNAPSHOT_CAP: usize = 600;
+/// Per-slot caps on bricks held per snapshot: posts / blogs / Bluesky videos
+/// / Steam trailers. Posts arrive by the thousand and must not crowd out the
+/// rarer kinds, and trailers hydrate last so they get a reserved slot that
+/// Bluesky videos can't fill first.
+const KIND_CAPS: [usize; 4] = [500, 60, 30, 13];
+
+fn kind_slot(brick: &Brick) -> usize {
+    match brick {
+        Brick::Post(_) => 0,
+        Brick::Blog(_) => 1,
+        Brick::Video(v) if v.source == crate::model::VideoSource::Bluesky => 2,
+        Brick::Video(_) => 3,
+    }
+}
 /// Author-feed fan-out concurrency (the rate limiter is the real governor).
 const FAN_OUT: usize = 16;
+/// New Steam games hydrated per snapshot; the storefront API throttles hard.
+const STEAM_MENTIONS_PER_SNAPSHOT: usize = 10;
+/// Featured trailers mixed in as exploration filler.
+const STEAM_FEATURED_PER_SNAPSHOT: usize = 3;
+/// Storefront concurrency.
+const STEAM_FAN_OUT: usize = 2;
 
 pub struct Snapshot {
     pub id: String,
@@ -50,7 +69,23 @@ struct Inner {
     pool: Vec<Brick>,
     wall: Vec<Brick>,
     seen: HashSet<String>,
+    /// pool+wall population per kind, checked against KIND_CAPS
+    kind_counts: [usize; 4],
     warming: bool,
+}
+
+impl Inner {
+    /// Insert into the pool unless a duplicate or over its kind's cap.
+    fn admit(&mut self, brick: &Brick) {
+        let slot = kind_slot(brick);
+        if self.kind_counts[slot] >= KIND_CAPS[slot] {
+            return;
+        }
+        if self.seen.insert(brick.id().to_string()) {
+            self.kind_counts[slot] += 1;
+            self.pool.push(brick.clone());
+        }
+    }
 }
 
 pub fn snapshot_id(did: &str, seed: u64) -> String {
@@ -106,6 +141,7 @@ async fn build(
             pool: Vec::new(),
             wall: Vec::new(),
             seen: HashSet::new(),
+            kind_counts: [0; 4],
             warming: !cohort.is_empty(),
         }),
         progress: Notify::new(),
@@ -121,48 +157,82 @@ async fn build(
     let viewer = did.clone();
     tokio::spawn(async move {
         let started = Instant::now();
-        let mut answered = 0usize;
-        let mut yielding_authors: Vec<String> = Vec::new();
 
-        let mut feeds = stream::iter(cohort.into_iter().map(|author| {
-            let state = Arc::clone(&fill_state);
-            async move {
-                let (bricks, docs) = tokio::join!(
-                    author_feed_cached(&state, &author.did),
-                    std_docs_cached(&state, &author),
-                );
-                (author, bricks, docs)
+        // featured trailers don't depend on the cohort — hydrate them
+        // concurrently with the author fan-out so they make the first pages
+        let featured_fill = async {
+            let featured = featured_sample(&fill_state, seed).await;
+            let bricks = hydrate_trailers(&fill_state, featured).await;
+            tracing::debug!("steam featured yielded {} trailer bricks", bricks.len());
+            let mut inner = fill_snapshot.inner.lock().await;
+            for brick in &bricks {
+                inner.admit(brick);
             }
-        }))
-        .buffer_unordered(FAN_OUT);
-
-        while let Some((author, bricks, docs)) = feeds.next().await {
-            answered += 1;
-            if !bricks.is_empty() || !docs.bricks.is_empty() {
-                yielding_authors.push(author.did);
-            }
-            {
-                let mut inner = fill_snapshot.inner.lock().await;
-                let inner = &mut *inner;
-                // bskyPostRef suppression: the blog card wins over its
-                // cross-posted skeet, whether the post came first or later
-                for uri in &docs.suppressed_posts {
-                    if inner.seen.insert(uri.clone()) {
-                        // post not pooled yet — the insert blocks it later
-                    } else {
-                        inner.pool.retain(|b| b.id() != uri);
-                    }
-                }
-                for brick in docs.bricks.iter().chain(bricks.iter()) {
-                    if inner.pool.len() + inner.wall.len() >= SNAPSHOT_CAP {
-                        break;
-                    }
-                    if inner.seen.insert(brick.id().to_string()) {
-                        inner.pool.push(brick.clone());
-                    }
-                }
-            }
+            drop(inner);
             fill_snapshot.progress.notify_waiters();
+        };
+
+        let mut mentioned_appids: Vec<u64> = Vec::new();
+        let authors_fill = async {
+            let mut feeds = stream::iter(cohort.into_iter().map(|author| {
+                let state = Arc::clone(&fill_state);
+                async move {
+                    let (yield_, docs) = tokio::join!(
+                        author_feed_cached(&state, &author.did),
+                        std_docs_cached(&state, &author),
+                    );
+                    (author, yield_, docs)
+                }
+            }))
+            .buffer_unordered(FAN_OUT);
+
+            let mut answered = 0usize;
+            let mut yielding_authors: Vec<String> = Vec::new();
+            let mut mentioned: Vec<u64> = Vec::new();
+            while let Some((author, yield_, docs)) = feeds.next().await {
+                answered += 1;
+                if !yield_.bricks.is_empty() || !docs.bricks.is_empty() {
+                    yielding_authors.push(author.did);
+                }
+                for appid in &yield_.steam_appids {
+                    if !mentioned.contains(appid) {
+                        mentioned.push(*appid);
+                    }
+                }
+                {
+                    let mut inner = fill_snapshot.inner.lock().await;
+                    let inner = &mut *inner;
+                    // bskyPostRef suppression: the blog card wins over its
+                    // cross-posted skeet, whether the post came first or later
+                    for uri in &docs.suppressed_posts {
+                        if inner.seen.insert(uri.clone()) {
+                            // post not pooled yet — the insert blocks it later
+                        } else {
+                            inner.pool.retain(|b| b.id() != uri);
+                        }
+                    }
+                    for brick in docs.bricks.iter().chain(yield_.bricks.iter()) {
+                        inner.admit(brick);
+                    }
+                }
+                fill_snapshot.progress.notify_waiters();
+            }
+            (answered, yielding_authors, mentioned)
+        };
+
+        let ((answered, yielding_authors, mentioned), ()) =
+            tokio::join!(authors_fill, featured_fill);
+        mentioned_appids.extend(mentioned);
+
+        // games the cohort talked about — these do need the posts first
+        mentioned_appids.truncate(STEAM_MENTIONS_PER_SNAPSHOT);
+        if !mentioned_appids.is_empty() {
+            tracing::debug!("steam mentions: hydrating {}", mentioned_appids.len());
+            let bricks = hydrate_trailers(&fill_state, mentioned_appids).await;
+            let mut inner = fill_snapshot.inner.lock().await;
+            for brick in &bricks {
+                inner.admit(brick);
+            }
         }
 
         {
@@ -252,7 +322,7 @@ async fn get_follows_cached(
         .map_err(|e: Arc<crate::http::HttpError>| AppError::Upstream(e.to_string()))
 }
 
-async fn author_feed_cached(state: &Arc<AppState>, author_did: &str) -> Arc<Vec<Brick>> {
+async fn author_feed_cached(state: &Arc<AppState>, author_did: &str) -> Arc<AuthorYield> {
     let http = &state.http;
     let base = state.config.appview_base.clone();
     let did_owned = author_did.to_string();
@@ -261,15 +331,77 @@ async fn author_feed_cached(state: &Arc<AppState>, author_did: &str) -> Arc<Vec<
         .author_feed
         .get_with(author_did.to_string(), async move {
             match bluesky::get_author_feed(http, &base, &did_owned).await {
-                Ok(bricks) => Arc::new(bricks),
+                Ok(yield_) => Arc::new(yield_),
                 Err(e) => {
                     // a single author failing must never sink the wall
                     tracing::debug!("author feed {did_owned} failed: {e}");
+                    Arc::new(AuthorYield { bricks: Vec::new(), steam_appids: Vec::new() })
+                }
+            }
+        })
+        .await
+}
+
+/// Hydrate a batch of appids into trailer bricks (bounded concurrency).
+async fn hydrate_trailers(state: &Arc<AppState>, appids: Vec<u64>) -> Vec<Brick> {
+    stream::iter(appids.into_iter().map(|appid| {
+        let state = Arc::clone(state);
+        async move { steam_trailers_cached(&state, appid).await }
+    }))
+    .buffer_unordered(STEAM_FAN_OUT)
+    .collect::<Vec<_>>()
+    .await
+    .into_iter()
+    .flat_map(|bricks| bricks.iter().cloned().collect::<Vec<_>>())
+    .collect()
+}
+
+async fn steam_trailers_cached(state: &Arc<AppState>, appid: u64) -> Arc<Vec<Brick>> {
+    let http = &state.http;
+    let base = state.config.steam_store_base.clone();
+    state
+        .caches
+        .steam_trailers
+        .get_with(appid, async move {
+            let hydrated_at = chrono::Utc::now().to_rfc3339();
+            match steam::get_trailers(http, &base, appid, &hydrated_at).await {
+                Ok(bricks) => Arc::new(bricks),
+                Err(e) => {
+                    tracing::debug!("steam appdetails {appid} failed: {e}");
                     Arc::new(Vec::new())
                 }
             }
         })
         .await
+}
+
+/// A small seeded sample of featured releases — exploration filler so video
+/// bricks exist even when nobody you follow talks about games.
+async fn featured_sample(state: &Arc<AppState>, seed: u64) -> Vec<u64> {
+    let http = &state.http;
+    let base = state.config.steam_store_base.clone();
+    let featured = state
+        .caches
+        .steam_featured
+        .get_with(0u8, async move {
+            match steam::get_featured(http, &base).await {
+                Ok(ids) => Arc::new(ids),
+                Err(e) => {
+                    tracing::debug!("steam featured failed: {e}");
+                    Arc::new(Vec::new())
+                }
+            }
+        })
+        .await;
+    let mut ids: Vec<u64> = featured.as_ref().clone();
+    // sample from a small stable prefix, not the whole list: successive
+    // snapshots then reuse already-hydrated trailers (cache hits) instead of
+    // hydrating 3 cold appids after the wall has already been laid
+    ids.truncate(STEAM_FEATURED_PER_SNAPSHOT * 2);
+    let mut rng = ChaCha8Rng::seed_from_u64(seed ^ 0x57EA);
+    ids.shuffle(&mut rng);
+    ids.truncate(STEAM_FEATURED_PER_SNAPSHOT);
+    ids
 }
 
 /// Cohort: up to KNOWN_ACTIVE authors that yielded content before, topped up

@@ -10,10 +10,14 @@ use chrono::{DateTime, Utc};
 use xxhash_rust::xxh3::xxh3_64_with_seed;
 
 use super::score;
-use crate::model::Brick;
+use crate::model::{Brick, VideoSource};
 
-/// Target share of the wall per kind: post / blog / video.
-const TARGET: [f64; 3] = [0.70, 0.15, 0.15];
+/// Target share of the wall per mix kind: post / blog / Bluesky video /
+/// Steam trailer. Trailers are their own kind — they have no engagement
+/// signal, so ranking them against liked Bluesky videos would bury them at
+/// the bottom of every wall.
+const TARGET: [f64; 4] = [0.70, 0.15, 0.10, 0.05];
+const KINDS: usize = 4;
 /// A brick's author may not reappear within this many trailing bricks
 /// (soft — ignored when every candidate is inside the window).
 const AUTHOR_WINDOW: usize = 8;
@@ -22,7 +26,8 @@ fn kind_index(brick: &Brick) -> usize {
     match brick {
         Brick::Post(_) => 0,
         Brick::Blog(_) => 1,
-        Brick::Video(_) => 2,
+        Brick::Video(v) if v.source == VideoSource::Bluesky => 2,
+        Brick::Video(_) => 3,
     }
 }
 
@@ -35,9 +40,9 @@ fn jitter(seed: u64, id: &str) -> f64 {
 
 /// How much the wall currently wants each kind: target share over actual
 /// share. Scale-free, so it composes with grout by multiplication.
-fn need(wall_counts: &[usize; 3], laid: usize) -> [f64; 3] {
-    let mut need = [0.0; 3];
-    for k in 0..3 {
+fn need(wall_counts: &[usize; KINDS], laid: usize) -> [f64; KINDS] {
+    let mut need = [0.0; KINDS];
+    for k in 0..KINDS {
         let actual = if laid == 0 { 0.0 } else { wall_counts[k] as f64 / laid as f64 };
         need[k] = TARGET[k] / (actual + 0.05);
     }
@@ -62,7 +67,7 @@ pub fn lay_next(
 
     let recent_authors: Vec<&str> =
         wall.iter().rev().take(AUTHOR_WINDOW).map(score::author_key).collect();
-    let mut counts = [0usize; 3];
+    let mut counts = [0usize; KINDS];
     for brick in wall {
         counts[kind_index(brick)] += 1;
     }
@@ -84,7 +89,7 @@ pub fn lay_next(
     };
 
     let pick = |respect_window: bool| -> Option<usize> {
-        (0..3)
+        (0..KINDS)
             .filter_map(|kind| {
                 leader(kind, respect_window).map(|index| {
                     let weight = need[kind] * jitter(seed, &format!("{position}:{kind}"));
@@ -167,30 +172,32 @@ mod tests {
         })
     }
 
-    fn video(i: usize, author_n: usize) -> Brick {
+    fn video(i: usize, author_n: usize, source: VideoSource) -> Brick {
+        let steam = source == VideoSource::Steam;
         Brick::Video(VideoBrick {
             id: format!("video-{i}"),
             url: String::new(),
-            author: Some(author(author_n)),
+            author: (!steam).then(|| author(author_n)),
             title: "t".into(),
             poster: None,
             playlist: String::new(),
             aspect_ratio: None,
-            source: VideoSource::Bluesky,
+            source,
             game: None,
             created_at: ts(i),
             like_count: 0,
         })
     }
 
-    /// 300 candidates over 30 authors, 70/15/15-ish raw mix
+    /// 300 candidates over 30 authors, roughly matching the target mix
     fn big_pool() -> Vec<Brick> {
         let mut pool = Vec::new();
         for i in 0..300 {
             let a = i % 30;
             pool.push(match i % 20 {
                 3 | 10 | 17 => blog(i, a),
-                6 | 13 | 19 => video(i, a),
+                6 | 13 => video(i, a, VideoSource::Bluesky),
+                19 => video(i, a, VideoSource::Steam),
                 _ => post(i, a),
             });
         }
@@ -249,14 +256,15 @@ mod tests {
         let mut pool = big_pool();
         let mut wall = Vec::new();
         lay(&mut pool, &mut wall, 200, 9, now());
-        let mut counts = [0usize; 3];
+        let mut counts = [0usize; KINDS];
         for b in &wall {
             counts[kind_index(b)] += 1;
         }
         let share = |k: usize| counts[k] as f64 / wall.len() as f64;
         assert!((share(0) - 0.70).abs() < 0.10, "posts {}", share(0));
         assert!((share(1) - 0.15).abs() < 0.08, "blogs {}", share(1));
-        assert!((share(2) - 0.15).abs() < 0.08, "videos {}", share(2));
+        assert!((share(2) - 0.10).abs() < 0.06, "bsky videos {}", share(2));
+        assert!((share(3) - 0.05).abs() < 0.04, "trailers {}", share(3));
     }
 
     #[test]
@@ -266,5 +274,29 @@ mod tests {
         let mut wall = Vec::new();
         lay(&mut pool, &mut wall, 50, 5, now());
         assert_eq!(wall.len(), 50);
+    }
+    #[test]
+    fn trailers_pooled_late_still_get_laid() {
+        // wall already has 100 bricks laid with no trailers available,
+        // then 3 trailers join the pool — they must appear in the next 48
+        let mut pool: Vec<Brick> = Vec::new();
+        for i in 0..200 {
+            let a = i % 30;
+            pool.push(match i % 20 {
+                3 | 10 | 17 => blog(i, a),
+                6 | 13 => video(i, a, VideoSource::Bluesky),
+                _ => post(i, a),
+            });
+        }
+        let mut wall = Vec::new();
+        lay(&mut pool, &mut wall, 100, 11, now());
+        assert!(wall.iter().all(|b| kind_index(b) != 3));
+
+        for i in 900..903 {
+            pool.push(video(i, 0, VideoSource::Steam));
+        }
+        lay(&mut pool, &mut wall, 48, 11, now());
+        let trailers = wall.iter().filter(|b| kind_index(b) == 3).count();
+        assert!(trailers >= 2, "only {trailers} trailers laid in 48 bricks");
     }
 }

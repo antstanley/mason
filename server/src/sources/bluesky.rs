@@ -6,6 +6,13 @@ use serde::Deserialize;
 
 use crate::http::{Bucket, Http, HttpError};
 use crate::model::{AspectRatio, Author, Brick, ExternalEmbed, ImageEmbed, PostBrick, VideoBrick, VideoSource};
+use crate::sources::steam;
+
+/// One author's posts plus the Steam games they were talking about.
+pub struct AuthorYield {
+    pub bricks: Vec<Brick>,
+    pub steam_appids: Vec<u64>,
+}
 
 #[derive(Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -62,18 +69,55 @@ pub async fn get_follows(http: &Http, base: &str, did: &str) -> Result<Vec<Follo
 }
 
 /// One author's recent posts as bricks. Replies excluded upstream; reposts
-/// (reason != null) dropped here so nothing is double-counted.
-pub async fn get_author_feed(http: &Http, base: &str, did: &str) -> Result<Vec<Brick>, HttpError> {
+/// (reason != null) dropped here so nothing is double-counted. Steam store
+/// links are mined from post text, richtext facets, and link cards.
+pub async fn get_author_feed(
+    http: &Http,
+    base: &str,
+    did: &str,
+) -> Result<AuthorYield, HttpError> {
     let url = format!(
         "{base}/xrpc/app.bsky.feed.getAuthorFeed?actor={did}&limit=30&filter=posts_no_replies"
     );
     let page: AuthorFeed = http.get_json(&url, Bucket::Appview).await?;
-    Ok(page
+
+    let mut steam_appids = Vec::new();
+    let bricks = page
         .feed
         .into_iter()
         .filter(|item| item.reason.is_none())
-        .filter_map(|item| post_to_brick(item.post))
-        .collect())
+        .filter_map(|item| {
+            let facet_uris = facet_link_uris(&item.post.record.facets);
+            let brick = post_to_brick(item.post)?;
+            let mut fragments: Vec<&str> = facet_uris.iter().map(String::as_str).collect();
+            if let Brick::Post(p) = &brick {
+                fragments.push(&p.text);
+                if let Some(external) = &p.external {
+                    fragments.push(&external.uri);
+                }
+            }
+            for appid in steam::extract_appids(fragments) {
+                if !steam_appids.contains(&appid) {
+                    steam_appids.push(appid);
+                }
+            }
+            Some(brick)
+        })
+        .collect();
+    Ok(AuthorYield { bricks, steam_appids })
+}
+
+/// URIs from `app.bsky.richtext.facet#link` features — link text in posts is
+/// often display-truncated, only the facet holds the real URL.
+fn facet_link_uris(facets: &[serde_json::Value]) -> Vec<String> {
+    facets
+        .iter()
+        .flat_map(|f| f.get("features").and_then(|x| x.as_array()).into_iter().flatten())
+        .filter(|feature| {
+            feature.get("$type").and_then(|t| t.as_str()) == Some("app.bsky.richtext.facet#link")
+        })
+        .filter_map(|feature| feature.get("uri").and_then(|u| u.as_str()).map(String::from))
+        .collect()
 }
 
 #[derive(Deserialize)]
@@ -295,7 +339,8 @@ mod tests {
             .mount(&server)
             .await;
 
-        let bricks = get_author_feed(&Http::new(), &server.uri(), "did:plc:aa").await.unwrap();
+        let AuthorYield { bricks, .. } =
+            get_author_feed(&Http::new(), &server.uri(), "did:plc:aa").await.unwrap();
         assert_eq!(bricks.len(), 1, "repost must be dropped");
         match &bricks[0] {
             Brick::Video(v) => {

@@ -67,10 +67,11 @@ pub async fn get_documents(
     let mut suppressed_posts = Vec::new();
     for envelope in listing.records {
         let Some(doc) = parse_document(envelope.value) else { continue };
-        let publication = fetch_publication(http, &pds, &author.did, &doc.site).await;
+        let Some(site) = doc.site.clone() else { continue };
+        let publication = fetch_publication(http, &pds, &author.did, &site).await;
         let url = canonical_url(&doc, &publication);
-        if let Some(bsky_ref) = &doc.bsky_post_ref {
-            suppressed_posts.push(bsky_ref.uri.clone());
+        if let Some(uri) = doc.bsky_post_ref.as_ref().and_then(|r| r.uri(&author.did)) {
+            suppressed_posts.push(uri);
         }
         bricks.push(Brick::Blog(BlogBrick {
             id: envelope.uri,
@@ -106,15 +107,41 @@ struct RecordEnvelope {
 struct DocumentRecord {
     title: String,
     /// AT-URI of the publication record (repo part may be a handle),
-    /// or a plain https URL
-    site: String,
+    /// or a plain https URL. Required by the lexicon but absent in some
+    /// real records — those are skipped (a card that links nowhere is
+    /// not wall-worthy).
+    site: Option<String>,
     published_at: String,
     path: Option<String>,
     description: Option<String>,
     cover_image: Option<BlobRef>,
     #[serde(default)]
     tags: Vec<String>,
-    bsky_post_ref: Option<StrongRef>,
+    bsky_post_ref: Option<BskyPostRef>,
+}
+
+/// Officially a strongRef `{uri, cid}`, but some publishers write a bare
+/// string (an rkey or at-uri).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum BskyPostRef {
+    Strong(StrongRef),
+    Bare(String),
+}
+
+impl BskyPostRef {
+    /// Full post at-uri when derivable; bare rkeys resolve against the
+    /// author's repo.
+    fn uri(&self, author_did: &str) -> Option<String> {
+        match self {
+            BskyPostRef::Strong(r) => Some(r.uri.clone()),
+            BskyPostRef::Bare(s) if s.starts_with("at://") => Some(s.clone()),
+            BskyPostRef::Bare(rkey) if !rkey.is_empty() => {
+                Some(format!("at://{author_did}/app.bsky.feed.post/{rkey}"))
+            }
+            BskyPostRef::Bare(_) => None,
+        }
+    }
 }
 
 #[derive(Deserialize)]

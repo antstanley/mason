@@ -6,7 +6,7 @@ use moka::Expiry;
 
 use crate::algo::snapshot::Snapshot;
 use crate::model::Brick;
-use crate::sources::bluesky::Follow;
+use crate::sources::bluesky::{AuthorYield, Follow};
 
 /// One author's standard.site yield.
 pub struct StdDocs {
@@ -41,10 +41,14 @@ pub struct Caches {
     pub did: Cache<String, String>,
     /// did → follows
     pub follows: Cache<String, Arc<Vec<Follow>>>,
-    /// author did → their recent bricks
-    pub author_feed: Cache<String, Arc<Vec<Brick>>>,
+    /// author did → their recent bricks + mentioned Steam games
+    pub author_feed: Cache<String, Arc<AuthorYield>>,
     /// author did → their standard.site documents (negative results live 24h)
     pub std_docs: Cache<String, Arc<StdDocs>>,
+    /// appid → trailer bricks
+    pub steam_trailers: Cache<u64, Arc<Vec<Brick>>>,
+    /// featured appids (single-key)
+    pub steam_featured: Cache<u8, Arc<Vec<u64>>>,
     /// snapshot id → live snapshot
     pub snapshots: Cache<String, Arc<Snapshot>>,
     /// viewer did → authors that yielded content recently (for cohort sampling)
@@ -69,6 +73,14 @@ impl Caches {
             std_docs: Cache::builder()
                 .max_capacity(20_000)
                 .expire_after(StdDocsExpiry)
+                .build(),
+            steam_trailers: Cache::builder()
+                .max_capacity(5_000)
+                .time_to_live(Duration::from_secs(24 * 3600))
+                .build(),
+            steam_featured: Cache::builder()
+                .max_capacity(1)
+                .time_to_live(Duration::from_secs(6 * 3600))
                 .build(),
             snapshots: Cache::builder()
                 .max_capacity(500)
