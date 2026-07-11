@@ -4,12 +4,19 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
 
+# one run per PR at a time; a new push cancels an in-flight deploy of the same PR
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   id-token: write # GitHub OIDC → preview-mason-gh role, no stored keys
   contents: read
+  pull-requests: write # sticky preview-URL comment
 
 env:
   AWS_REGION: eu-west-1 # keep in sync with config/preview.jsonc
+  PREVIEW_ID: pr-${{ github.event.pull_request.number }}
 
 jobs:
   deploy:
@@ -56,8 +63,27 @@ jobs:
 
       - name: Deploy preview
         run: >
-          cd web && pnpm exec blogwright preview deploy pr-${{ github.event.number }}
+          cd web && pnpm exec blogwright preview deploy "$PREVIEW_ID"
           --domain ${{ secrets.PREVIEW_DOMAIN }}
+
+      - name: Comment preview URL
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PREVIEW_URL: https://pr-${{ github.event.pull_request.number }}.${{ secrets.PREVIEW_DOMAIN }}
+        with:
+          script: |
+            const url = process.env.PREVIEW_URL;
+            const marker = '<!-- preview-deploy -->';
+            const body = `${marker}\n🧱 Preview wall deployed: ${url}\n\n_Updates on every push; removed when this PR closes._`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
+            }
 
   destroy:
     if: github.event.action == 'closed'
@@ -84,4 +110,18 @@ jobs:
 
       # teardown is a prefix delete — no build needed
       - name: Destroy preview
-        run: cd web && pnpm exec blogwright preview destroy pr-${{ github.event.number }}
+        run: cd web && pnpm exec blogwright preview destroy "$PREVIEW_ID"
+
+      - name: Comment removal
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const marker = '<!-- preview-deploy -->';
+            const body = `${marker}\n🧹 Preview wall removed.`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body });
+            }
