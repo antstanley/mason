@@ -1,11 +1,38 @@
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use moka::future::Cache;
+use moka::Expiry;
 
 use crate::algo::snapshot::Snapshot;
 use crate::model::Brick;
 use crate::sources::bluesky::Follow;
+
+/// One author's standard.site yield.
+pub struct StdDocs {
+    pub bricks: Vec<Brick>,
+    /// post URIs suppressed via bskyPostRef — the blog card wins
+    pub suppressed_posts: Vec<String>,
+}
+
+/// Most follows publish no standard.site records — cache that emptiness for
+/// a day, but recheck actual publishers every 15 minutes.
+struct StdDocsExpiry;
+
+impl Expiry<String, Arc<StdDocs>> for StdDocsExpiry {
+    fn expire_after_create(
+        &self,
+        _key: &String,
+        value: &Arc<StdDocs>,
+        _created_at: Instant,
+    ) -> Option<Duration> {
+        Some(if value.bricks.is_empty() {
+            Duration::from_secs(24 * 3600)
+        } else {
+            Duration::from_secs(900)
+        })
+    }
+}
 
 /// All in-memory state. TTLs per the plan; capacities keep a small
 /// deployment bounded.
@@ -16,6 +43,8 @@ pub struct Caches {
     pub follows: Cache<String, Arc<Vec<Follow>>>,
     /// author did → their recent bricks
     pub author_feed: Cache<String, Arc<Vec<Brick>>>,
+    /// author did → their standard.site documents (negative results live 24h)
+    pub std_docs: Cache<String, Arc<StdDocs>>,
     /// snapshot id → live snapshot
     pub snapshots: Cache<String, Arc<Snapshot>>,
     /// viewer did → authors that yielded content recently (for cohort sampling)
@@ -36,6 +65,10 @@ impl Caches {
             author_feed: Cache::builder()
                 .max_capacity(20_000)
                 .time_to_live(Duration::from_secs(300))
+                .build(),
+            std_docs: Cache::builder()
+                .max_capacity(20_000)
+                .expire_after(StdDocsExpiry)
                 .build(),
             snapshots: Cache::builder()
                 .max_capacity(500)

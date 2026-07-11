@@ -20,10 +20,11 @@ use tokio::sync::{Mutex, Notify};
 use xxhash_rust::xxh3::xxh3_64_with_seed;
 
 use super::mix;
-use crate::state::AppState;
+use crate::cache::StdDocs;
 use crate::error::AppError;
-use crate::model::Brick;
-use crate::sources::bluesky;
+use crate::model::{Author, Brick};
+use crate::sources::{bluesky, standardsite};
+use crate::state::AppState;
 
 /// Sampled authors per snapshot — never fan out to the whole follow graph.
 const COHORT_SIZE: usize = 100;
@@ -123,24 +124,36 @@ async fn build(
         let mut answered = 0usize;
         let mut yielding_authors: Vec<String> = Vec::new();
 
-        let mut feeds = stream::iter(cohort.into_iter().map(|author_did| {
+        let mut feeds = stream::iter(cohort.into_iter().map(|author| {
             let state = Arc::clone(&fill_state);
             async move {
-                let bricks = author_feed_cached(&state, &author_did).await;
-                (author_did, bricks)
+                let (bricks, docs) = tokio::join!(
+                    author_feed_cached(&state, &author.did),
+                    std_docs_cached(&state, &author),
+                );
+                (author, bricks, docs)
             }
         }))
         .buffer_unordered(FAN_OUT);
 
-        while let Some((author_did, bricks)) = feeds.next().await {
+        while let Some((author, bricks, docs)) = feeds.next().await {
             answered += 1;
-            if !bricks.is_empty() {
-                yielding_authors.push(author_did);
+            if !bricks.is_empty() || !docs.bricks.is_empty() {
+                yielding_authors.push(author.did);
             }
             {
                 let mut inner = fill_snapshot.inner.lock().await;
                 let inner = &mut *inner;
-                for brick in bricks.iter() {
+                // bskyPostRef suppression: the blog card wins over its
+                // cross-posted skeet, whether the post came first or later
+                for uri in &docs.suppressed_posts {
+                    if inner.seen.insert(uri.clone()) {
+                        // post not pooled yet — the insert blocks it later
+                    } else {
+                        inner.pool.retain(|b| b.id() != uri);
+                    }
+                }
+                for brick in docs.bricks.iter().chain(bricks.iter()) {
                     if inner.pool.len() + inner.wall.len() >= SNAPSHOT_CAP {
                         break;
                     }
@@ -267,24 +280,49 @@ async fn sample_cohort(
     viewer: &str,
     follows: &[bluesky::Follow],
     seed: u64,
-) -> Vec<String> {
+) -> Vec<Author> {
     let known_active = state.caches.activity.get(viewer).await.unwrap_or_default();
-    let follow_dids: HashSet<&str> = follows.iter().map(|f| f.did.as_str()).collect();
+    let by_did: std::collections::HashMap<&str, &bluesky::Follow> =
+        follows.iter().map(|f| (f.did.as_str(), f)).collect();
 
-    let mut cohort: Vec<String> = known_active
+    let mut cohort: Vec<Author> = known_active
         .iter()
-        .filter(|did| follow_dids.contains(did.as_str()))
+        .filter_map(|did| by_did.get(did.as_str()))
         .take(KNOWN_ACTIVE)
-        .cloned()
+        .map(|f| Author::from(*f))
         .collect();
 
-    let chosen: HashSet<&str> = cohort.iter().map(String::as_str).collect();
-    let mut rest: Vec<&str> =
-        follows.iter().map(|f| f.did.as_str()).filter(|d| !chosen.contains(d)).collect();
+    let chosen: HashSet<&str> = cohort.iter().map(|a| a.did.as_str()).collect();
+    let mut rest: Vec<&bluesky::Follow> =
+        follows.iter().filter(|f| !chosen.contains(f.did.as_str())).collect();
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     rest.shuffle(&mut rng);
-    cohort.extend(rest.into_iter().take(COHORT_SIZE.saturating_sub(cohort.len())).map(String::from));
+    cohort.extend(
+        rest.into_iter().take(COHORT_SIZE.saturating_sub(cohort.len())).map(Author::from),
+    );
     cohort
+}
+
+async fn std_docs_cached(state: &Arc<AppState>, author: &Author) -> Arc<StdDocs> {
+    let http = &state.http;
+    let plc_base = state.config.plc_base.clone();
+    let author = author.clone();
+    state
+        .caches
+        .std_docs
+        .get_with(author.did.clone(), async move {
+            match standardsite::get_documents(http, &plc_base, &author).await {
+                Ok(result) => Arc::new(StdDocs {
+                    bricks: result.bricks,
+                    suppressed_posts: result.suppressed_posts,
+                }),
+                Err(e) => {
+                    tracing::debug!("standard.site fetch for {} failed: {e}", author.did);
+                    Arc::new(StdDocs { bricks: Vec::new(), suppressed_posts: Vec::new() })
+                }
+            }
+        })
+        .await
 }
 
 async fn record_activity(state: &Arc<AppState>, viewer: &str, mut yielding: Vec<String>) {

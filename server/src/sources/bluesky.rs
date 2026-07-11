@@ -12,6 +12,19 @@ use crate::model::{AspectRatio, Author, Brick, ExternalEmbed, ImageEmbed, PostBr
 pub struct Follow {
     pub did: String,
     pub handle: String,
+    pub display_name: Option<String>,
+    pub avatar: Option<String>,
+}
+
+impl From<&Follow> for Author {
+    fn from(f: &Follow) -> Self {
+        Author {
+            did: f.did.clone(),
+            handle: f.handle.clone(),
+            display_name: f.display_name.clone(),
+            avatar: f.avatar.clone(),
+        }
+    }
 }
 
 pub async fn resolve_handle(http: &Http, base: &str, handle: &str) -> Result<String, HttpError> {

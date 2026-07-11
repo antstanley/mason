@@ -1,0 +1,330 @@
+//! standard.site blog ingestion: DID doc → PDS → listRecords
+//! site.standard.document (+ its site.standard.publication). Blog cards are
+//! metadata + link-out only — the `content` union is platform-specific
+//! (Leaflet, pckt, WordPress all differ) and is never rendered.
+
+use serde::Deserialize;
+
+use crate::http::{Bucket, Http, HttpError};
+use crate::model::{Author, BlogBrick, Brick, Publication};
+
+/// (bricks, suppressed post uris from bskyPostRef — the blog card wins over
+/// its cross-posted skeet)
+pub struct StandardSiteYield {
+    pub bricks: Vec<Brick>,
+    pub suppressed_posts: Vec<String>,
+}
+
+/// PDS endpoint from the DID document (plc.directory for did:plc,
+/// /.well-known/did.json for did:web).
+pub async fn resolve_pds(http: &Http, plc_base: &str, did: &str) -> Result<String, HttpError> {
+    #[derive(Deserialize)]
+    struct DidDoc {
+        #[serde(default)]
+        service: Vec<Service>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Service {
+        id: String,
+        service_endpoint: serde_json::Value,
+    }
+
+    let url = if let Some(domain) = did.strip_prefix("did:web:") {
+        format!("https://{domain}/.well-known/did.json")
+    } else {
+        format!("{plc_base}/{did}")
+    };
+    let doc: DidDoc = http.get_json(&url, Bucket::Unmetered).await?;
+    doc.service
+        .into_iter()
+        .find(|s| s.id.ends_with("atproto_pds"))
+        .and_then(|s| s.service_endpoint.as_str().map(String::from))
+        .ok_or(HttpError::Status(404))
+}
+
+pub async fn get_documents(
+    http: &Http,
+    plc_base: &str,
+    author: &Author,
+) -> Result<StandardSiteYield, HttpError> {
+    let pds = resolve_pds(http, plc_base, &author.did).await?;
+    let url = format!(
+        "{pds}/xrpc/com.atproto.repo.listRecords?repo={}&collection=site.standard.document&limit=25",
+        author.did
+    );
+    let listing: ListRecords = match http.get_json(&url, Bucket::Unmetered).await {
+        Ok(l) => l,
+        // repos without the collection 400 on some PDS implementations —
+        // that's just "no blog here"
+        Err(HttpError::Status(400 | 404)) => {
+            return Ok(StandardSiteYield { bricks: Vec::new(), suppressed_posts: Vec::new() });
+        }
+        Err(e) => return Err(e),
+    };
+
+    let mut bricks = Vec::new();
+    let mut suppressed_posts = Vec::new();
+    for envelope in listing.records {
+        let Some(doc) = parse_document(envelope.value) else { continue };
+        let publication = fetch_publication(http, &pds, &author.did, &doc.site).await;
+        let url = canonical_url(&doc, &publication);
+        if let Some(bsky_ref) = &doc.bsky_post_ref {
+            suppressed_posts.push(bsky_ref.uri.clone());
+        }
+        bricks.push(Brick::Blog(BlogBrick {
+            id: envelope.uri,
+            url,
+            author: author.clone(),
+            title: doc.title,
+            description: doc.description.filter(|d| !d.is_empty()),
+            cover_image: doc
+                .cover_image
+                .and_then(|blob| blob.link())
+                .map(|cid| format!("{pds}/xrpc/com.atproto.sync.getBlob?did={}&cid={cid}", author.did)),
+            publication,
+            tags: doc.tags,
+            published_at: doc.published_at,
+        }));
+    }
+    Ok(StandardSiteYield { bricks, suppressed_posts })
+}
+
+#[derive(Deserialize)]
+struct ListRecords {
+    records: Vec<RecordEnvelope>,
+}
+
+#[derive(Deserialize)]
+struct RecordEnvelope {
+    uri: String,
+    value: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DocumentRecord {
+    title: String,
+    /// AT-URI of the publication record (repo part may be a handle),
+    /// or a plain https URL
+    site: String,
+    published_at: String,
+    path: Option<String>,
+    description: Option<String>,
+    cover_image: Option<BlobRef>,
+    #[serde(default)]
+    tags: Vec<String>,
+    bsky_post_ref: Option<StrongRef>,
+}
+
+#[derive(Deserialize)]
+struct BlobRef {
+    #[serde(rename = "ref")]
+    reference: Option<serde_json::Value>,
+}
+
+impl BlobRef {
+    fn link(&self) -> Option<String> {
+        self.reference.as_ref()?.get("$link")?.as_str().map(String::from)
+    }
+}
+
+#[derive(Deserialize)]
+struct StrongRef {
+    uri: String,
+}
+
+/// Log-and-skip on unknown shapes — the lexicon is young, parse defensively.
+fn parse_document(value: serde_json::Value) -> Option<DocumentRecord> {
+    match serde_json::from_value(value) {
+        Ok(doc) => Some(doc),
+        Err(e) => {
+            tracing::debug!("skipping unparseable site.standard.document: {e}");
+            None
+        }
+    }
+}
+
+async fn fetch_publication(
+    http: &Http,
+    pds: &str,
+    fallback_repo: &str,
+    site: &str,
+) -> Publication {
+    // site may be a plain https URL — publication is implied
+    if let Some(rest) = site.strip_prefix("https://") {
+        let host = rest.split('/').next().unwrap_or(rest);
+        return Publication { name: host.to_string(), url: site.to_string(), icon: None };
+    }
+
+    // at://repo/site.standard.publication/rkey (repo may be handle or did)
+    let mut parts = site.strip_prefix("at://").unwrap_or(site).splitn(3, '/');
+    let repo = parts.next().unwrap_or(fallback_repo);
+    let _collection = parts.next();
+    let rkey = parts.next().unwrap_or("self");
+
+    #[derive(Deserialize)]
+    struct RecordResponse {
+        value: PublicationRecord,
+    }
+    #[derive(Deserialize)]
+    struct PublicationRecord {
+        name: String,
+        url: String,
+    }
+
+    let url = format!(
+        "{pds}/xrpc/com.atproto.repo.getRecord?repo={repo}&collection=site.standard.publication&rkey={rkey}"
+    );
+    match http.get_json::<RecordResponse>(&url, Bucket::Unmetered).await {
+        Ok(r) => Publication { name: r.value.name, url: r.value.url, icon: None },
+        Err(e) => {
+            tracing::debug!("publication fetch failed for {site}: {e}");
+            Publication { name: "blog".into(), url: String::new(), icon: None }
+        }
+    }
+}
+
+fn canonical_url(doc: &DocumentRecord, publication: &Publication) -> String {
+    let base = publication.url.trim_end_matches('/');
+    match &doc.path {
+        Some(path) if !base.is_empty() => format!("{base}{path}"),
+        _ if !base.is_empty() => base.to_string(),
+        _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::http::Http;
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn author() -> Author {
+        Author {
+            did: "did:plc:blogger".into(),
+            handle: "blogger.test".into(),
+            display_name: None,
+            avatar: None,
+        }
+    }
+
+    async fn mock_pds_resolution(server: &MockServer) {
+        Mock::given(method("GET"))
+            .and(path("/did:plc:blogger"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "service": [{
+                    "id": "#atproto_pds",
+                    "type": "AtprotoPersonalDataServer",
+                    "serviceEndpoint": server.uri()
+                }]
+            })))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn documents_become_blog_bricks_with_canonical_urls() {
+        let server = MockServer::start().await;
+        mock_pds_resolution(&server).await;
+
+        Mock::given(method("GET"))
+            .and(path("/xrpc/com.atproto.repo.listRecords"))
+            .and(query_param("collection", "site.standard.document"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "records": [
+                    {
+                        "uri": "at://did:plc:blogger/site.standard.document/aaa",
+                        "value": {
+                            "$type": "site.standard.document",
+                            "title": "Why bricks?",
+                            "site": "at://did:plc:blogger/site.standard.publication/self",
+                            "publishedAt": "2026-07-01T00:00:00Z",
+                            "path": "/why-bricks/",
+                            "description": "A manifesto",
+                            "coverImage": {"$type": "blob", "ref": {"$link": "bafyCOVER"}, "mimeType": "image/png", "size": 1},
+                            "tags": ["walls"],
+                            "bskyPostRef": {"uri": "at://did:plc:blogger/app.bsky.feed.post/xpost", "cid": "bafyPOST"},
+                            "content": {"$type": "pub.leaflet.content", "whatever": true}
+                        }
+                    },
+                    {
+                        "uri": "at://did:plc:blogger/site.standard.document/bbb",
+                        "value": {"$type": "site.standard.document", "totally": "malformed"}
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/xrpc/com.atproto.repo.getRecord"))
+            .and(query_param("collection", "site.standard.publication"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "value": {"name": "The Daily Brick", "url": "https://blog.example.com/"}
+            })))
+            .mount(&server)
+            .await;
+
+        let result = get_documents(&Http::new(), &server.uri(), &author()).await.unwrap();
+        assert_eq!(result.bricks.len(), 1, "malformed record must be skipped, not fatal");
+        assert_eq!(result.suppressed_posts, vec!["at://did:plc:blogger/app.bsky.feed.post/xpost"]);
+        match &result.bricks[0] {
+            Brick::Blog(b) => {
+                assert_eq!(b.title, "Why bricks?");
+                assert_eq!(b.url, "https://blog.example.com/why-bricks/");
+                assert_eq!(b.publication.name, "The Daily Brick");
+                assert!(b.cover_image.as_deref().unwrap().contains("getBlob"));
+                assert!(b.cover_image.as_deref().unwrap().contains("bafyCOVER"));
+            }
+            other => panic!("expected blog brick, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn no_collection_is_empty_not_error() {
+        let server = MockServer::start().await;
+        mock_pds_resolution(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/com.atproto.repo.listRecords"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(
+                serde_json::json!({"error": "InvalidRequest", "message": "no such collection"}),
+            ))
+            .mount(&server)
+            .await;
+
+        let result = get_documents(&Http::new(), &server.uri(), &author()).await.unwrap();
+        assert!(result.bricks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn https_site_skips_publication_fetch() {
+        let server = MockServer::start().await;
+        mock_pds_resolution(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/com.atproto.repo.listRecords"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "records": [{
+                    "uri": "at://did:plc:blogger/site.standard.document/ccc",
+                    "value": {
+                        "title": "Plain site",
+                        "site": "https://plain.example.com",
+                        "publishedAt": "2026-07-02T00:00:00Z",
+                        "path": "/post/"
+                    }
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        let result = get_documents(&Http::new(), &server.uri(), &author()).await.unwrap();
+        match &result.bricks[0] {
+            Brick::Blog(b) => {
+                assert_eq!(b.publication.name, "plain.example.com");
+                assert_eq!(b.url, "https://plain.example.com/post/");
+            }
+            other => panic!("expected blog brick, got {other:?}"),
+        }
+    }
+}
