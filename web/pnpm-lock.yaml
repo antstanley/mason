@@ -25,8 +25,8 @@ importers:
         specifier: ^4.3.2
         version: 4.3.2(vite@8.1.4(jiti@2.7.0)(yaml@2.9.0))
       blogwright:
-        specifier: ^0.1.0
-        version: 0.1.0
+        specifier: ^0.2.0
+        version: 0.2.0
       knip:
         specifier: ^6.25.0
         version: 6.25.0
@@ -1150,16 +1150,16 @@ packages:
     resolution: {integrity: sha512-qIj0G9wZbMGNLjLmg1PT6v2mE9AH2zlnADJD/2tC6E00hgmhUOfEB6greHPAfLRSufHqROIUTkw6E+M3lH0PTQ==}
     engines: {node: '>= 0.4'}
 
-  blogwright-core@0.1.0:
-    resolution: {integrity: sha512-FbUEXYWyVi+JduydVs8q4zQVxF3o3i0kG6FceaCmN29Fp3VqFAb7sdyuO8UlmU1aCZDK8GnpiHtQ+9gBK0jhcw==}
+  blogwright-core@0.2.0:
+    resolution: {integrity: sha512-qmZo8L9uLj2S6hywPH1HMcfqscGPQWJeQGZ9AWAv7MnaZN2P+MutiBYEXVFD+teNs92wDcyeUDRTz34eoaXsJg==}
     engines: {node: '>=22'}
 
-  blogwright-pds@0.1.0:
-    resolution: {integrity: sha512-YmFN4Kgg5QH2Kdm/ORpo3U8gykBz7Lju9gD23zGk+xPZI2OiBs3o2yilMCzv1mTploE+GFLXM5VP/7FTcjoqGw==}
+  blogwright-pds@0.2.0:
+    resolution: {integrity: sha512-fQ7W2DGyeVvxJqFVGPSwA7rcwNh5d3XPYGZM37LUygKm8UuV+zTaf4ikb1G5s2qXWyKjJ30D9EQ6sczj5KA8GQ==}
     engines: {node: '>=22'}
 
-  blogwright@0.1.0:
-    resolution: {integrity: sha512-QOienhaRPsJ/X0NwFVddyHbDwuDL08CchwFIlF2vCDKK9pIdVhOgvo3vd8mxEBF3pbpaMkXMhxh1BOH012Ztkw==}
+  blogwright@0.2.0:
+    resolution: {integrity: sha512-H/XSgdeYEkL5G03w5DwM1dsBxWvuxZ2r87leA7MnyMT80XgWSQuBPLWDu2oJ7jNDQnGgFz9N/nmx8BeAAp9Ecg==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -2462,22 +2462,22 @@ snapshots:
 
   axobject-query@4.1.0: {}
 
-  blogwright-core@0.1.0:
+  blogwright-core@0.2.0:
     dependencies:
       '@aws-crypto/sha256-js': 5.2.0
       '@aws-sdk/credential-providers': 3.1085.0
       '@smithy/protocol-http': 5.5.8
       '@smithy/signature-v4': 5.6.4
 
-  blogwright-pds@0.1.0:
+  blogwright-pds@0.2.0:
     dependencies:
       '@atproto/oauth-client-node': 0.4.8
-      blogwright-core: 0.1.0
+      blogwright-core: 0.2.0
 
-  blogwright@0.1.0:
+  blogwright@0.2.0:
     dependencies:
-      blogwright-core: 0.1.0
-      blogwright-pds: 0.1.0
+      blogwright-core: 0.2.0
+      blogwright-pds: 0.2.0
       fflate: 0.8.3
 
   bowser@2.14.1: {}
