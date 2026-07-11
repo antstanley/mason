@@ -11,11 +11,13 @@
 		children: Snippet;
 	} = $props();
 
-	const accentClass = {
-		post: 'border-brick-post/60 hover:border-brick-post',
-		blog: 'border-brick-blog/60 hover:border-brick-blog',
-		video: 'border-brick-video/60 hover:border-brick-video'
-	}[accent];
+	const accentClass = $derived(
+		{
+			post: 'border-brick-post/60 hover:border-brick-post',
+			blog: 'border-brick-blog/60 hover:border-brick-blog',
+			video: 'border-brick-video/60 hover:border-brick-video'
+		}[accent]
+	);
 </script>
 
 <article

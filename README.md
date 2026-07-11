@@ -94,6 +94,7 @@ Then CI (GitHub-OIDC — no stored keys):
 - **PR previews** (`preview.yml`): every PR deploys to
   `https://pr-<n>.<preview-domain>` on open/update and is torn down on
   close — one shared distribution, so a preview is just an S3 prefix.
+  (This very sentence shipped through the first preview PR. 🧱)
 - **Production** (`deploy.yml`): manual workflow dispatch, gated by the
   `production` GitHub environment. `just deploy` does the same from a
   laptop. `blogwright status`, `history`, `logs <hash>`, and

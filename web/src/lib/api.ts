@@ -1,10 +1,10 @@
 import { browser } from "$app/environment";
-import { PUBLIC_MASON_SERVER_URL } from "$env/static/public";
 import type { FeedResponse } from "./types";
 
 /** Empty → local mode: same-origin fetch, intercepted by the wasm service
- *  worker. Set → server mode: direct CORS call to that mortar instance. */
-const BASE = PUBLIC_MASON_SERVER_URL;
+ *  worker. Set → server mode: direct CORS call to that mortar instance.
+ *  Injected at build time via vite `define` (defaults to '' when unset). */
+const BASE: string = import.meta.env.PUBLIC_MASON_SERVER_URL ?? "";
 
 export const localMode = BASE === "";
 
