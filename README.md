@@ -66,6 +66,21 @@ just clean        # reclaim the cargo target dir (~3GB)
 
 Try actor `demo` for an offline fixture wall.
 
+## Releases
+
+mason ships as one thing, so it carries one version. The root `package.json` is
+the source of truth; `pnpm version` propagates it to `web/package.json`, the Rust
+workspace and its lockfile, so the three can no longer drift apart.
+
+```sh
+pnpm changeset      # describe a user-visible change, pick major/minor/patch
+```
+
+Commit the generated file. CI keeps a "chore: version mason" PR open collecting
+the pending changesets; merging it bumps the version, writes CHANGELOG.md, tags,
+and cuts the GitHub release. Nothing is published to npm: the release is the
+artifact. Infrastructure-only changes usually need no changeset.
+
 ## Deploy (AWS via blogwright)
 
 The static local-mode build deploys to S3 + CloudFront with

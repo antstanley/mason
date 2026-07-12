@@ -1,0 +1,16 @@
+{
+	"name": "mason",
+	"version": "0.1.0",
+	"private": true,
+	"description": "One wall, every brick. An atproto discovery app.",
+	"packageManager": "pnpm@11.9.0",
+	"scripts": {
+		"changeset": "changeset",
+		"version": "changeset version && node scripts/sync-version.mjs",
+		"release": "node scripts/release.mjs"
+	},
+	"devDependencies": {
+		"@changesets/changelog-github": "^0.5.1",
+		"@changesets/cli": "^2.29.7"
+	}
+}
