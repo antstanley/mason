@@ -9,13 +9,29 @@
 	let { brick }: { brick: VideoBrick } = $props();
 
 	// The <video> element does not exist until the user clicks; the Wall
-	// never plays anything on its own.
+	// never plays anything on its own. That holds for live streams too: a
+	// wall of talking heads is nobody's idea of a good time.
 	let playRequested = $state(false);
 
 	const ratio = $derived(
 		brick.aspectRatio ? `${brick.aspectRatio.width} / ${brick.aspectRatio.height}` : '16 / 9'
 	);
-	const sourceName = $derived(brick.source === 'steam' ? 'Steam' : 'Bluesky');
+	const sourceName = $derived(brick.source === 'streamplace' ? 'Streamplace' : 'Bluesky');
+
+	// Hours and minutes; a stream runs long enough that seconds are noise.
+	// Not every archived video is a long one though: clips of a few seconds
+	// exist, and rounding those to "0m" makes the card look broken.
+	function runtime(ms: number): string {
+		const seconds = Math.round(ms / 1000);
+		if (seconds < 60) return `${seconds}s`;
+		const minutes = Math.round(seconds / 60);
+		const hours = Math.floor(minutes / 60);
+		return hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
+	}
+
+	const viewers = $derived(
+		brick.viewerCount === 1 ? '1 watching' : `${brick.viewerCount} watching`
+	);
 
 	// if another card starts playing, collapse this one back to its poster
 	$effect(() => {
@@ -26,7 +42,13 @@
 <BrickShell accent="video">
 	<div class="relative">
 		{#if playRequested}
-			<VideoPlayer id={brick.id} playlist={brick.playlist} poster={brick.poster} aspectRatio={ratio} />
+			<VideoPlayer
+				id={brick.id}
+				playlist={brick.playlist}
+				poster={brick.poster}
+				aspectRatio={ratio}
+				live={brick.live}
+			/>
 			<button
 				type="button"
 				onclick={() => (playRequested = false)}
@@ -56,42 +78,66 @@
 					playRequested = true;
 				}}
 				class="absolute inset-0 grid cursor-pointer place-items-center focus-visible:outline-offset-[-3px]"
-				aria-label="Play video: {brick.title || sourceName + ' video'}"
+				aria-label={brick.live
+					? `Watch live: ${brick.title || sourceName + ' stream'}`
+					: `Play video: ${brick.title || sourceName + ' video'}`}
 			>
 				<span
-					class="grid size-16 place-items-center rounded-full bg-brick-video pl-1 text-2xl text-white shadow-brick-lift transition-transform motion-safe:group-hover:scale-110"
+					class="grid size-16 place-items-center rounded-full pl-1 text-2xl text-white shadow-brick-lift transition-transform motion-safe:group-hover:scale-110 {brick.live
+						? 'bg-live'
+						: 'bg-brick-video'}"
 					aria-hidden="true"
 				>
 					▶
 				</span>
 			</button>
-			<span
-				class="pointer-events-none absolute top-2 left-2 rounded-full bg-kiln/75 px-2.5 py-0.5 text-[0.7rem] font-bold text-chalk"
-			>
-				{brick.source === 'steam' ? '🎮 Steam' : '🦋 Bluesky'}
-			</span>
+			{#if brick.live}
+				<span
+					class="pointer-events-none absolute top-2 left-2 flex items-center gap-1.5 rounded-full bg-live px-2.5 py-0.5 text-[0.7rem] font-bold tracking-wide text-white uppercase"
+				>
+					<span class="size-1.5 rounded-full bg-white motion-safe:animate-pulse" aria-hidden="true"
+					></span>
+					live
+				</span>
+			{:else}
+				<span
+					class="pointer-events-none absolute top-2 left-2 rounded-full bg-kiln/75 px-2.5 py-0.5 text-[0.7rem] font-bold text-chalk"
+				>
+					{brick.source === 'streamplace' ? '📺 Streamplace' : '🦋 Bluesky'}
+				</span>
+			{/if}
+			{#if brick.durationMs}
+				<span
+					class="pointer-events-none absolute right-2 bottom-2 rounded-full bg-kiln/75 px-2 py-0.5 text-[0.7rem] font-bold text-chalk tabular-nums"
+				>
+					{runtime(brick.durationMs)}
+				</span>
+			{/if}
 		{/if}
 	</div>
 	<div class="flex flex-col gap-3 p-4">
 		{#if brick.title}
 			<p class="font-display leading-tight font-bold">{brick.title}</p>
 		{/if}
-		{#if brick.game}
-			<p class="text-sm opacity-75">{brick.game.name}</p>
+		{#if brick.activity || (brick.live && brick.viewerCount !== null)}
+			<p class="flex flex-wrap items-center gap-x-2 text-sm opacity-75">
+				{#if brick.live && brick.viewerCount !== null}
+					<span class="font-semibold text-live dark:text-live-bright">{viewers}</span>
+				{/if}
+				{#if brick.activity}
+					<span>{brick.activity}</span>
+				{/if}
+			</p>
 		{/if}
 		<div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
-			{#if brick.author}
-				<AuthorChip author={brick.author} />
-			{:else}
-				<span></span>
-			{/if}
+			<AuthorChip author={brick.author} />
 			<a
 				href={clientUrl(brick.url)}
 				target="_blank"
 				rel="noopener noreferrer"
 				class="shrink-0 text-sm font-semibold text-brick-video-ink hover:underline dark:text-brick-video-bright"
 			>
-				watch on {sourceName} ↗
+				{brick.live ? 'watch live' : 'watch'} on {sourceName} ↗
 			</a>
 		</div>
 	</div>

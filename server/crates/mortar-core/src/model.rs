@@ -97,15 +97,8 @@ pub struct BlogBrick {
 #[serde(rename_all = "camelCase")]
 pub enum VideoSource {
     Bluesky,
-    Steam,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct GameInfo {
-    pub appid: u64,
-    pub name: String,
-    pub header_image: Option<String>,
+    /// stream.place: atproto livestreaming. Live now, or an archived VOD.
+    Streamplace,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -113,18 +106,27 @@ pub struct GameInfo {
 pub struct VideoBrick {
     pub id: String,
     pub url: String,
-    /// None for Steam trailers (no atproto author)
-    pub author: Option<Author>,
+    pub author: Author,
     pub title: String,
     pub poster: Option<String>,
-    /// HLS m3u8 URL; Bluesky `playlist` or Steam `hls_h264`
+    /// HLS m3u8 URL: Bluesky's `playlist`, or Streamplace's
+    /// `place.stream.playback.*` (live or archived)
     pub playlist: String,
     pub aspect_ratio: Option<AspectRatio>,
     pub source: VideoSource,
-    pub game: Option<GameInfo>,
     pub created_at: String,
     #[serde(default)]
     pub like_count: u64,
+    /// Streamplace only: this stream is happening RIGHT NOW. The most
+    /// valuable brick on the wall, and the only one with a deadline.
+    #[serde(default)]
+    pub live: bool,
+    /// Viewers watching a live stream.
+    pub viewer_count: Option<u64>,
+    /// Length of an archived stream.
+    pub duration_ms: Option<u64>,
+    /// What the streamer says they are doing ("music", a game, …).
+    pub activity: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

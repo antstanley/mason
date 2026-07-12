@@ -20,33 +20,14 @@ fn state() -> Arc<AppState> {
         let mut slot = cell.borrow_mut();
         if slot.is_none() {
             console_error_panic_hook::set_once();
-            // Steam's storefront API has no CORS headers; disabled in the
-            // browser build. Point steam_store_base at a proxy and flip
-            // steam_enabled via init_config to bring trailers back.
-            *slot = Some(Arc::new(AppState::new(Config {
-                steam_enabled: false,
-                ..Config::default()
-            })));
+            // Every upstream mason reads (the AppView, plc.directory, each
+            // PDS, Streamplace) serves permissive CORS, so the browser build
+            // needs no overrides and no proxy: it is the same engine talking
+            // to the same network, from a different address.
+            *slot = Some(Arc::new(AppState::new(Config::default())));
         }
         Arc::clone(slot.as_ref().expect("state initialized"))
     })
-}
-
-/// Optional: override upstreams before first use (e.g. a Steam CORS proxy).
-#[wasm_bindgen]
-pub fn init_config(steam_proxy_base: Option<String>) {
-    STATE.with(|cell| {
-        let mut config = Config {
-            steam_enabled: false,
-            ..Config::default()
-        };
-        if let Some(base) = steam_proxy_base {
-            config.steam_store_base = base;
-            config.steam_enabled = true;
-        }
-        console_error_panic_hook::set_once();
-        *cell.borrow_mut() = Some(Arc::new(AppState::new(config)));
-    });
 }
 
 /// Snapshot of the warm caches as JSON; the service worker stores this in

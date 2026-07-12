@@ -36,8 +36,8 @@ class ClientState {
 export const client = new ClientState();
 
 /** Rewrite a bsky.app link to the reader's chosen client. Only bsky.app is
- *  rewritten: blog links and Steam pages are not atproto posts and must be
- *  left exactly as they are. */
+ *  rewritten: blog links and stream.place pages are not Bluesky posts, and no
+ *  other client knows how to show them. They pass through untouched. */
 export function clientUrl(url: string, host: string = client.host): string {
   if (host === "bsky.app") return url;
   try {

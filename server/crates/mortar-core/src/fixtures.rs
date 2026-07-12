@@ -10,9 +10,9 @@ const POST_TEXTS: &[&str] = &[
     "day 47 of building in public. the wall grows.",
     "if your discovery feed doesn't spark joy, throw the whole algorithm out",
     "the mortar between good posts is other good posts",
-    "TIL steam trailers are HLS streams now. everything is a livestream if you squint",
+    "TIL you can livestream over atproto now. everything is a wall if you squint",
     "atproto is the most fun I've had on the internet since 2009",
-    "my follow graph is 40% shitposters, 40% blog nerds, 20% game devs. perfect balance",
+    "my follow graph is 40% shitposters, 40% blog nerds, 20% streamers. perfect balance",
     "unpopular opinion: endless scroll is fine when the content is actually good",
     "publish on your own site. syndicate everywhere. the dream is alive",
     "every timeline is a wall. every post is a brick. every like is a trowel of mortar",
@@ -42,17 +42,15 @@ const BLOG_TITLES: &[(&str, &str)] = &[
     ),
     (
         "HLS everywhere: how video quietly standardized",
-        "From Steam trailers to social clips, everything is an m3u8 now.",
+        "From livestreams to social clips, everything is an m3u8 now.",
     ),
 ];
 
-const GAME_NAMES: &[&str] = &[
-    "Brickfall Chronicles",
-    "Mortar & Mayhem",
-    "Kiln Keeper",
-    "Trowel Tactics",
-    "Grout: The Reckoning",
-    "Plasterpunk 2099",
+const STREAM_TITLES: &[&str] = &[
+    "laying bricks live, no plan, no mercy",
+    "kiln maintenance and chill",
+    "reading the atproto spec out loud (part 4)",
+    "late night mortar mixing",
 ];
 
 const HANDLES: &[(&str, &str)] = &[
@@ -114,16 +112,18 @@ fn brick(i: usize) -> Brick {
                 published_at: created_at(i),
             })
         }
-        // 3 videos per 20: alternate bluesky / steam
+        // 3 videos per 20: alternate Bluesky clips and Streamplace streams,
+        // one of which is live (brick 6 of the first twenty, so the demo wall
+        // opens on it just as a real one would)
         6 | 13 | 19 => {
-            let steam = i.is_multiple_of(2);
-            let game = GAME_NAMES[i % GAME_NAMES.len()];
+            let streamplace = i.is_multiple_of(2);
+            let live = i == 6;
             Brick::Video(VideoBrick {
                 id: format!("fixture-video-{i}"),
                 url: format!("https://example.com/video/{i}"),
-                author: (!steam).then(|| author(i)),
-                title: if steam {
-                    format!("{game}: Launch Trailer")
+                author: author(i),
+                title: if streamplace {
+                    STREAM_TITLES[i % STREAM_TITLES.len()].into()
                 } else {
                     POST_TEXTS[i % POST_TEXTS.len()].into()
                 },
@@ -133,18 +133,17 @@ fn brick(i: usize) -> Brick {
                     width: 16,
                     height: 9,
                 }),
-                source: if steam {
-                    VideoSource::Steam
+                source: if streamplace {
+                    VideoSource::Streamplace
                 } else {
                     VideoSource::Bluesky
                 },
-                game: steam.then(|| GameInfo {
-                    appid: 400 + i as u64,
-                    name: game.into(),
-                    header_image: None,
-                }),
                 created_at: created_at(i),
                 like_count: (i as u64 * 13) % 500,
+                live,
+                viewer_count: live.then_some(37),
+                duration_ms: (streamplace && !live).then_some(4_920_000),
+                activity: streamplace.then(|| "bricklaying".into()),
             })
         }
         // everything else: posts, some with images

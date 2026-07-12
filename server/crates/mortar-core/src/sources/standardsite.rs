@@ -7,6 +7,7 @@ use serde::Deserialize;
 
 use crate::http::{Bucket, Http, HttpError};
 use crate::model::{Author, BlogBrick, Brick, Publication};
+use crate::sources::pds::blob_url;
 
 /// (bricks, suppressed post uris from bskyPostRef; the blog card wins over
 /// its cross-posted skeet)
@@ -15,40 +16,11 @@ pub struct StandardSiteYield {
     pub suppressed_posts: Vec<String>,
 }
 
-/// PDS endpoint from the DID document (plc.directory for did:plc,
-/// /.well-known/did.json for did:web).
-pub async fn resolve_pds(http: &Http, plc_base: &str, did: &str) -> Result<String, HttpError> {
-    #[derive(Deserialize)]
-    struct DidDoc {
-        #[serde(default)]
-        service: Vec<Service>,
-    }
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Service {
-        id: String,
-        service_endpoint: serde_json::Value,
-    }
-
-    let url = if let Some(domain) = did.strip_prefix("did:web:") {
-        format!("https://{domain}/.well-known/did.json")
-    } else {
-        format!("{plc_base}/{did}")
-    };
-    let doc: DidDoc = http.get_json(&url, Bucket::Unmetered).await?;
-    doc.service
-        .into_iter()
-        .find(|s| s.id.ends_with("atproto_pds"))
-        .and_then(|s| s.service_endpoint.as_str().map(String::from))
-        .ok_or(HttpError::Status(404))
-}
-
 pub async fn get_documents(
     http: &Http,
-    plc_base: &str,
+    pds: &str,
     author: &Author,
 ) -> Result<StandardSiteYield, HttpError> {
-    let pds = resolve_pds(http, plc_base, &author.did).await?;
     let url = format!(
         "{pds}/xrpc/com.atproto.repo.listRecords?repo={}&collection=site.standard.document&limit=25",
         author.did
@@ -68,6 +40,12 @@ pub async fn get_documents(
 
     let mut bricks = Vec::new();
     let mut suppressed_posts = Vec::new();
+    // Every document points at a publication, and it is nearly always the SAME
+    // publication: a blogger has one blog. Fetching it per document meant 25
+    // sequential getRecord calls for one author, which is what made the repo
+    // fan-out take twenty seconds and left the first wall with no blogs on it.
+    let mut publications: std::collections::HashMap<String, Publication> =
+        std::collections::HashMap::new();
     for envelope in listing.records {
         let Some(doc) = parse_document(envelope.value) else {
             continue;
@@ -75,7 +53,14 @@ pub async fn get_documents(
         let Some(site) = doc.site.clone() else {
             continue;
         };
-        let publication = fetch_publication(http, &pds, &author.did, &site).await;
+        let publication = match publications.get(&site) {
+            Some(known) => known.clone(),
+            None => {
+                let fetched = fetch_publication(http, pds, &author.did, &site).await;
+                publications.insert(site.clone(), fetched.clone());
+                fetched
+            }
+        };
         let url = canonical_url(&doc, &publication);
         if let Some(uri) = doc.bsky_post_ref.as_ref().and_then(|r| r.uri(&author.did)) {
             suppressed_posts.push(uri);
@@ -86,12 +71,10 @@ pub async fn get_documents(
             author: author.clone(),
             title: doc.title,
             description: doc.description.filter(|d| !d.is_empty()),
-            cover_image: doc.cover_image.and_then(|blob| blob.link()).map(|cid| {
-                format!(
-                    "{pds}/xrpc/com.atproto.sync.getBlob?did={}&cid={cid}",
-                    author.did
-                )
-            }),
+            cover_image: doc
+                .cover_image
+                .and_then(|blob| blob.link())
+                .map(|cid| blob_url(pds, &author.did, &cid)),
             publication,
             tags: doc.tags,
             published_at: doc.published_at,
@@ -263,24 +246,9 @@ mod tests {
         }
     }
 
-    async fn mock_pds_resolution(server: &MockServer) {
-        Mock::given(method("GET"))
-            .and(path("/did:plc:blogger"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "service": [{
-                    "id": "#atproto_pds",
-                    "type": "AtprotoPersonalDataServer",
-                    "serviceEndpoint": server.uri()
-                }]
-            })))
-            .mount(server)
-            .await;
-    }
-
     #[tokio::test]
     async fn documents_become_blog_bricks_with_canonical_urls() {
         let server = MockServer::start().await;
-        mock_pds_resolution(&server).await;
 
         Mock::given(method("GET"))
             .and(path("/xrpc/com.atproto.repo.listRecords"))
@@ -347,7 +315,6 @@ mod tests {
     #[tokio::test]
     async fn no_collection_is_empty_not_error() {
         let server = MockServer::start().await;
-        mock_pds_resolution(&server).await;
         Mock::given(method("GET"))
             .and(path("/xrpc/com.atproto.repo.listRecords"))
             .respond_with(ResponseTemplate::new(400).set_body_json(
@@ -365,7 +332,6 @@ mod tests {
     #[tokio::test]
     async fn https_site_skips_publication_fetch() {
         let server = MockServer::start().await;
-        mock_pds_resolution(&server).await;
         Mock::given(method("GET"))
             .and(path("/xrpc/com.atproto.repo.listRecords"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({

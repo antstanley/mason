@@ -57,25 +57,24 @@ export interface BlogBrick {
   publishedAt: string;
 }
 
-interface GameInfo {
-  appid: number;
-  name: string;
-  headerImage: string | null;
-}
-
 export interface VideoBrick {
   kind: "video";
   id: string;
   url: string;
-  author: Author | null;
+  author: Author;
   title: string;
   poster: string | null;
   playlist: string;
   aspectRatio: AspectRatio | null;
-  source: "bluesky" | "steam";
-  game: GameInfo | null;
+  source: "bluesky" | "streamplace";
   createdAt: string;
   likeCount: number;
+  /** Streamplace only: this stream is happening right now. */
+  live: boolean;
+  viewerCount: number | null;
+  durationMs: number | null;
+  /** What the streamer says they are doing ("music", a game, ...). */
+  activity: string | null;
 }
 
 export type Brick = PostBrick | BlogBrick | VideoBrick;

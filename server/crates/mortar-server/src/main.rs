@@ -22,8 +22,7 @@ async fn main() {
     let config = Config {
         appview_base: env_or("APPVIEW_BASE", "https://public.api.bsky.app"),
         plc_base: env_or("PLC_BASE", "https://plc.directory"),
-        steam_store_base: env_or("STEAM_STORE_BASE", "https://store.steampowered.com"),
-        steam_enabled: true,
+        streamplace_base: env_or("STREAMPLACE_BASE", "https://stream.place"),
     };
     let state = Arc::new(AppState::new(config));
     let app = routes::router(state);

@@ -9,7 +9,10 @@ follows.
 |---|---|---|
 | 📱 posts | `app.bsky.feed.post` via the public AppView | sky |
 | 📝 blogs | [standard.site](https://standard.site) documents (Leaflet, pckt.blog, Offprint, WordPress…) | tangerine |
-| 🎬 video | Bluesky native video + Steam trailers; both HLS, always click-to-play, **never autoplay** | violet |
+| 🎬 video | Bluesky native video + [Streamplace](https://stream.place) streams, live and archived; all HLS, always click-to-play, **never autoplay** | violet |
+
+A friend who is live right now opens the wall. It is the only brick with a
+deadline, so it is the only one that jumps the queue.
 
 ## Two build modes, one Rust engine
 
@@ -24,10 +27,10 @@ server/crates/
 **local mode (default; no server at all):** mortar compiles to wasm and runs
 inside a service worker that intercepts `/api/feed`. The static site deploys
 anywhere; your browser talks directly to the public AppView, plc.directory,
-and each author's PDS (all CORS-open). Nobody's server sees whose feed you
-browse, and every user spends their own rate-limit budget.
-*Limitation:* Steam's storefront API has no CORS headers, so trailer bricks
-are absent in local mode (set a proxy via `init_config` to restore them).
+each author's PDS, and stream.place (all CORS-open). Nobody's server sees
+whose feed you browse, and every user spends their own rate-limit budget.
+The browser build reads exactly what the native one reads; there is no
+degraded mode.
 Module service workers required: Chrome 91+, Safari 15+, Firefox 147+.
 
 **server mode:** set `PUBLIC_MASON_SERVER_URL` in `web/.env` and the same SPA

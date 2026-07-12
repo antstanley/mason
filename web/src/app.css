@@ -26,6 +26,14 @@
   --color-brick-video-ink: oklch(0.45 0.2 295);
   --color-brick-video-bright: oklch(0.74 0.17 295);
 
+  /* the only brick with a deadline. Not an urgency mechanic: a livestream
+     really is happening while you look at it, and it really will be gone
+     tomorrow. The one hot signal on an otherwise unhurried wall.
+     Deep enough to carry white badge text (5.4:1) and to read as ink on
+     chalk (5.2:1); the obvious brighter red failed both. */
+  --color-live: oklch(0.55 0.22 25);
+  --color-live-bright: oklch(0.75 0.16 25); /* ink on kiln in dark mode */
+
   /* pops */
   --color-pop-pink: oklch(0.68 0.24 350);
   /* CTA fill: white text needs a deeper pink than the display accent */

@@ -8,13 +8,11 @@ use crate::http::{Bucket, Http, HttpError};
 use crate::model::{
     AspectRatio, Author, Brick, ExternalEmbed, ImageEmbed, PostBrick, VideoBrick, VideoSource,
 };
-use crate::sources::steam;
 
-/// One author's posts plus the Steam games they were talking about.
+/// One author's recent posts, videos among them.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AuthorYield {
     pub bricks: Vec<Brick>,
-    pub steam_appids: Vec<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -46,8 +44,22 @@ pub async fn resolve_handle(http: &Http, base: &str, handle: &str) -> Result<Str
     Ok(http.get_json::<Resolved>(&url, Bucket::Appview).await?.did)
 }
 
-/// Full follow list, paginated 100 at a time (AppView max).
-pub async fn get_follows(http: &Http, base: &str, did: &str) -> Result<Vec<Follow>, HttpError> {
+/// Follow-graph pages (100 at a time, the AppView maximum), threaded through
+/// the cursor.
+///
+/// Each page is a round trip that cannot start until the previous one lands,
+/// so `max_pages` is the caller's patience: someone with 2000 follows costs
+/// twenty sequential requests, and a wall that waits for all of them has not
+/// begun to fetch a single post ten seconds in. The returned cursor is `Some`
+/// when there is more graph behind it, so a caller can take a head start now
+/// and finish the job later.
+pub async fn get_follows(
+    http: &Http,
+    base: &str,
+    did: &str,
+    from: Option<String>,
+    max_pages: usize,
+) -> Result<(Vec<Follow>, Option<String>), HttpError> {
     #[derive(Deserialize)]
     struct FollowsPage {
         follows: Vec<Follow>,
@@ -55,8 +67,8 @@ pub async fn get_follows(http: &Http, base: &str, did: &str) -> Result<Vec<Follo
     }
 
     let mut follows = Vec::new();
-    let mut cursor: Option<String> = None;
-    loop {
+    let mut cursor = from;
+    for _ in 0..max_pages {
         let mut url = format!("{base}/xrpc/app.bsky.graph.getFollows?actor={did}&limit=100");
         if let Some(c) = &cursor {
             url.push_str(&format!("&cursor={c}"));
@@ -64,72 +76,28 @@ pub async fn get_follows(http: &Http, base: &str, did: &str) -> Result<Vec<Follo
         let page: FollowsPage = http.get_json(&url, Bucket::Appview).await?;
         follows.extend(page.follows);
         cursor = page.cursor;
-        // hard stop at 2000 follows; the cohort sampler doesn't need more
-        if cursor.is_none() || follows.len() >= 2000 {
-            return Ok(follows);
+        if cursor.is_none() {
+            break;
         }
     }
+    Ok((follows, cursor))
 }
 
-/// One author's recent posts as bricks. Replies excluded upstream; reposts
-/// (reason != null) dropped here so nothing is double-counted. Steam store
-/// links are mined from post text, richtext facets, and link cards.
+/// One author's recent posts as bricks. Replies are excluded upstream; reposts
+/// (reason != null) are dropped here so nothing is double-counted.
 pub async fn get_author_feed(http: &Http, base: &str, did: &str) -> Result<AuthorYield, HttpError> {
     let url = format!(
         "{base}/xrpc/app.bsky.feed.getAuthorFeed?actor={did}&limit=30&filter=posts_no_replies"
     );
     let page: AuthorFeed = http.get_json(&url, Bucket::Appview).await?;
 
-    let mut steam_appids = Vec::new();
     let bricks = page
         .feed
         .into_iter()
         .filter(|item| item.reason.is_none())
-        .filter_map(|item| {
-            let facet_uris = facet_link_uris(&item.post.record.facets);
-            let brick = post_to_brick(item.post)?;
-            let mut fragments: Vec<&str> = facet_uris.iter().map(String::as_str).collect();
-            if let Brick::Post(p) = &brick {
-                fragments.push(&p.text);
-                if let Some(external) = &p.external {
-                    fragments.push(&external.uri);
-                }
-            }
-            for appid in steam::extract_appids(fragments) {
-                if !steam_appids.contains(&appid) {
-                    steam_appids.push(appid);
-                }
-            }
-            Some(brick)
-        })
+        .filter_map(|item| post_to_brick(item.post))
         .collect();
-    Ok(AuthorYield {
-        bricks,
-        steam_appids,
-    })
-}
-
-/// URIs from `app.bsky.richtext.facet#link` features; link text in posts is
-/// often display-truncated, only the facet holds the real URL.
-fn facet_link_uris(facets: &[serde_json::Value]) -> Vec<String> {
-    facets
-        .iter()
-        .flat_map(|f| {
-            f.get("features")
-                .and_then(|x| x.as_array())
-                .into_iter()
-                .flatten()
-        })
-        .filter(|feature| {
-            feature.get("$type").and_then(|t| t.as_str()) == Some("app.bsky.richtext.facet#link")
-        })
-        .filter_map(|feature| {
-            feature
-                .get("uri")
-                .and_then(|u| u.as_str())
-                .map(String::from)
-        })
-        .collect()
+    Ok(AuthorYield { bricks })
 }
 
 #[derive(Deserialize)]
@@ -171,8 +139,6 @@ struct PostRecord {
     #[serde(default)]
     text: String,
     created_at: String,
-    #[serde(default)]
-    facets: Vec<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -259,15 +225,18 @@ fn post_to_brick(post: PostView) -> Option<Brick> {
         Some(EmbedView::Video(video)) => Some(Brick::Video(VideoBrick {
             id: post.uri.clone(),
             url,
-            author: Some(author),
+            author,
             title: post.record.text,
             poster: video.thumbnail,
             playlist: video.playlist,
             aspect_ratio: video.aspect_ratio.map(Into::into),
             source: VideoSource::Bluesky,
-            game: None,
             created_at: post.record.created_at,
             like_count: post.like_count,
+            live: false,
+            viewer_count: None,
+            duration_ms: None,
+            activity: None,
         })),
         embed => {
             let (images, external) = match embed {
@@ -297,7 +266,6 @@ fn post_to_brick(post: PostView) -> Option<Brick> {
             if post.record.text.is_empty() && images.is_empty() && external.is_none() {
                 return None;
             }
-            let _ = &post.record.facets; // facets consumed by the Steam source in M5
             Some(Brick::Post(PostBrick {
                 id: post.uri,
                 url,
@@ -395,11 +363,44 @@ mod tests {
             .mount(&server)
             .await;
 
-        let follows = get_follows(&Http::new(), &server.uri(), "did:plc:aa")
+        let (follows, cursor) = get_follows(&Http::new(), &server.uri(), "did:plc:aa", None, 10)
             .await
             .unwrap();
         assert_eq!(follows.len(), 2);
         assert_eq!(follows[1].did, "did:plc:cc");
+        assert!(
+            cursor.is_none(),
+            "the graph ended, so there is nothing to chase"
+        );
+    }
+
+    /// A big follow graph costs one blocking round trip per 100 follows, so a
+    /// caller must be able to take a head start and come back for the rest.
+    #[tokio::test]
+    async fn a_bounded_fetch_stops_early_and_hands_back_the_cursor() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.graph.getFollows"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "follows": [{"did": "did:plc:bb", "handle": "b.test"}],
+                "cursor": "more"
+            })))
+            .mount(&server)
+            .await;
+
+        let (follows, cursor) = get_follows(&Http::new(), &server.uri(), "did:plc:aa", None, 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            follows.len(),
+            2,
+            "exactly max_pages pages, not the whole graph"
+        );
+        assert_eq!(
+            cursor.as_deref(),
+            Some("more"),
+            "the rest of the graph must be reachable later"
+        );
     }
 
     #[tokio::test]
