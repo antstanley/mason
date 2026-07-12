@@ -5,7 +5,20 @@ name: deploy
 # unchanged code.
 on:
   workflow_call:
+    inputs:
+      refresh:
+        type: boolean
+        default: false
   workflow_dispatch:
+    inputs:
+      refresh:
+        description: >-
+          Re-upload every file, even unchanged ones. S3 writes object metadata
+          only on a PUT, so content-type and tag fixes never reach objects the
+          ETag check would skip. Needed once after a blogwright upgrade that
+          changes metadata; invalidates the whole CDN, so leave it off otherwise.
+        type: boolean
+        default: false
 
 permissions:
   id-token: write # GitHub OIDC → blogwright deploy role, no stored keys
@@ -34,15 +47,13 @@ jobs:
           tool: wasm-pack
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
-        with:
-          version: 11
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      # heavy toolchain work happens here, not in the builder MicroVM —
+      # heavy toolchain work happens here, not in the builder MicroVM -
       # the pkg rides into the deploy zip via config sourceInclude
       - name: Build wasm feed engine
         run: |
@@ -60,8 +71,9 @@ jobs:
       - name: Deploy to production
         env:
           PRODUCTION_DOMAIN: ${{ secrets.PRODUCTION_DOMAIN }}
+          REFRESH: ${{ inputs.refresh && '--refresh' || '' }}
         # --domain only when the secret is set; otherwise the CloudFront
         # default domain serves the site
         run: |
           cd web
-          pnpm exec blogwright deploy production ${PRODUCTION_DOMAIN:+--domain "$PRODUCTION_DOMAIN"}
+          pnpm exec blogwright deploy production ${PRODUCTION_DOMAIN:+--domain "$PRODUCTION_DOMAIN"} $REFRESH
