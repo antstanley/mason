@@ -1,18 +1,18 @@
 # Changesets
 
-mason ships as one thing, so it carries one version: the root `package.json` is
-the source of truth, and `pnpm version` propagates it to `web/package.json`, the
-Rust workspace and its lockfile. Nothing is published to npm; a release is a tag
-and a GitHub release.
-
-Add a changeset with any user-visible change:
+Add one with any user-visible change:
 
 ```sh
-pnpm changeset          # describe the change, pick major/minor/patch
+pnpm changeset      # describe the change, pick major/minor/patch
 ```
 
-Commit the generated file. On merge to `main`, CI keeps a "chore: version mason"
-PR open collecting the pending changesets. Merging that PR bumps the version,
-writes CHANGELOG.md, tags, and cuts the release.
+Commit the generated file. On merge to `main`, CI collects the pending changesets
+into a "chore: version mason" PR; merging that bumps the version everywhere
+(root, `web/`, the Rust workspace and its lockfile), writes `CHANGELOG.md`, tags,
+and cuts the GitHub release.
 
-Infrastructure-only changes (CI, deploy config) usually need no changeset.
+**Releasing is not deploying**: the live site only changes when the deploy
+workflow is dispatched.
+
+Infrastructure-only changes usually need no changeset. Full flow, and what
+major/minor/patch mean for mason: see the Releases section of the root README.
