@@ -43,6 +43,14 @@ jobs:
           publish: pnpm run release
           commit: "chore: version mason"
           title: "chore: version mason"
+          # `scripts/release.mjs` already tags the version and cuts the release
+          # from the changelog. Left on, this action cuts a SECOND one for the
+          # same tag and GitHub rejects it ("tag_name was used by an immutable
+          # release"), which fails the job AFTER the release is live: the tag
+          # ships, `published` never gets set, and the deploy that depends on it
+          # is silently skipped. A release that does not deploy is the one
+          # outcome this pipeline exists to prevent (see #7).
+          createGithubReleases: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
