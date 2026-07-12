@@ -5,10 +5,10 @@
 pub struct Config {
     pub appview_base: String,
     pub plc_base: String,
-    pub steam_store_base: String,
-    /// Steam's storefront API has no CORS headers, so the browser build
-    /// disables it (or routes it through a proxy via `steam_store_base`).
-    pub steam_enabled: bool,
+    /// Streamplace: the live list, archived streams, and HLS playback for
+    /// both. It serves permissive CORS, so the browser build talks to it
+    /// directly, exactly as the server build does.
+    pub streamplace_base: String,
 }
 
 impl Default for Config {
@@ -16,8 +16,7 @@ impl Default for Config {
         Self {
             appview_base: "https://public.api.bsky.app".into(),
             plc_base: "https://plc.directory".into(),
-            steam_store_base: "https://store.steampowered.com".into(),
-            steam_enabled: true,
+            streamplace_base: "https://stream.place".into(),
         }
     }
 }

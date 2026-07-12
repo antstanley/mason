@@ -33,7 +33,7 @@ pub async fn handle_feed(
     };
 
     let snap = snapshot::get_or_build(state, &did, seed).await?;
-    let (items, has_more) = snapshot::get_page(&snap, offset, PAGE_SIZE).await;
+    let (items, has_more) = snapshot::get_page(state, &snap, offset, PAGE_SIZE).await;
     let next = has_more.then(|| {
         cursor::encode(&Cursor {
             snapshot: snap.id.clone(),

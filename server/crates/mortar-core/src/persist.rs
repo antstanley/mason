@@ -18,10 +18,12 @@ use crate::sources::bluesky::{AuthorYield, Follow};
 
 /// Bump when any persisted shape changes; imports of older bundles are
 /// discarded wholesale (they're just caches).
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 type Entries<K, V> = Vec<(K, V, u64)>;
 
+/// The live list is deliberately absent: it is 60 seconds from being a lie,
+/// and it costs one call to rebuild.
 #[derive(Serialize, Deserialize)]
 pub struct PersistedCaches {
     pub version: u32,
@@ -29,8 +31,8 @@ pub struct PersistedCaches {
     pub follows: Entries<String, Vec<Follow>>,
     pub author_feed: Entries<String, AuthorYield>,
     pub std_docs: Entries<String, StdDocs>,
-    pub steam_trailers: Entries<u64, Vec<Brick>>,
-    pub steam_featured: Entries<u8, Vec<u64>>,
+    pub pds: Entries<String, String>,
+    pub streams: Entries<String, Vec<Brick>>,
     pub activity: Entries<String, Vec<String>>,
 }
 
@@ -41,14 +43,8 @@ pub async fn export(caches: &Caches) -> PersistedCaches {
         follows: caches.follows.export_map(|v| v.as_ref().clone()).await,
         author_feed: caches.author_feed.export_map(|v| v.as_ref().clone()).await,
         std_docs: caches.std_docs.export_map(|v| v.as_ref().clone()).await,
-        steam_trailers: caches
-            .steam_trailers
-            .export_map(|v| v.as_ref().clone())
-            .await,
-        steam_featured: caches
-            .steam_featured
-            .export_map(|v| v.as_ref().clone())
-            .await,
+        pds: caches.pds.export_map(Clone::clone).await,
+        streams: caches.streams.export_map(|v| v.as_ref().clone()).await,
         activity: caches.activity.export_map(|v| v.as_ref().clone()).await,
     }
 }
@@ -68,14 +64,8 @@ pub async fn import(caches: &Caches, persisted: PersistedCaches) {
         .std_docs
         .import_map(persisted.std_docs, Arc::new)
         .await;
-    caches
-        .steam_trailers
-        .import_map(persisted.steam_trailers, Arc::new)
-        .await;
-    caches
-        .steam_featured
-        .import_map(persisted.steam_featured, Arc::new)
-        .await;
+    caches.pds.import_map(persisted.pds, |v| v).await;
+    caches.streams.import_map(persisted.streams, Arc::new).await;
     caches
         .activity
         .import_map(persisted.activity, Arc::new)

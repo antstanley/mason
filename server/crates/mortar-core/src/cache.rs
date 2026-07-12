@@ -13,9 +13,10 @@ use crate::algo::snapshot::Snapshot;
 use crate::model::Brick;
 use crate::platform::Instant;
 use crate::sources::bluesky::{AuthorYield, Follow};
+use crate::sources::streamplace::LiveStream;
 
 /// One author's standard.site yield.
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
 pub struct StdDocs {
     pub bricks: Vec<Brick>,
     /// post URIs suppressed via bskyPostRef; the blog card wins
@@ -141,6 +142,12 @@ const HOUR: Duration = Duration::from_secs(3600);
 pub const STD_DOCS_POSITIVE_TTL: Duration = Duration::from_secs(900);
 pub const STD_DOCS_NEGATIVE_TTL: Duration = Duration::from_secs(24 * 3600);
 
+pub const STREAMS_POSITIVE_TTL: Duration = Duration::from_secs(1800);
+pub const STREAMS_NEGATIVE_TTL: Duration = Duration::from_secs(24 * 3600);
+/// Long enough to serve a whole snapshot's fan-out from one call, short enough
+/// that "live" stays true.
+pub const LIVE_TTL: Duration = Duration::from_secs(60);
+
 /// All in-memory state. TTLs per the plan; capacities keep a small
 /// deployment bounded.
 pub struct Caches {
@@ -148,15 +155,22 @@ pub struct Caches {
     pub did: TtlCache<String, String>,
     /// did → follows (1h)
     pub follows: TtlCache<String, Arc<Vec<Follow>>>,
-    /// author did → their recent bricks + mentioned Steam games (5min)
+    /// author did → their recent bricks (5min)
     pub author_feed: TtlCache<String, Arc<AuthorYield>>,
     /// author did → standard.site docs; publishers 15min, negatives 24h
     /// (callers pick the TTL via insert_with_ttl)
     pub std_docs: TtlCache<String, Arc<StdDocs>>,
-    /// appid → trailer bricks (24h)
-    pub steam_trailers: TtlCache<u64, Arc<Vec<Brick>>>,
-    /// featured appids, single key (6h)
-    pub steam_featured: TtlCache<u8, Arc<Vec<u64>>>,
+    /// author did → their PDS endpoint (24h). Identity moves rarely, and
+    /// every repo we read (blogs, streams, blobs) needs the answer.
+    pub pds: TtlCache<String, String>,
+    /// author did → their archived Streamplace videos; streamers 30min,
+    /// negatives 24h (most people have never streamed)
+    pub streams: TtlCache<String, Arc<Vec<Brick>>>,
+    /// the whole live network, single key (60s). It is the one thing on the
+    /// wall with a deadline, so it is the one thing barely cached. Streams,
+    /// not bricks: what is cached here is true for every viewer, and the
+    /// per-viewer filter happens downstream.
+    pub live: TtlCache<u8, Arc<Vec<LiveStream>>>,
     /// snapshot id → live snapshot (30min)
     pub snapshots: TtlCache<String, Arc<Snapshot>>,
     /// viewer did → authors that yielded content recently (24h)
@@ -176,8 +190,9 @@ impl Caches {
             follows: TtlCache::new(HOUR, 1_000),
             author_feed: TtlCache::new(Duration::from_secs(300), 20_000),
             std_docs: TtlCache::new(STD_DOCS_NEGATIVE_TTL, 20_000),
-            steam_trailers: TtlCache::new(24 * HOUR, 5_000),
-            steam_featured: TtlCache::new(6 * HOUR, 1),
+            pds: TtlCache::new(24 * HOUR, 20_000),
+            streams: TtlCache::new(STREAMS_NEGATIVE_TTL, 20_000),
+            live: TtlCache::new(LIVE_TTL, 1),
             snapshots: TtlCache::new(Duration::from_secs(1800), 500),
             activity: TtlCache::new(24 * HOUR, 1_000),
         }

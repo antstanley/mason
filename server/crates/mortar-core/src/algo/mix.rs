@@ -13,20 +13,23 @@ use super::score;
 use crate::model::{Brick, VideoSource};
 
 /// Target share of the wall per mix kind: post / blog / Bluesky video /
-/// Steam trailer. Trailers are their own kind; they have no engagement
-/// signal, so ranking them against liked Bluesky videos would bury them at
-/// the bottom of every wall.
-const TARGET: [f64; 4] = [0.70, 0.15, 0.10, 0.05];
-const KINDS: usize = 4;
+/// archived stream / live stream. Each kind competes only with itself; an
+/// archived stream has no engagement signal, so ranking it against a liked
+/// Bluesky video would bury it at the bottom of every wall.
+const TARGET: [f64; KINDS] = [0.68, 0.15, 0.09, 0.05, 0.03];
+pub const KINDS: usize = 5;
+/// The kind that is happening right now.
+const LIVE: usize = 4;
 /// A brick's author may not reappear within this many trailing bricks
 /// (soft; ignored when every candidate is inside the window).
 const AUTHOR_WINDOW: usize = 8;
 
-fn kind_index(brick: &Brick) -> usize {
+pub fn kind_index(brick: &Brick) -> usize {
     match brick {
         Brick::Post(_) => 0,
         Brick::Blog(_) => 1,
         Brick::Video(v) if v.source == VideoSource::Bluesky => 2,
+        Brick::Video(v) if v.live => LIVE,
         Brick::Video(_) => 3,
     }
 }
@@ -95,6 +98,17 @@ pub fn lay_next(
             })
             .map(|(i, _)| i)
     };
+
+    // A live stream is the only brick on the wall with a deadline: it is
+    // happening while you look at it, and tomorrow it is gone. The first one
+    // the pool can offer skips the kind lottery and opens the wall; the need
+    // factor spaces out any others (rare: it means two people you follow are
+    // streaming at once).
+    if counts[LIVE] == 0
+        && let Some(index) = leader(LIVE, false)
+    {
+        return Some(pool.remove(index));
+    }
 
     let pick = |respect_window: bool| -> Option<usize> {
         (0..KINDS)
@@ -206,20 +220,33 @@ mod tests {
     }
 
     fn video(i: usize, author_n: usize, source: VideoSource) -> Brick {
-        let steam = source == VideoSource::Steam;
         Brick::Video(VideoBrick {
             id: format!("video-{i}"),
             url: String::new(),
-            author: (!steam).then(|| author(author_n)),
+            author: author(author_n),
             title: "t".into(),
             poster: None,
             playlist: String::new(),
             aspect_ratio: None,
             source,
-            game: None,
             created_at: ts(i),
             like_count: 0,
+            live: false,
+            viewer_count: None,
+            duration_ms: None,
+            activity: None,
         })
+    }
+
+    fn live(i: usize, author_n: usize, viewers: u64) -> Brick {
+        match video(i, author_n, VideoSource::Streamplace) {
+            Brick::Video(mut v) => {
+                v.live = true;
+                v.viewer_count = Some(viewers);
+                Brick::Video(v)
+            }
+            other => other,
+        }
     }
 
     /// 300 candidates over 30 authors, roughly matching the target mix
@@ -230,7 +257,7 @@ mod tests {
             pool.push(match i % 20 {
                 3 | 10 | 17 => blog(i, a),
                 6 | 13 => video(i, a, VideoSource::Bluesky),
-                19 => video(i, a, VideoSource::Steam),
+                19 => video(i, a, VideoSource::Streamplace),
                 _ => post(i, a),
             });
         }
@@ -273,6 +300,27 @@ mod tests {
         assert_eq!(ids(&w1), ids(&w2));
     }
 
+    /// The live queue-jump is a new early return inside lay_next, so it has to
+    /// obey the rule the whole cursor rests on: laying 24 then 24 must equal
+    /// laying 48. It reads only (pool, wall), so it does; this is the test that
+    /// notices if it ever starts reading a clock or a counter instead.
+    #[test]
+    fn pagination_is_stable_with_a_live_brick() {
+        let mut p1 = big_pool();
+        p1.push(live(900, 7, 42));
+        let mut w1 = Vec::new();
+        lay(&mut p1, &mut w1, 24, 7, now());
+        lay(&mut p1, &mut w1, 24, 7, now());
+
+        let mut p2 = big_pool();
+        p2.push(live(900, 7, 42));
+        let mut w2 = Vec::new();
+        lay(&mut p2, &mut w2, 48, 7, now());
+
+        let ids = |w: &[Brick]| w.iter().map(|b| b.id().to_string()).collect::<Vec<_>>();
+        assert_eq!(ids(&w1), ids(&w2));
+    }
+
     #[test]
     fn author_never_repeats_within_window_when_alternatives_exist() {
         let mut pool = big_pool(); // 30 authors ≫ window of 8
@@ -294,10 +342,61 @@ mod tests {
             counts[kind_index(b)] += 1;
         }
         let share = |k: usize| counts[k] as f64 / wall.len() as f64;
-        assert!((share(0) - 0.70).abs() < 0.10, "posts {}", share(0));
-        assert!((share(1) - 0.15).abs() < 0.08, "blogs {}", share(1));
-        assert!((share(2) - 0.10).abs() < 0.06, "bsky videos {}", share(2));
-        assert!((share(3) - 0.05).abs() < 0.04, "trailers {}", share(3));
+        assert!((share(0) - TARGET[0]).abs() < 0.10, "posts {}", share(0));
+        assert!((share(1) - TARGET[1]).abs() < 0.08, "blogs {}", share(1));
+        assert!(
+            (share(2) - TARGET[2]).abs() < 0.06,
+            "bsky videos {}",
+            share(2)
+        );
+        assert!((share(3) - TARGET[3]).abs() < 0.04, "streams {}", share(3));
+    }
+
+    /// The whole point of pinning live high: a stream that is happening right
+    /// now is worthless three screens down, and the mixer's need factor alone
+    /// would bury it there (posts open every wall at 14x the need of anything
+    /// else).
+    #[test]
+    fn a_live_stream_opens_the_wall() {
+        for seed in 0..20 {
+            let mut pool = big_pool();
+            pool.push(live(900, 7, 42));
+            let mut wall = Vec::new();
+            lay(&mut pool, &mut wall, 24, seed, now());
+            assert_eq!(
+                wall[0].id(),
+                "video-900",
+                "seed {seed} buried the live stream"
+            );
+        }
+    }
+
+    /// It jumps the queue exactly once. A live brick that keeps winning would
+    /// be a wall of one stream.
+    #[test]
+    fn live_does_not_take_over_the_wall() {
+        let mut pool = big_pool();
+        pool.push(live(900, 7, 42));
+        pool.push(live(901, 8, 9));
+        let mut wall = Vec::new();
+        lay(&mut pool, &mut wall, 48, 3, now());
+
+        let live_laid = wall.iter().filter(|b| kind_index(b) == LIVE).count();
+        assert_eq!(wall[0].id(), "video-900", "the busiest live stream leads");
+        assert!(
+            (1..=3).contains(&live_laid),
+            "{live_laid} live bricks in 48 is not a wall, it is a channel"
+        );
+    }
+
+    /// A live stream has no date worth trusting (its record may be months
+    /// old), so it must not be ranked by one. Viewers are its recency.
+    #[test]
+    fn among_live_streams_the_busiest_leads() {
+        let mut pool = vec![live(1, 1, 3), live(2, 2, 500), live(3, 3, 40)];
+        let mut wall = Vec::new();
+        lay(&mut pool, &mut wall, 1, 11, now());
+        assert_eq!(wall[0].id(), "video-2");
     }
 
     #[test]
@@ -309,9 +408,9 @@ mod tests {
         assert_eq!(wall.len(), 50);
     }
     #[test]
-    fn trailers_pooled_late_still_get_laid() {
-        // wall already has 100 bricks laid with no trailers available,
-        // then 3 trailers join the pool; they must appear in the next 48
+    fn streams_pooled_late_still_get_laid() {
+        // wall already has 100 bricks laid with no streams available, then 3
+        // join the pool (a slow PDS answered); they must appear in the next 48
         let mut pool: Vec<Brick> = Vec::new();
         for i in 0..200 {
             let a = i % 30;
@@ -326,11 +425,11 @@ mod tests {
         assert!(wall.iter().all(|b| kind_index(b) != 3));
 
         for i in 900..903 {
-            pool.push(video(i, 0, VideoSource::Steam));
+            pool.push(video(i, i % 30, VideoSource::Streamplace));
         }
         lay(&mut pool, &mut wall, 48, 11, now());
-        let trailers = wall.iter().filter(|b| kind_index(b) == 3).count();
-        assert!(trailers >= 2, "only {trailers} trailers laid in 48 bricks");
+        let streams = wall.iter().filter(|b| kind_index(b) == 3).count();
+        assert!(streams >= 2, "only {streams} streams laid in 48 bricks");
     }
 
     /// Half of the fix for the wall whose first page belonged to one person.

@@ -30,8 +30,8 @@ pub enum HttpError {
 pub enum Bucket {
     /// Rate-limited against the shared AppView budget
     Appview,
-    /// Other hosts (individual PDSes, plc.directory, Steam); the per-source
-    /// callers bound their own concurrency instead
+    /// Other hosts (individual PDSes, plc.directory, stream.place); the
+    /// per-source callers bound their own concurrency instead
     Unmetered,
 }
 
@@ -60,9 +60,17 @@ impl Http {
     pub fn new() -> Self {
         Self {
             client: make_client(),
+            // 10/s sustained is Bluesky's public ceiling (3000 per 5 minutes)
+            // and stays. The BURST is what governs how fast a cold wall fills:
+            // a snapshot asks for one author feed per cohort member, and at a
+            // burst of 40 the other sixty queued behind the drip, so the pool
+            // grew at ten bricks a second and a reader could out-scroll their
+            // own wall. A burst of 100 lets the cohort go out at once; a whole
+            // session is ~150 requests, nowhere near the ceiling, and the
+            // browser's own six-per-host connection limit is the real throttle.
             appview_bucket: RateLimiter::direct(
                 Quota::per_second(NonZeroU32::new(10).expect("nonzero"))
-                    .allow_burst(NonZeroU32::new(40).expect("nonzero")),
+                    .allow_burst(NonZeroU32::new(100).expect("nonzero")),
             ),
         }
     }

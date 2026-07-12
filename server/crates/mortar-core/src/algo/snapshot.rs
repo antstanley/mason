@@ -21,12 +21,15 @@ use tokio::sync::{Mutex, Notify};
 use xxhash_rust::xxh3::xxh3_64_with_seed;
 
 use super::{mix, score};
-use crate::cache::{STD_DOCS_NEGATIVE_TTL, STD_DOCS_POSITIVE_TTL, StdDocs};
+use crate::cache::{
+    STD_DOCS_NEGATIVE_TTL, STD_DOCS_POSITIVE_TTL, STREAMS_NEGATIVE_TTL, STREAMS_POSITIVE_TTL,
+    StdDocs,
+};
 use crate::error::AppError;
 use crate::model::{Author, Brick};
 use crate::platform::{self, Instant, SystemTime};
 use crate::sources::bluesky::AuthorYield;
-use crate::sources::{bluesky, standardsite, steam};
+use crate::sources::{bluesky, pds, standardsite, streamplace};
 use crate::state::AppState;
 
 /// Sampled authors per snapshot; never fan out to the whole follow graph.
@@ -38,33 +41,40 @@ const KNOWN_ACTIVE: usize = 60;
 /// could own the whole first screen: 30 of its posts cleared a brick-count
 /// gate long before anyone else's feed arrived.
 const FIRST_PAINT_AUTHORS: usize = 12;
-/// No author may hold more than this many bricks in the pool. The mixer's
-/// diversity window can only space authors out if the pool HAS other authors.
+/// No author may hold more than this many bricks of ONE KIND in the pool. The
+/// mixer's diversity window can only space authors out if the pool has other
+/// authors in it.
+///
+/// Per kind, not per author, and the distinction is load-bearing: posts arrive
+/// from a fast endpoint and blogs and streams from slow ones, so a flat
+/// per-author cap is spent entirely on skeets before a prolific author's blog
+/// has even been fetched, and their blog is then turned away at the door. The
+/// flooding this guards against is a chatty account drowning the pool in
+/// posts, and that is still exactly what it stops.
 const MAX_BRICKS_PER_AUTHOR: usize = 4;
 /// …or this much time has passed, whichever comes first.
 const FIRST_PAINT_DEADLINE: Duration = Duration::from_secs(3);
-/// Per-slot caps on bricks held per snapshot: posts / blogs / Bluesky videos
-/// / Steam trailers. Posts arrive by the thousand and must not crowd out the
-/// rarer kinds, and trailers hydrate last so they get a reserved slot that
-/// Bluesky videos can't fill first.
-const KIND_CAPS: [usize; 4] = [500, 60, 30, 13];
-/// Author-feed fan-out concurrency (the rate limiter is the real governor).
+/// Per-slot caps on bricks held per snapshot, by mix kind (see `mix::KINDS`).
+/// Posts arrive by the thousand and must not crowd out the rarer kinds.
+const KIND_CAPS: [usize; mix::KINDS] = [500, 60, 30, 20, 5];
+/// Author-feed fan-out concurrency (the AppView rate limiter, 10/s, is the
+/// real governor here).
 const FAN_OUT: usize = 16;
-/// New Steam games hydrated per snapshot; the storefront API throttles hard.
-const STEAM_MENTIONS_PER_SNAPSHOT: usize = 10;
-/// Featured trailers mixed in as exploration filler.
-const STEAM_FEATURED_PER_SNAPSHOT: usize = 3;
-/// Storefront concurrency.
-const STEAM_FAN_OUT: usize = 2;
-
-fn kind_slot(brick: &Brick) -> usize {
-    match brick {
-        Brick::Post(_) => 0,
-        Brick::Blog(_) => 1,
-        Brick::Video(v) if v.source == crate::model::VideoSource::Bluesky => 2,
-        Brick::Video(_) => 3,
-    }
-}
+/// Repo-read fan-out. Higher, because these go to a hundred different PDSes
+/// rather than to one rate-limited AppView, and the slowest of them must not
+/// hold up the rest.
+const REPO_FAN_OUT: usize = 32;
+/// Pages of the follow graph (100 each) the first wall will wait for. Three is
+/// three round trips, and 300 follows to sample a 100-author cohort from.
+const FOLLOW_PAGES_EAGER: usize = 3;
+/// The cap on the whole graph, chased in the background. The cohort sampler
+/// has never needed more than this.
+const FOLLOW_PAGES_MAX: usize = 20;
+/// The fans that supply the rare kinds: repo reads, and the live list.
+const SLOW_FANS: usize = 2;
+/// How long the FIRST page will wait for those two before laying anyway. A
+/// wall of nothing but posts is not mason; a wall that never arrives is worse.
+const MIX_DEADLINE: Duration = Duration::from_secs(6);
 
 pub struct Snapshot {
     pub id: String,
@@ -82,9 +92,10 @@ impl Snapshot {
                 pool: Vec::new(),
                 wall: Vec::new(),
                 seen: HashSet::new(),
-                kind_counts: [0; 4],
+                kind_counts: [0; mix::KINDS],
                 author_counts: HashMap::new(),
                 warming: true,
+                slow_fans: SLOW_FANS,
             }),
             progress: Notify::new(),
         }
@@ -96,10 +107,17 @@ struct Inner {
     wall: Vec<Brick>,
     seen: HashSet<String>,
     /// pool+wall population per kind, checked against KIND_CAPS
-    kind_counts: [usize; 4],
-    /// bricks admitted per author, checked against MAX_BRICKS_PER_AUTHOR
-    author_counts: HashMap<String, usize>,
+    kind_counts: [usize; mix::KINDS],
+    /// bricks admitted per (author, kind), checked against
+    /// MAX_BRICKS_PER_AUTHOR
+    author_counts: HashMap<(String, usize), usize>,
     warming: bool,
+    /// Fans that supply the rare kinds and have not finished: the repo reads
+    /// (every blog, every archived stream) and the live list. Posts arrive
+    /// from one fast endpoint and always win the race, so a wall laid the
+    /// instant it *could* be laid is a wall of nothing but posts. The first
+    /// page waits, briefly, for these.
+    slow_fans: usize,
 }
 
 impl Inner {
@@ -109,12 +127,12 @@ impl Inner {
         if !score::is_fresh(brick, now) {
             return;
         }
-        let slot = kind_slot(brick);
+        let slot = mix::kind_index(brick);
         if self.kind_counts[slot] >= KIND_CAPS[slot] {
             return;
         }
         let author = score::author_key(brick).to_string();
-        let held = self.author_counts.entry(author).or_insert(0);
+        let held = self.author_counts.entry((author, slot)).or_insert(0);
         if *held >= MAX_BRICKS_PER_AUTHOR {
             return;
         }
@@ -127,7 +145,12 @@ impl Inner {
 
     /// Distinct authors currently represented in the pool and on the wall.
     fn distinct_authors(&self) -> usize {
-        self.author_counts.values().filter(|n| **n > 0).count()
+        self.author_counts
+            .iter()
+            .filter(|(_, held)| **held > 0)
+            .map(|((did, _), _)| did.as_str())
+            .collect::<HashSet<_>>()
+            .len()
     }
 }
 
@@ -186,10 +209,10 @@ pub async fn get_or_build(
     Ok(snapshot)
 }
 
-/// The background fill: follows → cohort fan-out (+ concurrent featured
-/// trailers) → mentioned-game trailers → warming off. Any follow-graph
-/// failure leaves an empty (but terminated) snapshot rather than an error -
-/// actor existence was already checked by resolve.
+/// The background fill: follows → cohort fan-out, with the live list running
+/// concurrently → warming off. Any follow-graph failure leaves an empty (but
+/// terminated) snapshot rather than an error; actor existence was already
+/// checked by resolve.
 async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, seed: u64) {
     let started = Instant::now();
 
@@ -212,55 +235,95 @@ async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, see
         cohort.len()
     );
 
-    // featured trailers don't depend on the cohort; hydrate them
-    // concurrently with the author fan-out so they make the first pages
-    let featured_fill = async {
-        if !state.config.steam_enabled {
-            return;
+    // Who is live is one call for the whole network, and it does not depend on
+    // the cohort: a friend streaming right now belongs on the wall whether or
+    // not this snapshot's random sample happened to pick them. It runs
+    // alongside the fan-out so it lands in time for the first paint.
+    let live_fill = async {
+        let bricks = live_bricks(&state, &follows).await;
+        if !bricks.is_empty() {
+            tracing::debug!("{} of the follow graph is live", bricks.len());
+            let now = Utc::now();
+            let mut inner = snapshot.inner.lock().await;
+            for brick in bricks.iter() {
+                inner.admit(brick, now);
+            }
         }
-        let featured = featured_sample(&state, seed).await;
-        let bricks = hydrate_trailers(&state, featured).await;
-        tracing::debug!("steam featured yielded {} trailer bricks", bricks.len());
-        let now = Utc::now();
-        let mut inner = snapshot.inner.lock().await;
-        for brick in &bricks {
-            inner.admit(brick, now);
-        }
-        drop(inner);
-        snapshot.progress.notify_waiters();
+        finish_slow_fan(&snapshot).await;
     };
 
-    let authors_fill = async {
-        let mut feeds = stream::iter(cohort.into_iter().map(|author| {
+    // Posts and repo reads are fanned out SEPARATELY, and this is the whole
+    // reason a cold wall paints at all.
+    //
+    // They used to share one task per author, which meant an author's posts
+    // were not admitted until plc.directory and two PDS listRecords had also
+    // answered for them. Posts are 68% of the wall and come from one fast,
+    // rate-limited endpoint; blogs and archived streams are a handful of
+    // bricks and come from a hundred different PDSes at a hundred different
+    // speeds. Coupling them held the fast source hostage to the slow one: a
+    // 100-author fill took 17s, so a viewer with a large follow graph got an
+    // EMPTY first page and had to wait for a second request to see anything.
+    // Split, the posts land at AppView speed and the rest catches up behind
+    // them.
+    let posts_fill = async {
+        let mut feeds = stream::iter(cohort.iter().cloned().map(|author| {
             let state = Arc::clone(&state);
             async move {
-                let (yield_, docs) = tokio::join!(
-                    author_feed_cached(&state, &author.did),
-                    std_docs_cached(&state, &author),
-                );
-                (author, yield_, docs)
+                let yield_ = author_feed_cached(&state, &author.did).await;
+                (author, yield_)
             }
         }))
         .buffer_unordered(FAN_OUT);
 
         let mut answered = 0usize;
-        let mut yielding_authors: Vec<String> = Vec::new();
-        let mut mentioned: Vec<u64> = Vec::new();
-        while let Some((author, yield_, docs)) = feeds.next().await {
+        let mut yielding: Vec<String> = Vec::new();
+        while let Some((author, yield_)) = feeds.next().await {
             answered += 1;
-            if !yield_.bricks.is_empty() || !docs.bricks.is_empty() {
-                yielding_authors.push(author.did);
+            if !yield_.bricks.is_empty() {
+                yielding.push(author.did);
             }
-            for appid in &yield_.steam_appids {
-                if !mentioned.contains(appid) {
-                    mentioned.push(*appid);
+            {
+                let now = Utc::now();
+                let mut inner = snapshot.inner.lock().await;
+                for brick in &yield_.bricks {
+                    inner.admit(brick, now);
                 }
+            }
+            snapshot.progress.notify_waiters();
+        }
+        (answered, yielding)
+    };
+
+    let repos_fill = async {
+        let mut repos = stream::iter(cohort.iter().cloned().map(|author| {
+            let state = Arc::clone(&state);
+            async move {
+                // blogs and archived streams both read the author's repo, so
+                // they share one identity lookup rather than racing for two
+                let Some(pds) = pds_cached(&state, &author.did).await else {
+                    return (author, Arc::new(StdDocs::default()), Arc::new(Vec::new()));
+                };
+                let (docs, streams) = tokio::join!(
+                    std_docs_cached(&state, &pds, &author),
+                    streams_cached(&state, &pds, &author),
+                );
+                (author, docs, streams)
+            }
+        }))
+        .buffer_unordered(REPO_FAN_OUT);
+
+        let mut yielding: Vec<String> = Vec::new();
+        while let Some((author, docs, streams)) = repos.next().await {
+            if !docs.bricks.is_empty() || !streams.is_empty() {
+                yielding.push(author.did);
             }
             {
                 let mut inner = snapshot.inner.lock().await;
                 let inner = &mut *inner;
                 // bskyPostRef suppression: the blog card wins over its
-                // cross-posted skeet, whether the post came first or later
+                // cross-posted skeet, whether the post came first or later.
+                // Now that posts race ahead, "later" is the common case: the
+                // skeet is usually already pooled, and gets withdrawn here.
                 for uri in &docs.suppressed_posts {
                     if inner.seen.insert(uri.clone()) {
                         // post not pooled yet; the insert blocks it later
@@ -269,29 +332,19 @@ async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, see
                     }
                 }
                 let now = Utc::now();
-                for brick in docs.bricks.iter().chain(yield_.bricks.iter()) {
+                for brick in docs.bricks.iter().chain(streams.iter()) {
                     inner.admit(brick, now);
                 }
             }
             snapshot.progress.notify_waiters();
         }
-        (answered, yielding_authors, mentioned)
+        finish_slow_fan(&snapshot).await;
+        yielding
     };
 
-    let ((answered, yielding_authors, mut mentioned_appids), ()) =
-        futures::join!(authors_fill, featured_fill);
-
-    // games the cohort talked about; these do need the posts first
-    mentioned_appids.truncate(STEAM_MENTIONS_PER_SNAPSHOT);
-    if state.config.steam_enabled && !mentioned_appids.is_empty() {
-        tracing::debug!("steam mentions: hydrating {}", mentioned_appids.len());
-        let bricks = hydrate_trailers(&state, mentioned_appids).await;
-        let now = Utc::now();
-        let mut inner = snapshot.inner.lock().await;
-        for brick in &bricks {
-            inner.admit(brick, now);
-        }
-    }
+    let ((answered, mut yielding_authors), repo_authors, ()) =
+        futures::join!(posts_fill, repos_fill, live_fill);
+    yielding_authors.extend(repo_authors);
 
     {
         let mut inner = snapshot.inner.lock().await;
@@ -308,39 +361,130 @@ async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, see
     record_activity(&state, &viewer, yielding_authors).await;
 }
 
+/// One of the two rare-kind fans has finished; a page waiting for a mixed pool
+/// has one less thing to wait for.
+async fn finish_slow_fan(snapshot: &Snapshot) {
+    {
+        let mut inner = snapshot.inner.lock().await;
+        inner.slow_fans = inner.slow_fans.saturating_sub(1);
+    }
+    snapshot.progress.notify_waiters();
+}
+
+/// Streams end. A live brick is admitted once, during the fill, and then waits
+/// in the pool for the snapshot's whole half-hour life; without this, a stream
+/// that finished twenty minutes ago would still be laid with a LIVE badge and
+/// a playlist that 404s.
+///
+/// Only bricks still in the pool can be withdrawn. Ones already laid stay
+/// where they are, because the wall never moves; the player is the last line
+/// of defence for those, and says so.
+async fn drop_ended_streams(state: &Arc<AppState>, snapshot: &Snapshot) {
+    {
+        // the overwhelming majority of walls have no live brick at all, and
+        // must not pay anything to discover that
+        let inner = snapshot.inner.lock().await;
+        if !inner.pool.iter().any(score::is_live) {
+            return;
+        }
+    }
+
+    // Prune against a live list we ALREADY hold. Fetching one here would put a
+    // network round trip in the middle of somebody's scroll every time the
+    // sixty-second cache lapsed, to answer a question that only matters to the
+    // rare wall with a live brick still in its pool. Refresh it for the next
+    // page instead, and let this one through.
+    let Some(network) = state.caches.live.get(&0u8).await else {
+        let refresh = Arc::clone(state);
+        platform::spawn(async move {
+            let _ = live_cached(&refresh).await;
+        });
+        return;
+    };
+    let still_live: HashSet<&str> = network.iter().map(|s| s.uri()).collect();
+
+    let mut inner = snapshot.inner.lock().await;
+    let before = inner.pool.len();
+    inner
+        .pool
+        .retain(|brick| !score::is_live(brick) || still_live.contains(brick.id()));
+    let dropped = before - inner.pool.len();
+    if dropped > 0 {
+        tracing::debug!("snapshot {}: {dropped} stream(s) ended", snapshot.id);
+    }
+    // kind_counts and author_counts are admission budgets, not a census, and
+    // are deliberately left alone: an ended stream does not buy its author a
+    // fresh slot on a wall that has already been laid around them.
+}
+
 /// Serve one page, laying new bricks from the pool as needed. Waits briefly
 /// while warming if the wall is still too short.
-pub async fn get_page(snapshot: &Snapshot, offset: usize, size: usize) -> (Vec<Brick>, bool) {
-    let deadline = Instant::now() + Duration::from_secs(8);
+pub async fn get_page(
+    state: &Arc<AppState>,
+    snapshot: &Snapshot,
+    offset: usize,
+    size: usize,
+) -> (Vec<Brick>, bool) {
+    drop_ended_streams(state, snapshot).await;
+    let started = Instant::now();
+    let deadline = started + Duration::from_secs(8);
+    let mix_deadline = started + MIX_DEADLINE;
     loop {
+        let awaiting_mix;
         {
             let mut guard = snapshot.inner.lock().await;
             let inner = &mut *guard;
             let wanted = offset + size;
-            if inner.wall.len() < wanted && !inner.pool.is_empty() {
-                let missing = wanted - inner.wall.len();
-                mix::lay(
-                    &mut inner.pool,
-                    &mut inner.wall,
-                    missing,
-                    snapshot.seed,
-                    Utc::now(),
-                );
-            }
-            let exhausted = !inner.warming && inner.pool.is_empty();
-            if inner.wall.len() >= wanted || exhausted {
-                let end = wanted.min(inner.wall.len());
-                let items = inner
-                    .wall
-                    .get(offset.min(end)..end)
-                    .map(<[Brick]>::to_vec)
-                    .unwrap_or_default();
-                let has_more = !inner.pool.is_empty() || inner.warming;
-                return (items, has_more);
+
+            // Bricks are laid once and never move, so laying is the moment the
+            // pool's composition becomes the wall's composition. Posts arrive
+            // from one fast endpoint and blogs and streams from a hundred slow
+            // ones, so laying the instant 24 bricks exist would freeze a FIRST
+            // wall of pure posts before a single blog had a chance to arrive.
+            //
+            // Only the first page. Nobody is watching a blank screen decide
+            // what it wants to be on page four; they are mid-scroll, they have
+            // hit the bottom, and they are waiting. A snapshot rebuilt after
+            // the service worker was reaped mid-scroll is warming all over
+            // again, and making that reader wait six seconds for a better
+            // blog-to-post ratio is a bad trade every time.
+            awaiting_mix = offset == 0
+                && inner.warming
+                && inner.slow_fans > 0
+                && Instant::now() < mix_deadline;
+
+            if !awaiting_mix {
+                if inner.wall.len() < wanted && !inner.pool.is_empty() {
+                    let missing = wanted - inner.wall.len();
+                    mix::lay(
+                        &mut inner.pool,
+                        &mut inner.wall,
+                        missing,
+                        snapshot.seed,
+                        Utc::now(),
+                    );
+                }
+                let exhausted = !inner.warming && inner.pool.is_empty();
+                if inner.wall.len() >= wanted || exhausted {
+                    let end = wanted.min(inner.wall.len());
+                    let items = inner
+                        .wall
+                        .get(offset.min(end)..end)
+                        .map(<[Brick]>::to_vec)
+                        .unwrap_or_default();
+                    let has_more = !inner.pool.is_empty() || inner.warming;
+                    return (items, has_more);
+                }
             }
         }
-        let remaining = deadline.saturating_duration_since(Instant::now());
+        // wake on the next brick, or on whichever deadline is next: the mix
+        // deadline only defers laying, the hard one ends the page
+        let wake = if awaiting_mix { mix_deadline } else { deadline };
+        let remaining = wake.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
+            if awaiting_mix {
+                continue; // waited long enough for the rare kinds; lay anyway
+            }
             // serve a short page rather than hang; scroll retries
             let guard = snapshot.inner.lock().await;
             let end = (offset + size).min(guard.wall.len());
@@ -355,6 +499,14 @@ pub async fn get_page(snapshot: &Snapshot, offset: usize, size: usize) -> (Vec<B
     }
 }
 
+/// The follow graph, but only as much of it as a waiting person can justify.
+///
+/// Follows page 100 at a time and each page is a round trip that blocks the
+/// next, so a 2000-follow graph costs twenty sequential requests: ten seconds
+/// in which not one post has been fetched, and a wall that arrives empty. The
+/// cohort samples 100 authors regardless, so a few hundred follows is plenty
+/// to build the first wall out of. The rest is fetched behind the user's back
+/// and cached, so their NEXT wall samples the whole graph.
 async fn get_follows_cached(
     state: &Arc<AppState>,
     did: &str,
@@ -362,16 +514,58 @@ async fn get_follows_cached(
     if let Some(follows) = state.caches.follows.get(&did.to_string()).await {
         return Ok(follows);
     }
-    let follows = bluesky::get_follows(&state.http, &state.config.appview_base, did)
+    let (head, cursor) = bluesky::get_follows(
+        &state.http,
+        &state.config.appview_base,
+        did,
+        None,
+        FOLLOW_PAGES_EAGER,
+    )
+    .await
+    .map_err(|e| AppError::Upstream(e.to_string()))?;
+    let head = Arc::new(head);
+
+    let Some(cursor) = cursor else {
+        // the whole graph fitted in the head start; nothing left to chase
+        state
+            .caches
+            .follows
+            .insert(did.to_string(), Arc::clone(&head))
+            .await;
+        return Ok(head);
+    };
+
+    // Deliberately NOT cached: a partial graph must never masquerade as the
+    // whole one. The task below replaces it with the real thing.
+    let rest_state = Arc::clone(state);
+    let rest_did = did.to_string();
+    let rest_head = Arc::clone(&head);
+    platform::spawn(async move {
+        let remaining = FOLLOW_PAGES_MAX.saturating_sub(FOLLOW_PAGES_EAGER);
+        match bluesky::get_follows(
+            &rest_state.http,
+            &rest_state.config.appview_base,
+            &rest_did,
+            Some(cursor),
+            remaining,
+        )
         .await
-        .map(Arc::new)
-        .map_err(|e| AppError::Upstream(e.to_string()))?;
-    state
-        .caches
-        .follows
-        .insert(did.to_string(), Arc::clone(&follows))
-        .await;
-    Ok(follows)
+        {
+            Ok((tail, _)) => {
+                let mut whole = rest_head.as_ref().clone();
+                whole.extend(tail);
+                tracing::debug!("follow graph for {rest_did} completed: {}", whole.len());
+                rest_state
+                    .caches
+                    .follows
+                    .insert(rest_did, Arc::new(whole))
+                    .await;
+            }
+            Err(e) => tracing::debug!("completing follow graph for {rest_did} failed: {e}"),
+        }
+    });
+
+    Ok(head)
 }
 
 async fn author_feed_cached(state: &Arc<AppState>, author_did: &str) -> Arc<AuthorYield> {
@@ -384,10 +578,7 @@ async fn author_feed_cached(state: &Arc<AppState>, author_did: &str) -> Arc<Auth
             Err(e) => {
                 // a single author failing must never sink the wall
                 tracing::debug!("author feed {author_did} failed: {e}");
-                Arc::new(AuthorYield {
-                    bricks: Vec::new(),
-                    steam_appids: Vec::new(),
-                })
+                Arc::new(AuthorYield { bricks: Vec::new() })
             }
         };
     state
@@ -398,77 +589,103 @@ async fn author_feed_cached(state: &Arc<AppState>, author_did: &str) -> Arc<Auth
     yield_
 }
 
-/// Hydrate a batch of appids into trailer bricks (bounded concurrency).
-async fn hydrate_trailers(state: &Arc<AppState>, appids: Vec<u64>) -> Vec<Brick> {
-    stream::iter(appids.into_iter().map(|appid| {
-        let state = Arc::clone(state);
-        async move { steam_trailers_cached(&state, appid).await }
-    }))
-    .buffer_unordered(STEAM_FAN_OUT)
-    .collect::<Vec<_>>()
-    .await
-    .into_iter()
-    .flat_map(|bricks| bricks.iter().cloned().collect::<Vec<_>>())
-    .collect()
-}
-
-async fn steam_trailers_cached(state: &Arc<AppState>, appid: u64) -> Arc<Vec<Brick>> {
-    if let Some(cached) = state.caches.steam_trailers.get(&appid).await {
+/// Who is live on Streamplace, network-wide. Viewer-independent by
+/// construction, which is what makes the single cache key honest: this
+/// function must never see the follow graph, or one viewer's friends would be
+/// served to the next.
+async fn live_cached(state: &Arc<AppState>) -> Arc<Vec<streamplace::LiveStream>> {
+    if let Some(cached) = state.caches.live.get(&0u8).await {
         return cached;
     }
-    let hydrated_at = Utc::now().to_rfc3339();
-    let bricks = match steam::get_trailers(
-        &state.http,
-        &state.config.steam_store_base,
-        appid,
-        &hydrated_at,
-    )
-    .await
-    {
-        Ok(bricks) => Arc::new(bricks),
+    let streams = match streamplace::get_live(&state.http, &state.config.streamplace_base).await {
+        Ok(streams) => Arc::new(streams),
         Err(e) => {
-            tracing::debug!("steam appdetails {appid} failed: {e}");
+            tracing::debug!("streamplace live list failed: {e}");
             Arc::new(Vec::new())
         }
     };
-    state
-        .caches
-        .steam_trailers
-        .insert(appid, Arc::clone(&bricks))
-        .await;
+    state.caches.live.insert(0u8, Arc::clone(&streams)).await;
+    streams
+}
+
+/// Which of the network's live streams belong to this viewer. Separated out
+/// so the filter can be tested without a whole AppState: it is the seam where
+/// a shared cache becomes one person's wall, and getting it wrong shows a
+/// viewer strangers.
+fn followed_live<'a>(
+    network: &'a [streamplace::LiveStream],
+    follows: &[bluesky::Follow],
+) -> Vec<&'a streamplace::LiveStream> {
+    let followed: HashSet<&str> = follows.iter().map(|f| f.did.as_str()).collect();
+    network
+        .iter()
+        .filter(|s| followed.contains(s.did()))
+        .collect()
+}
+
+/// The live streams this particular viewer follows, as bricks.
+async fn live_bricks(state: &Arc<AppState>, follows: &[bluesky::Follow]) -> Vec<Brick> {
+    let network = live_cached(state).await;
+    let mut bricks = Vec::new();
+    for stream in followed_live(&network, follows) {
+        // only now, for the handful that survive the filter, is it worth
+        // finding out where their repo (and so their poster) lives
+        let pds = pds_cached(state, stream.did()).await;
+        bricks.push(
+            stream
+                .clone()
+                .into_brick(&state.config.streamplace_base, pds.as_deref()),
+        );
+    }
     bricks
 }
 
-/// A small seeded sample of featured releases; exploration filler so video
-/// bricks exist even when nobody you follow talks about games.
-async fn featured_sample(state: &Arc<AppState>, seed: u64) -> Vec<u64> {
-    let featured = match state.caches.steam_featured.get(&0u8).await {
-        Some(cached) => cached,
-        None => {
-            let ids = match steam::get_featured(&state.http, &state.config.steam_store_base).await {
-                Ok(ids) => Arc::new(ids),
-                Err(e) => {
-                    tracing::debug!("steam featured failed: {e}");
-                    Arc::new(Vec::new())
-                }
-            };
-            state
-                .caches
-                .steam_featured
-                .insert(0u8, Arc::clone(&ids))
-                .await;
-            ids
+/// Where an author's repo lives. Cached for a day: identity moves rarely, and
+/// both the blog and the stream reader need the answer for every author.
+async fn pds_cached(state: &Arc<AppState>, did: &str) -> Option<String> {
+    if let Some(cached) = state.caches.pds.get(&did.to_string()).await {
+        return Some(cached);
+    }
+    match pds::resolve(&state.http, &state.config.plc_base, did).await {
+        Ok(pds) => {
+            state.caches.pds.insert(did.to_string(), pds.clone()).await;
+            Some(pds)
         }
+        Err(e) => {
+            tracing::debug!("pds resolution for {did} failed: {e}");
+            None
+        }
+    }
+}
+
+/// One author's archived Streamplace videos.
+async fn streams_cached(state: &Arc<AppState>, pds: &str, author: &Author) -> Arc<Vec<Brick>> {
+    if let Some(cached) = state.caches.streams.get(&author.did).await {
+        return cached;
+    }
+    let bricks =
+        match streamplace::get_videos(&state.http, pds, &state.config.streamplace_base, author)
+            .await
+        {
+            Ok(bricks) => Arc::new(bricks),
+            Err(e) => {
+                tracing::debug!("streamplace videos for {} failed: {e}", author.did);
+                Arc::new(Vec::new())
+            }
+        };
+    // the same shape as blogs: the few who stream get rechecked within the
+    // hour, the many who never will are left alone for a day
+    let ttl = if bricks.is_empty() {
+        STREAMS_NEGATIVE_TTL
+    } else {
+        STREAMS_POSITIVE_TTL
     };
-    let mut ids: Vec<u64> = featured.as_ref().clone();
-    // sample from a small stable prefix, not the whole list: successive
-    // snapshots then reuse already-hydrated trailers (cache hits) instead of
-    // hydrating 3 cold appids after the wall has already been laid
-    ids.truncate(STEAM_FEATURED_PER_SNAPSHOT * 2);
-    let mut rng = ChaCha8Rng::seed_from_u64(seed ^ 0x57EA);
-    ids.shuffle(&mut rng);
-    ids.truncate(STEAM_FEATURED_PER_SNAPSHOT);
-    ids
+    state
+        .caches
+        .streams
+        .insert_with_ttl(author.did.clone(), Arc::clone(&bricks), ttl)
+        .await;
+    bricks
 }
 
 /// Cohort: up to KNOWN_ACTIVE authors that yielded content before, topped up
@@ -511,22 +728,18 @@ async fn sample_cohort(
     cohort
 }
 
-async fn std_docs_cached(state: &Arc<AppState>, author: &Author) -> Arc<StdDocs> {
+async fn std_docs_cached(state: &Arc<AppState>, pds: &str, author: &Author) -> Arc<StdDocs> {
     if let Some(cached) = state.caches.std_docs.get(&author.did).await {
         return cached;
     }
-    let docs = match standardsite::get_documents(&state.http, &state.config.plc_base, author).await
-    {
+    let docs = match standardsite::get_documents(&state.http, pds, author).await {
         Ok(result) => Arc::new(StdDocs {
             bricks: result.bricks,
             suppressed_posts: result.suppressed_posts,
         }),
         Err(e) => {
             tracing::debug!("standard.site fetch for {} failed: {e}", author.did);
-            Arc::new(StdDocs {
-                bricks: Vec::new(),
-                suppressed_posts: Vec::new(),
-            })
+            Arc::new(StdDocs::default())
         }
     };
     // publishers get rechecked soon; the silent majority is cached for a day
@@ -547,6 +760,10 @@ async fn record_activity(state: &Arc<AppState>, viewer: &str, mut yielding: Vec<
     if yielding.is_empty() {
         return;
     }
+    // an author who yielded both posts and a blog is reported by both fans;
+    // a duplicate here would waste one of the next cohort's known-active slots
+    let mut once = HashSet::new();
+    yielding.retain(|did| once.insert(did.clone()));
     if let Some(previous) = state.caches.activity.get(&viewer.to_string()).await {
         let fresh: HashSet<String> = yielding.iter().cloned().collect();
         yielding.extend(
@@ -567,7 +784,7 @@ async fn record_activity(state: &Arc<AppState>, viewer: &str, mut yielding: Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{Author, PostBrick};
+    use crate::model::{Author, PostBrick, VideoBrick, VideoSource};
 
     fn post(id: usize, author: usize, hours_old: i64) -> Brick {
         Brick::Post(PostBrick {
@@ -588,14 +805,42 @@ mod tests {
         })
     }
 
+    fn blog(id: usize, author: usize) -> Brick {
+        Brick::Blog(crate::model::BlogBrick {
+            id: format!("blog-{id}"),
+            url: String::new(),
+            author: Author {
+                did: format!("did:plc:a{author}"),
+                handle: format!("a{author}.test"),
+                display_name: None,
+                avatar: None,
+            },
+            title: "t".into(),
+            description: None,
+            cover_image: None,
+            publication: crate::model::Publication {
+                name: "p".into(),
+                url: String::new(),
+                icon: None,
+            },
+            tags: vec![],
+            published_at: Utc::now().to_rfc3339(),
+        })
+    }
+
+    fn live_stream(did: &str) -> streamplace::LiveStream {
+        streamplace::LiveStream::for_test(did)
+    }
+
     fn inner() -> Inner {
         Inner {
             pool: Vec::new(),
             wall: Vec::new(),
             seen: HashSet::new(),
-            kind_counts: [0; 4],
+            kind_counts: [0; mix::KINDS],
             author_counts: HashMap::new(),
             warming: true,
+            slow_fans: SLOW_FANS,
         }
     }
 
@@ -610,6 +855,28 @@ mod tests {
             i.admit(&post(n, 0, 1), now);
         }
         assert_eq!(i.pool.len(), MAX_BRICKS_PER_AUTHOR);
+    }
+
+    /// Posts reach the pool seconds before blogs and archived streams do, from
+    /// a faster endpoint. A per-author cap is therefore always spent on posts
+    /// first, and a flat one would turn a prolific blogger's own blog away
+    /// from their own wall. The cap is per author PER KIND for exactly this
+    /// reason.
+    #[test]
+    fn a_prolific_poster_can_still_bring_a_blog() {
+        let mut i = inner();
+        let now = Utc::now();
+        for n in 0..10 {
+            i.admit(&post(n, 0, 1), now);
+        }
+        assert_eq!(i.pool.len(), MAX_BRICKS_PER_AUTHOR, "posts are capped");
+
+        i.admit(&blog(100, 0), now);
+        assert_eq!(
+            i.pool.len(),
+            MAX_BRICKS_PER_AUTHOR + 1,
+            "the blog was turned away by a quota its author's own skeets had eaten"
+        );
     }
 
     /// First paint used to gate on brick count, so 30 bricks from one author
@@ -642,5 +909,191 @@ mod tests {
         i.admit(&post(2, 1, 71), now); // just inside the 72h window
         i.admit(&post(3, 2, 73), now); // just outside it
         assert_eq!(i.pool.len(), 2);
+    }
+
+    /// The live list is one call for the WHOLE network, cached under a single
+    /// key and shared by every viewer on the machine. The filter is therefore
+    /// the only thing standing between a viewer and a wall of strangers, and
+    /// it must key off the follow graph, not off who asked first.
+    #[test]
+    fn a_viewer_only_sees_the_streams_they_follow() {
+        let network = vec![
+            live_stream("did:plc:friend"),
+            live_stream("did:plc:stranger"),
+        ];
+        let follows = vec![bluesky::Follow {
+            did: "did:plc:friend".into(),
+            handle: "friend.test".into(),
+            display_name: None,
+            avatar: None,
+        }];
+
+        let mine = followed_live(&network, &follows);
+        assert_eq!(mine.len(), 1);
+        assert_eq!(mine[0].did(), "did:plc:friend");
+
+        // and someone who follows nobody live gets nothing, rather than
+        // inheriting whatever the last viewer's snapshot happened to cache
+        assert!(followed_live(&network, &[]).is_empty());
+    }
+
+    fn live_brick(uri: &str, did: &str) -> Brick {
+        Brick::Video(VideoBrick {
+            id: uri.into(),
+            url: String::new(),
+            author: Author {
+                did: did.into(),
+                handle: format!("{did}.test"),
+                display_name: None,
+                avatar: None,
+            },
+            title: "on air".into(),
+            poster: None,
+            playlist: String::new(),
+            aspect_ratio: None,
+            source: VideoSource::Streamplace,
+            created_at: Utc::now().to_rfc3339(),
+            like_count: 0,
+            live: true,
+            viewer_count: Some(2),
+            duration_ms: None,
+            activity: None,
+        })
+    }
+
+    /// The first page waits for the slow sources so the wall does not open on
+    /// nothing but skeets. A LATER page must not: the reader is mid-scroll and
+    /// has hit the bottom. This bites hardest in the service worker, which is
+    /// reaped after ~30s idle: pausing a scroll kills it, and the next page
+    /// rebuilds a warming snapshot from the cursor, so every deep page would
+    /// pay the first-paint tax again.
+    #[tokio::test]
+    async fn a_later_page_never_waits_for_the_mix() {
+        let state = Arc::new(AppState::new(crate::config::Config::default()));
+        let snapshot = Snapshot::new("s".into(), 1);
+        {
+            let mut inner = snapshot.inner.lock().await;
+            let now = Utc::now();
+            for n in 0..60 {
+                inner.admit(&post(n, n % 15, 1), now);
+            }
+            assert!(
+                inner.warming && inner.slow_fans > 0,
+                "the snapshot must still be warming for this test to mean anything"
+            );
+        }
+
+        let began = Instant::now();
+        let (items, _) = get_page(&state, &snapshot, 24, 24).await;
+        assert_eq!(items.len(), 24);
+        assert!(
+            began.elapsed() < Duration::from_secs(1),
+            "a scrolling reader waited {:?} for a better blog-to-post ratio",
+            began.elapsed()
+        );
+    }
+
+    /// Streams end. A live brick is admitted once and then waits in the pool
+    /// for half an hour; laying it after its stream has finished puts a LIVE
+    /// badge on a dead playlist.
+    #[tokio::test]
+    async fn an_ended_stream_is_withdrawn_from_the_pool() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/place.stream.live.getLiveUsers"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "streams": [{
+                    "uri": "at://did:plc:still/place.stream.livestream/3on",
+                    "author": { "did": "did:plc:still", "handle": "still.test" },
+                    "record": { "title": "on air", "createdAt": "2026-07-12T12:00:00Z" }
+                }]
+            })))
+            .mount(&server)
+            .await;
+
+        let state = Arc::new(AppState::new(crate::config::Config {
+            streamplace_base: server.uri(),
+            ..Default::default()
+        }));
+        let snapshot = Snapshot::new("s".into(), 1);
+        let now = Utc::now();
+        {
+            let mut inner = snapshot.inner.lock().await;
+            inner.admit(
+                &live_brick(
+                    "at://did:plc:still/place.stream.livestream/3on",
+                    "did:plc:still",
+                ),
+                now,
+            );
+            inner.admit(
+                &live_brick(
+                    "at://did:plc:gone/place.stream.livestream/3off",
+                    "did:plc:gone",
+                ),
+                now,
+            );
+            inner.admit(&post(1, 9, 1), now);
+            assert_eq!(inner.pool.len(), 3);
+        }
+
+        // the fill populates this; the prune reads it rather than fetching one
+        // mid-scroll
+        live_cached(&state).await;
+        drop_ended_streams(&state, &snapshot).await;
+
+        let inner = snapshot.inner.lock().await;
+        let ids: Vec<&str> = inner.pool.iter().map(Brick::id).collect();
+        assert_eq!(
+            ids,
+            vec!["at://did:plc:still/place.stream.livestream/3on", "post-1"],
+            "the ended stream must go, and nothing else with it"
+        );
+    }
+
+    /// A livestream record is written once and reused for months. The wall
+    /// admits it on the strength of the stream being live, not on the age of
+    /// the record; the age test would throw away the best brick on the wall.
+    #[test]
+    fn a_live_stream_is_admitted_however_old_its_record_is() {
+        let mut i = inner();
+        let now = Utc::now();
+
+        let ancient = Brick::Video(VideoBrick {
+            id: "live-1".into(),
+            url: String::new(),
+            author: Author {
+                did: "did:plc:streamer".into(),
+                handle: "streamer.test".into(),
+                display_name: None,
+                avatar: None,
+            },
+            title: "still going".into(),
+            poster: None,
+            playlist: String::new(),
+            aspect_ratio: None,
+            source: VideoSource::Streamplace,
+            created_at: (now - chrono::TimeDelta::days(120)).to_rfc3339(),
+            like_count: 0,
+            live: true,
+            viewer_count: Some(4),
+            duration_ms: None,
+            activity: None,
+        });
+        i.admit(&ancient, now);
+        assert_eq!(i.pool.len(), 1, "a live stream aged out of its own wall");
+
+        // the very same timestamp, no longer live, is past the 90-day window
+        // for an archived stream and drops. `live` is the whole difference.
+        let Brick::Video(mut ended) = ancient else {
+            unreachable!()
+        };
+        ended.live = false;
+        ended.id = "vod-1".into();
+        i.admit(&Brick::Video(ended), now);
+        assert_eq!(i.pool.len(), 1, "a 120-day archived stream is not fresh");
     }
 }

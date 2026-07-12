@@ -1,5 +1,7 @@
 <script lang="ts">
-	// Click-to-play HLS player for both Bluesky video and Steam trailers.
+	// Click-to-play HLS player: Bluesky clips, and Streamplace streams both
+	// live and archived. All three are m3u8; hls.js does not need to know
+	// which is which.
 	// This component only ever mounts from an explicit user gesture; videos
 	// on the Wall never start on their own. It pauses itself when scrolled
 	// out of view, and reports buffering so slow connections never see a
@@ -11,12 +13,15 @@
 		id,
 		playlist,
 		poster,
-		aspectRatio
+		aspectRatio,
+		live = false
 	}: {
 		id: string;
 		playlist: string;
 		poster: string | null;
 		aspectRatio: string;
+		/** a live stream can end between the wall being laid and the click */
+		live?: boolean;
 	} = $props();
 
 	let video = $state<HTMLVideoElement | null>(null);
@@ -83,7 +88,11 @@
 {#if failed}
 	<div class="grid w-full place-items-center bg-kiln text-chalk" style:aspect-ratio={aspectRatio}>
 		<p class="p-4 text-center text-sm font-semibold">
-			this video would not play here. open it at the source instead.
+			{#if live}
+				this stream has ended.
+			{:else}
+				this video would not play here. open it at the source instead.
+			{/if}
 		</p>
 	</div>
 {:else}

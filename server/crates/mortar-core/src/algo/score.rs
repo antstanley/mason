@@ -5,16 +5,17 @@ use chrono::{DateTime, Utc};
 
 use crate::model::{Brick, VideoSource};
 
-/// Half-life in hours per brick kind: posts churn fast, blogs simmer,
-/// trailers are near-evergreen. Shorter than the medium's shelf life on
-/// purpose, so the freshest brick of a kind clearly outranks yesterday's.
+/// Half-life in hours per brick kind: posts churn fast, blogs simmer, an
+/// archived stream is nearly evergreen. Shorter than the medium's shelf life
+/// on purpose, so the freshest brick of a kind clearly outranks yesterday's.
 pub fn half_life_hours(brick: &Brick) -> f64 {
     match brick {
         Brick::Post(_) => 12.0,
         Brick::Blog(_) => 24.0 * 3.0,
-        // a Bluesky video IS a post, and ages like one; only a Steam trailer,
-        // whose timestamp is merely when we hydrated it, is evergreen
+        // a Bluesky video IS a post, and ages like one
         Brick::Video(v) if v.source == VideoSource::Bluesky => 12.0,
+        // an archived stream is an hours-long thing somebody made; it stays
+        // worth watching long after a skeet about it would have expired
         Brick::Video(_) => 24.0 * 14.0,
     }
 }
@@ -35,9 +36,22 @@ pub fn max_age_hours(brick: &Brick) -> f64 {
     }
 }
 
+/// A stream that is happening right now. It is the only brick with a deadline,
+/// which earns it both an exemption from the age window and the top of the
+/// wall (see `mix::lay_next`).
+pub fn is_live(brick: &Brick) -> bool {
+    matches!(brick, Brick::Video(v) if v.live)
+}
+
 /// Bricks with an unparseable date are treated as stale: better to drop one
 /// than to let it sit at the top of a wall forever with an infinite age.
 pub fn is_fresh(brick: &Brick, now: DateTime<Utc>) -> bool {
+    // "live" is a fact about the present, not a claim about a timestamp. A
+    // streamer who has been broadcasting on the same record since March is
+    // still broadcasting.
+    if is_live(brick) {
+        return true;
+    }
     match created_at(brick) {
         Some(t) => (now - t).num_seconds().max(0) as f64 / 3600.0 <= max_age_hours(brick),
         None => false,
@@ -59,17 +73,19 @@ pub fn author_key(brick: &Brick) -> &str {
     match brick {
         Brick::Post(b) => &b.author.did,
         Brick::Blog(b) => &b.author.did,
-        // Steam trailers have no atproto author; group them under one key so
-        // the diversity window also spaces trailers apart
-        Brick::Video(b) => b.author.as_ref().map(|a| a.did.as_str()).unwrap_or("steam"),
+        Brick::Video(b) => &b.author.did,
     }
 }
 
 fn engagement(brick: &Brick) -> f64 {
     match brick {
         Brick::Post(b) => (b.like_count + 2 * b.repost_count) as f64,
-        // no comparable signal for blogs/trailers; neutral
-        Brick::Blog(_) | Brick::Video(_) => 0.0,
+        // a live stream's audience is its engagement, and it is the only kind
+        // whose signal is being generated as you look at it
+        Brick::Video(b) if b.live => b.viewer_count.unwrap_or(0) as f64,
+        Brick::Video(b) => b.like_count as f64,
+        // no comparable signal for blogs; neutral
+        Brick::Blog(_) => 0.0,
     }
 }
 

@@ -41,13 +41,57 @@
 		}
 	}
 
+	// How far below the fold we start laying the next bricks. The reader should
+	// meet a wall that is already there, not a spinner.
+	const PREFETCH_MARGIN = 1200;
+
+	function withinReach() {
+		if (!sentinel) return false;
+		return sentinel.getBoundingClientRect().top < window.innerHeight + PREFETCH_MARGIN;
+	}
+
+	let pumping = $state(false);
+
+	/** Keep laying bricks while the bottom of the wall is still within reach.
+	 *
+	 *  A plain observer callback is not enough, and this is the bug that used to
+	 *  strand the wall: IntersectionObserver fires on a CHANGE of state, and a
+	 *  page that comes back short (mortar serves what it has rather than make
+	 *  you wait for a full one) does not grow the wall enough to push the
+	 *  sentinel back out of the margin. It stays intersecting, so no second
+	 *  event ever arrives, and the wall stops for good with a cursor still in
+	 *  its hand. So we pull, rather than wait to be told. */
+	async function pump() {
+		if (pumping) return;
+		pumping = true;
+		try {
+			let stalls = 0;
+			while (!feed.done && withinReach()) {
+				const before = feed.items.length;
+				await feed.loadMore();
+				await tick();
+				if (feed.items.length > before) {
+					stalls = 0;
+					continue;
+				}
+				// a page that added nothing: the snapshot is still warming, or it
+				// failed. Back off a little, then a little more, and let the next
+				// scroll try again rather than spin on the spot.
+				if (feed.error || ++stalls > 3) break;
+				await new Promise((resume) => setTimeout(resume, 400 * stalls));
+			}
+		} finally {
+			pumping = false;
+		}
+	}
+
 	$effect(() => {
 		if (!sentinel) return;
 		const observer = new IntersectionObserver(
 			(entries) => {
-				if (entries[0].isIntersecting) void feed.loadMore();
+				if (entries[0].isIntersecting) void pump();
 			},
-			{ rootMargin: '1200px' }
+			{ rootMargin: `${PREFETCH_MARGIN}px` }
 		);
 		observer.observe(sentinel);
 		return () => observer.disconnect();
@@ -122,13 +166,16 @@
 		<div class="flex justify-center py-10">
 			<button
 				type="button"
-				onclick={() => void feed.loadMore()}
+				onclick={() => void pump()}
 				class="cursor-pointer rounded-full border-2 border-brick-blog/60 bg-chalk px-6 py-3 font-display font-bold shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95 dark:bg-kiln"
 			>
 				more bricks did not arrive. tap to retry
 			</button>
 		</div>
-	{:else if feed.loading}
+	{:else if feed.loading || pumping}
+		<!-- pumping, not just loading: between attempts the pump is briefly idle
+		     while the snapshot warms, and letting the skeletons blink out would
+		     read as a wall that had given up rather than one still being laid -->
 		<div class="pt-5">
 			<SkeletonGrid count={4} />
 		</div>
