@@ -1,0 +1,216 @@
+<!doctype html>
+<!-- Source for the Open Graph card. Rendered to static/og.png by
+     scripts/render-og.mjs; edit here, never edit the PNG. -->
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;700;800&display=swap"
+			rel="stylesheet"
+		/>
+		<style>
+			/* kiln mode: the same tokens the site uses in its dark scheme */
+			:root {
+				--kiln-deep: oklch(0.2 0.028 50); /* the field between bricks */
+				--kiln: oklch(0.25 0.03 50); /* brick faces */
+				--chalk: oklch(0.985 0.002 260);
+				--post: oklch(0.66 0.15 237);
+				--blog: oklch(0.7 0.19 45);
+				--video: oklch(0.58 0.22 295);
+				--video-bright: oklch(0.74 0.17 295);
+			}
+			* {
+				margin: 0;
+				box-sizing: border-box;
+			}
+			body {
+				width: 1200px;
+				height: 630px;
+				background: var(--kiln-deep);
+				color: var(--chalk);
+				font-family: 'Bricolage Grotesque', system-ui, sans-serif;
+				display: flex;
+				overflow: hidden;
+			}
+
+			/* the wall itself carries the meaning: real bricks, real mortar gaps */
+			.wall {
+				position: absolute;
+				inset: -60px;
+				display: flex;
+				gap: 14px;
+				padding: 14px;
+				transform: rotate(-3deg) scale(1.04);
+				transform-origin: center;
+			}
+			.col {
+				flex: 1;
+				display: flex;
+				flex-direction: column;
+				gap: 14px;
+			}
+			.brick {
+				background: var(--kiln);
+				border: 2px solid;
+				border-radius: 14px;
+				box-shadow: 0 2px 0 0 oklch(0 0 0 / 0.35);
+			}
+			.post {
+				border-color: color-mix(in oklch, var(--post) 60%, transparent);
+			}
+			.blog {
+				border-color: color-mix(in oklch, var(--blog) 60%, transparent);
+			}
+			.video {
+				border-color: color-mix(in oklch, var(--video) 60%, transparent);
+			}
+			.media {
+				height: 55%;
+				border-radius: 11px 11px 0 0;
+			}
+			.post .media {
+				background: color-mix(in oklch, var(--post) 26%, var(--kiln));
+			}
+			.blog .media {
+				background: color-mix(in oklch, var(--blog) 26%, var(--kiln));
+			}
+			.video .media {
+				background: color-mix(in oklch, var(--video) 30%, var(--kiln));
+				display: grid;
+				place-items: center;
+			}
+			.play {
+				width: 38px;
+				height: 38px;
+				border-radius: 999px;
+				background: var(--video);
+				display: grid;
+				place-items: center;
+				color: white;
+				font-size: 15px;
+				padding-left: 3px;
+			}
+			.lines {
+				padding: 11px 13px;
+				display: flex;
+				flex-direction: column;
+				gap: 7px;
+			}
+			.line {
+				height: 7px;
+				border-radius: 999px;
+				background: color-mix(in oklch, var(--chalk) 22%, transparent);
+			}
+
+			/* the card sits ON the wall, opaque, like a brick that speaks */
+			.plate {
+				position: relative;
+				margin: auto;
+				background: color-mix(in oklch, var(--kiln) 92%, var(--chalk));
+				border: 3px solid color-mix(in oklch, var(--chalk) 22%, transparent);
+				border-radius: 28px;
+				box-shadow:
+					0 10px 0 0 oklch(0 0 0 / 0.45),
+					0 30px 70px -20px oklch(0 0 0 / 0.6);
+				padding: 44px 56px 48px;
+				text-align: center;
+				max-width: 780px;
+			}
+			h1 {
+				font-size: 116px;
+				font-weight: 800;
+				letter-spacing: -0.035em;
+				line-height: 1;
+			}
+			p {
+				margin-top: 18px;
+				font-size: 30px;
+				font-weight: 400;
+				line-height: 1.28;
+				color: color-mix(in oklch, var(--chalk) 85%, transparent);
+			}
+			.kinds {
+				margin-top: 26px;
+				display: flex;
+				gap: 12px;
+				justify-content: center;
+				font-size: 19px;
+				font-weight: 700;
+			}
+			.kind {
+				padding: 8px 18px;
+				border-radius: 999px;
+				border: 2px solid;
+			}
+			.k-post {
+				border-color: var(--post);
+				color: var(--post);
+			}
+			.k-blog {
+				border-color: var(--blog);
+				color: var(--blog);
+			}
+			.k-video {
+				border-color: var(--video-bright);
+				color: var(--video-bright);
+			}
+		</style>
+	</head>
+	<body>
+		<div class="wall">
+			<div class="col">
+				<div class="brick post" style="height: 175px"><div class="lines" style="padding-top:16px"><div class="line" style="width:92%"></div><div class="line" style="width:76%"></div><div class="line" style="width:48%"></div></div></div>
+				<div class="brick blog" style="height: 150px"><div class="media" style="height:52%"></div><div class="lines"><div class="line" style="width:86%"></div><div class="line" style="width:58%"></div></div></div>
+				<div class="brick video" style="height: 200px"><div class="media" style="height:64%"><div class="play">▶</div></div><div class="lines"><div class="line" style="width:72%"></div></div></div>
+				<div class="brick post" style="height: 250px"><div class="media" style="height:58%"></div><div class="lines"><div class="line" style="width:88%"></div><div class="line" style="width:64%"></div></div></div>
+			</div>
+			<div class="col">
+				<div class="brick blog" style="height: 120px"><div class="media" style="height:52%"></div><div class="lines"><div class="line" style="width:86%"></div><div class="line" style="width:58%"></div></div></div>
+				<div class="brick post" style="height: 120px"><div class="lines" style="padding-top:16px"><div class="line" style="width:92%"></div><div class="line" style="width:76%"></div><div class="line" style="width:48%"></div></div></div>
+				<div class="brick video" style="height: 225px"><div class="media" style="height:64%"><div class="play">▶</div></div><div class="lines"><div class="line" style="width:72%"></div></div></div>
+				<div class="brick blog" style="height: 120px"><div class="media" style="height:52%"></div><div class="lines"><div class="line" style="width:86%"></div><div class="line" style="width:58%"></div></div></div>
+			</div>
+			<div class="col">
+				<div class="brick post" style="height: 175px"><div class="lines" style="padding-top:16px"><div class="line" style="width:92%"></div><div class="line" style="width:76%"></div><div class="line" style="width:48%"></div></div></div>
+				<div class="brick blog" style="height: 225px"><div class="media" style="height:52%"></div><div class="lines"><div class="line" style="width:86%"></div><div class="line" style="width:58%"></div></div></div>
+				<div class="brick post" style="height: 120px"><div class="lines" style="padding-top:16px"><div class="line" style="width:92%"></div><div class="line" style="width:76%"></div><div class="line" style="width:48%"></div></div></div>
+				<div class="brick video" style="height: 225px"><div class="media" style="height:64%"><div class="play">▶</div></div><div class="lines"><div class="line" style="width:72%"></div></div></div>
+			</div>
+			<div class="col">
+				<div class="brick post" style="height: 150px"><div class="lines" style="padding-top:16px"><div class="line" style="width:92%"></div><div class="line" style="width:76%"></div><div class="line" style="width:48%"></div></div></div>
+				<div class="brick blog" style="height: 120px"><div class="media" style="height:52%"></div><div class="lines"><div class="line" style="width:86%"></div><div class="line" style="width:58%"></div></div></div>
+				<div class="brick post" style="height: 120px"><div class="lines" style="padding-top:16px"><div class="line" style="width:92%"></div><div class="line" style="width:76%"></div><div class="line" style="width:48%"></div></div></div>
+				<div class="brick post" style="height: 200px"><div class="media" style="height:58%"></div><div class="lines"><div class="line" style="width:88%"></div><div class="line" style="width:64%"></div></div></div>
+			</div>
+			<div class="col">
+				<div class="brick blog" style="height: 200px"><div class="media" style="height:52%"></div><div class="lines"><div class="line" style="width:86%"></div><div class="line" style="width:58%"></div></div></div>
+				<div class="brick video" style="height: 120px"><div class="media" style="height:64%"><div class="play">▶</div></div><div class="lines"><div class="line" style="width:72%"></div></div></div>
+				<div class="brick post" style="height: 150px"><div class="lines" style="padding-top:16px"><div class="line" style="width:92%"></div><div class="line" style="width:76%"></div><div class="line" style="width:48%"></div></div></div>
+				<div class="brick blog" style="height: 120px"><div class="media" style="height:52%"></div><div class="lines"><div class="line" style="width:86%"></div><div class="line" style="width:58%"></div></div></div>
+			</div>
+			<div class="col">
+				<div class="brick post" style="height: 225px"><div class="media" style="height:58%"></div><div class="lines"><div class="line" style="width:88%"></div><div class="line" style="width:64%"></div></div></div>
+				<div class="brick post" style="height: 200px"><div class="media" style="height:58%"></div><div class="lines"><div class="line" style="width:88%"></div><div class="line" style="width:64%"></div></div></div>
+				<div class="brick blog" style="height: 120px"><div class="media" style="height:52%"></div><div class="lines"><div class="line" style="width:86%"></div><div class="line" style="width:58%"></div></div></div>
+				<div class="brick video" style="height: 225px"><div class="media" style="height:64%"><div class="play">▶</div></div><div class="lines"><div class="line" style="width:72%"></div></div></div>
+			</div>
+			<div class="col">
+				<div class="brick post" style="height: 120px"><div class="lines" style="padding-top:16px"><div class="line" style="width:92%"></div><div class="line" style="width:76%"></div><div class="line" style="width:48%"></div></div></div>
+				<div class="brick blog" style="height: 150px"><div class="media" style="height:52%"></div><div class="lines"><div class="line" style="width:86%"></div><div class="line" style="width:58%"></div></div></div>
+				<div class="brick post" style="height: 250px"><div class="media" style="height:58%"></div><div class="lines"><div class="line" style="width:88%"></div><div class="line" style="width:64%"></div></div></div>
+				<div class="brick video" style="height: 250px"><div class="media" style="height:64%"><div class="play">▶</div></div><div class="lines"><div class="line" style="width:72%"></div></div></div>
+			</div>
+		</div>
+
+		<div class="plate">
+			<h1>mason</h1>
+			<p id="tagline">everything the people you follow are making, in one wall</p>
+			<div class="kinds">
+				<span class="kind k-post">posts</span>
+				<span class="kind k-blog">blogs</span>
+				<span class="kind k-video">video</span>
+			</div>
+		</div>
+	</body>
+</html>

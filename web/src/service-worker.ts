@@ -8,10 +8,20 @@
 // a wake-up costs an IDB read instead of a cold network fan-out. (The
 // cursor's embedded seed covers correctness either way.)
 
+import { build, files, version } from "$service-worker";
 import init, { export_caches, feed_page, import_caches } from "$lib/mortar-wasm/pkg/mortar_wasm";
 import wasmUrl from "$lib/mortar-wasm/pkg/mortar_wasm_bg.wasm?url";
 
 declare const self: ServiceWorkerGlobalScope;
+
+// --- app shell cache --------------------------------------------------------
+// mason installs as an app, and an installed app that dies without a network
+// is a bad app. The shell and the wasm are precached, so an offline launch
+// still opens the landing page and the demo wall, which needs no network at
+// all: its bricks are fixtures compiled into the wasm.
+
+const SHELL = `mason-shell-${version}`;
+const PRECACHE = ["/", ...build, ...files];
 
 // --- IndexedDB: one store, one key -----------------------------------------
 
@@ -82,13 +92,49 @@ async function persistCaches(): Promise<void> {
   }
 }
 
-self.addEventListener("install", () => {
+self.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(SHELL).then((cache) => cache.addAll(PRECACHE)));
   void self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    (async () => {
+      // one cache per build; drop every older one
+      const stale = (await caches.keys()).filter(
+        (k) => k.startsWith("mason-shell-") && k !== SHELL,
+      );
+      await Promise.all(stale.map((k) => caches.delete(k)));
+      await self.clients.claim();
+    })(),
+  );
 });
+
+/** Cache first for the immutable build assets, network first for the rest,
+ *  and always fall back to the cached shell so an offline navigation lands on
+ *  the app instead of the browser's error page. */
+async function serveShell(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  const cache = await caches.open(SHELL);
+
+  // hashed build assets never change under their own name
+  if (build.includes(url.pathname)) {
+    const hit = await cache.match(url.pathname);
+    if (hit) return hit;
+  }
+
+  try {
+    const response = await fetch(request);
+    if (response.ok && request.method === "GET" && files.includes(url.pathname)) {
+      void cache.put(url.pathname, response.clone());
+    }
+    return response;
+  } catch {
+    const hit = (await cache.match(url.pathname)) ?? (await cache.match("/"));
+    if (hit) return hit;
+    throw new Error("offline and nothing cached for this request");
+  }
+}
 
 async function serveFeed(request: Request): Promise<Response> {
   await ensureInit();
@@ -124,15 +170,16 @@ function json(body: unknown, status: number): Response {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (
-    event.request.method === "GET" &&
-    url.origin === self.location.origin &&
-    url.pathname === "/api/feed"
-  ) {
+  if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
+
+  if (url.pathname === "/api/feed") {
     const response = serveFeed(event.request);
     event.respondWith(response);
     // keep the SW alive until the warm caches hit IndexedDB
     event.waitUntil(response.then(() => persistCaches()));
+    return;
   }
-  // everything else falls through to the network
+
+  // navigations and same-origin assets: shell cache, with an offline fallback
+  event.respondWith(serveShell(event.request));
 });

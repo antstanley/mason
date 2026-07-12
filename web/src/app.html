@@ -4,6 +4,49 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="text-scale" content="scale" />
+
+    <!-- Crawlers do not run JavaScript, and they never boot the service worker
+         that IS mason's feed engine. Whatever a link preview shows has to be
+         here, in the shell, or it does not exist. -->
+    <title>mason · everyone you follow, in one wall</title>
+    <meta
+      name="description"
+      content="A masonry wall of everything the people you follow are making: Bluesky posts, blogs and video. No login, and the feed is built in your own browser."
+    />
+    <link rel="canonical" href="https://mason.iamstan.dev/" />
+
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#f1f1f3" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#2a1e15" media="(prefers-color-scheme: dark)" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="mason" />
+    <meta property="og:url" content="https://mason.iamstan.dev/" />
+    <meta property="og:title" content="mason · everyone you follow, in one wall" />
+    <meta
+      property="og:description"
+      content="A masonry wall of everything the people you follow are making: Bluesky posts, blogs and video. No login, and the feed is built in your own browser."
+    />
+    <meta property="og:image" content="https://mason.iamstan.dev/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="The mason wordmark laid on a dark masonry wall of colour-coded bricks: sky for Bluesky posts, tangerine for blogs, violet for video."
+    />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="mason · everyone you follow, in one wall" />
+    <meta
+      name="twitter:description"
+      content="Bluesky posts, blogs and video from everyone you follow, in one wall. No login."
+    />
+    <meta name="twitter:image" content="https://mason.iamstan.dev/og.png" />
+
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">
