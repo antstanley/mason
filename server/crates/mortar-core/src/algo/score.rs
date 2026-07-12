@@ -3,15 +3,44 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::model::Brick;
+use crate::model::{Brick, VideoSource};
 
 /// Half-life in hours per brick kind: posts churn fast, blogs simmer,
-/// trailers are near-evergreen.
+/// trailers are near-evergreen. Shorter than the medium's shelf life on
+/// purpose, so the freshest brick of a kind clearly outranks yesterday's.
 pub fn half_life_hours(brick: &Brick) -> f64 {
     match brick {
-        Brick::Post(_) => 24.0,
-        Brick::Blog(_) => 24.0 * 7.0,
-        Brick::Video(_) => 24.0 * 30.0,
+        Brick::Post(_) => 12.0,
+        Brick::Blog(_) => 24.0 * 3.0,
+        // a Bluesky video IS a post, and ages like one; only a Steam trailer,
+        // whose timestamp is merely when we hydrated it, is evergreen
+        Brick::Video(v) if v.source == VideoSource::Bluesky => 12.0,
+        Brick::Video(_) => 24.0 * 14.0,
+    }
+}
+
+/// Nothing older than this is worth a slot on the wall. A hard window, not a
+/// soft preference: decay alone leaves a week-old post technically eligible,
+/// and on a quiet follow graph it will surface. mason is for what the people
+/// you follow are making, present tense.
+pub fn max_age_hours(brick: &Brick) -> f64 {
+    match brick {
+        Brick::Post(_) => 72.0,
+        Brick::Blog(_) => 24.0 * 14.0,
+        // same window as any other post: a video from three months ago is not
+        // "what the people you follow are making" (this is how the wall ended
+        // up 42% video: stale clips filled the gap left by expired text posts)
+        Brick::Video(v) if v.source == VideoSource::Bluesky => 72.0,
+        Brick::Video(_) => 24.0 * 90.0,
+    }
+}
+
+/// Bricks with an unparseable date are treated as stale: better to drop one
+/// than to let it sit at the top of a wall forever with an infinite age.
+pub fn is_fresh(brick: &Brick, now: DateTime<Utc>) -> bool {
+    match created_at(brick) {
+        Some(t) => (now - t).num_seconds().max(0) as f64 / 3600.0 <= max_age_hours(brick),
+        None => false,
     }
 }
 
@@ -96,7 +125,7 @@ mod tests {
     #[test]
     fn decay_halves_at_half_life() {
         let fresh = post("2026-07-11T00:00:00Z", 0, 0);
-        let one_half_life = post("2026-07-10T00:00:00Z", 0, 0); // 24h old
+        let one_half_life = post("2026-07-10T12:00:00Z", 0, 0); // 12h old
         let ratio = grout(&one_half_life, now()) / grout(&fresh, now());
         assert!((ratio - 0.5).abs() < 1e-9, "ratio was {ratio}");
     }
@@ -126,5 +155,37 @@ mod tests {
         let bad = post("not-a-date", 1000, 0);
         let ok = post("2026-07-01T00:00:00Z", 0, 0);
         assert!(grout(&ok, now()) > grout(&bad, now()));
+    }
+
+    #[test]
+    fn posts_older_than_72_hours_are_not_fresh() {
+        assert!(is_fresh(
+            &post(&(now() - TimeDelta::hours(71)).to_rfc3339(), 0, 0),
+            now()
+        ));
+        assert!(!is_fresh(
+            &post(&(now() - TimeDelta::hours(73)).to_rfc3339(), 0, 0),
+            now()
+        ));
+    }
+
+    #[test]
+    fn an_unparseable_date_is_stale_not_immortal() {
+        // it used to score as age f64::MAX/2, which is merely a low score;
+        // it must be dropped instead, or it lingers on every wall forever
+        assert!(!is_fresh(&post("not-a-date", 9999, 9999), now()));
+    }
+
+    #[test]
+    fn recency_bias_is_steep_enough_to_matter() {
+        // a day-old post must rank below a fresh one even when it was popular:
+        // 24h is two half-lives now, so decay is 0.25 against a x(1+ln) boost
+        let fresh_quiet = post(&now().to_rfc3339(), 0, 0);
+        let day_old_popular = post(&(now() - TimeDelta::hours(24)).to_rfc3339(), 40, 0);
+        assert!(grout(&fresh_quiet, now()) < grout(&day_old_popular, now()));
+
+        // but three days old (the window edge) loses to a fresh quiet post
+        let stale_popular = post(&(now() - TimeDelta::hours(71)).to_rfc3339(), 40, 0);
+        assert!(grout(&fresh_quiet, now()) > grout(&stale_popular, now()));
     }
 }

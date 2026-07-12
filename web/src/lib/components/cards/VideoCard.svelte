@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { VideoBrick } from '$lib/types';
 	import { player } from '$lib/state/player.svelte';
+	import { clientUrl } from '$lib/state/client.svelte';
 	import BrickShell from '../BrickShell.svelte';
 	import AuthorChip from '../AuthorChip.svelte';
 	import VideoPlayer from '../VideoPlayer.svelte';
@@ -85,7 +86,7 @@
 				<span></span>
 			{/if}
 			<a
-				href={brick.url}
+				href={clientUrl(brick.url)}
 				target="_blank"
 				rel="noopener noreferrer"
 				class="shrink-0 text-sm font-semibold text-brick-video-ink hover:underline dark:text-brick-video-bright"

@@ -3,6 +3,7 @@
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import { localMode } from '$lib/api';
+	import ClientPicker from '$lib/components/ClientPicker.svelte';
 
 	let { children } = $props();
 
@@ -41,6 +42,7 @@
 				mason&nbsp;<span aria-hidden="true">🧱</span>
 			</a>
 			<div class="flex items-center gap-3 text-sm">
+				<ClientPicker />
 				<span class="font-semibold opacity-75">@{actor}</span>
 				<a
 					href="/"
