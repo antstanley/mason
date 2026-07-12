@@ -1,11 +1,11 @@
 //! The heart of mortar: a snapshot is one user's wall-in-progress. Built on
 //! first request with a first-paint threshold (respond as soon as enough
 //! authors have answered), filled to completion by a background task, and
-//! paged immutably — bricks already served never move.
+//! paged immutably; bricks already served never move.
 //!
 //! The cursor carries (snapshot id, seed, offset). If a snapshot is evicted
 //! mid-scroll (cache TTL natively; instance death in the service worker),
-//! the same seed rebuilds a closely-matching wall — continuity is
+//! the same seed rebuilds a closely-matching wall; continuity is
 //! best-effort, determinism of jitter is exact.
 
 use std::collections::HashSet;
@@ -29,7 +29,7 @@ use crate::sources::bluesky::AuthorYield;
 use crate::sources::{bluesky, standardsite, steam};
 use crate::state::AppState;
 
-/// Sampled authors per snapshot — never fan out to the whole follow graph.
+/// Sampled authors per snapshot; never fan out to the whole follow graph.
 const COHORT_SIZE: usize = 100;
 /// Of which: authors that yielded content in recent snapshots.
 const KNOWN_ACTIVE: usize = 60;
@@ -164,7 +164,7 @@ pub async fn get_or_build(
 
 /// The background fill: follows → cohort fan-out (+ concurrent featured
 /// trailers) → mentioned-game trailers → warming off. Any follow-graph
-/// failure leaves an empty (but terminated) snapshot rather than an error —
+/// failure leaves an empty (but terminated) snapshot rather than an error -
 /// actor existence was already checked by resolve.
 async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, seed: u64) {
     let started = Instant::now();
@@ -188,7 +188,7 @@ async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, see
         cohort.len()
     );
 
-    // featured trailers don't depend on the cohort — hydrate them
+    // featured trailers don't depend on the cohort; hydrate them
     // concurrently with the author fan-out so they make the first pages
     let featured_fill = async {
         if !state.config.steam_enabled {
@@ -238,7 +238,7 @@ async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, see
                 // cross-posted skeet, whether the post came first or later
                 for uri in &docs.suppressed_posts {
                     if inner.seen.insert(uri.clone()) {
-                        // post not pooled yet — the insert blocks it later
+                        // post not pooled yet; the insert blocks it later
                     } else {
                         inner.pool.retain(|b| b.id() != uri);
                     }
@@ -255,7 +255,7 @@ async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, see
     let ((answered, yielding_authors, mut mentioned_appids), ()) =
         futures::join!(authors_fill, featured_fill);
 
-    // games the cohort talked about — these do need the posts first
+    // games the cohort talked about; these do need the posts first
     mentioned_appids.truncate(STEAM_MENTIONS_PER_SNAPSHOT);
     if state.config.steam_enabled && !mentioned_appids.is_empty() {
         tracing::debug!("steam mentions: hydrating {}", mentioned_appids.len());
@@ -412,7 +412,7 @@ async fn steam_trailers_cached(state: &Arc<AppState>, appid: u64) -> Arc<Vec<Bri
     bricks
 }
 
-/// A small seeded sample of featured releases — exploration filler so video
+/// A small seeded sample of featured releases; exploration filler so video
 /// bricks exist even when nobody you follow talks about games.
 async fn featured_sample(state: &Arc<AppState>, seed: u64) -> Vec<u64> {
     let featured = match state.caches.steam_featured.get(&0u8).await {

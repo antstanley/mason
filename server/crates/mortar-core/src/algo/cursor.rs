@@ -18,7 +18,7 @@ pub fn encode(cursor: &Cursor) -> String {
     URL_SAFE_NO_PAD.encode(serde_json::to_vec(cursor).expect("cursor serializes"))
 }
 
-/// Garbage or tampered input yields None — callers fall back to a fresh feed,
+/// Garbage or tampered input yields None; callers fall back to a fresh feed,
 /// never a 500.
 pub fn decode(raw: &str) -> Option<Cursor> {
     let bytes = URL_SAFE_NO_PAD.decode(raw).ok()?;

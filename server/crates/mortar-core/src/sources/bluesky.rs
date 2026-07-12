@@ -64,7 +64,7 @@ pub async fn get_follows(http: &Http, base: &str, did: &str) -> Result<Vec<Follo
         let page: FollowsPage = http.get_json(&url, Bucket::Appview).await?;
         follows.extend(page.follows);
         cursor = page.cursor;
-        // hard stop at 2000 follows — the cohort sampler doesn't need more
+        // hard stop at 2000 follows; the cohort sampler doesn't need more
         if cursor.is_none() || follows.len() >= 2000 {
             return Ok(follows);
         }
@@ -109,7 +109,7 @@ pub async fn get_author_feed(http: &Http, base: &str, did: &str) -> Result<Autho
     })
 }
 
-/// URIs from `app.bsky.richtext.facet#link` features — link text in posts is
+/// URIs from `app.bsky.richtext.facet#link` features; link text in posts is
 /// often display-truncated, only the facet holds the real URL.
 fn facet_link_uris(facets: &[serde_json::Value]) -> Vec<String> {
     facets

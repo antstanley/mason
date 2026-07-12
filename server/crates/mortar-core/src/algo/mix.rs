@@ -1,7 +1,7 @@
 //! The mixer lays bricks one at a time: each pick maximizes
 //! grout × type-need × jitter among candidates outside the author-diversity
 //! window. Ranking is within-kind (grout) while the need factor pulls the
-//! wall toward the target kind ratio — kinds are never compared by raw score.
+//! wall toward the target kind ratio; kinds are never compared by raw score.
 //!
 //! Pure and deterministic given (pool, wall, seed, now): laying 20 then 20
 //! equals laying 40, which is what makes cursor pagination stable.
@@ -13,13 +13,13 @@ use super::score;
 use crate::model::{Brick, VideoSource};
 
 /// Target share of the wall per mix kind: post / blog / Bluesky video /
-/// Steam trailer. Trailers are their own kind — they have no engagement
+/// Steam trailer. Trailers are their own kind; they have no engagement
 /// signal, so ranking them against liked Bluesky videos would bury them at
 /// the bottom of every wall.
 const TARGET: [f64; 4] = [0.70, 0.15, 0.10, 0.05];
 const KINDS: usize = 4;
 /// A brick's author may not reappear within this many trailing bricks
-/// (soft — ignored when every candidate is inside the window).
+/// (soft; ignored when every candidate is inside the window).
 const AUTHOR_WINDOW: usize = 8;
 
 fn kind_index(brick: &Brick) -> usize {
@@ -31,7 +31,7 @@ fn kind_index(brick: &Brick) -> usize {
     }
 }
 
-/// Deterministic wobble in [0.85, 1.15] — the wall feels alive across
+/// Deterministic wobble in [0.85, 1.15]; the wall feels alive across
 /// seeds but identical within one.
 fn jitter(seed: u64, id: &str) -> f64 {
     let h = xxh3_64_with_seed(id.as_bytes(), seed);
@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn trailers_pooled_late_still_get_laid() {
         // wall already has 100 bricks laid with no trailers available,
-        // then 3 trailers join the pool — they must appear in the next 48
+        // then 3 trailers join the pool; they must appear in the next 48
         let mut pool: Vec<Brick> = Vec::new();
         for i in 0..200 {
             let a = i % 30;

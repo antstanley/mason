@@ -4,21 +4,32 @@
   --font-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
   --font-sans: system-ui, -apple-system, sans-serif;
 
-  /* surfaces */
-  --color-plaster: oklch(0.97 0.015 85); /* warm cream */
-  --color-plaster-deep: oklch(0.93 0.02 80);
-  --color-kiln: oklch(0.22 0.012 50); /* dark mode surface */
-  --color-kiln-deep: oklch(0.17 0.01 50);
-  --color-ink: oklch(0.28 0.02 40);
-  --color-chalk: oklch(0.96 0.008 85);
+  /* surfaces; the field between bricks is MORTAR: cool stone, chroma ~0.
+     Warmth lives in the ink, the accents, and the content, never in the
+     body background (the cream default was on our own anti-reference list) */
+  --color-plaster: oklch(0.955 0.004 260); /* mortar white */
+  --color-plaster-deep: oklch(0.9 0.006 260);
+  --color-kiln: oklch(0.25 0.03 50); /* fired clay; dark surfaces */
+  --color-kiln-deep: oklch(0.2 0.028 50);
+  --color-ink: oklch(0.28 0.02 40); /* warm ink on cool stone */
+  --color-chalk: oklch(0.985 0.002 260); /* card face */
 
   /* brick-kind accents */
   --color-brick-post: oklch(0.66 0.15 237); /* sky */
   --color-brick-blog: oklch(0.7 0.19 45); /* tangerine */
   --color-brick-video: oklch(0.58 0.22 295); /* violet */
 
+  /* text-safe accent variants; AA on light tints/surfaces where the
+     display accents fall short (measured in the 2026-07 critique) */
+  --color-brick-post-ink: oklch(0.48 0.14 237);
+  --color-brick-blog-ink: oklch(0.47 0.16 45);
+  --color-brick-video-ink: oklch(0.45 0.2 295);
+  --color-brick-video-bright: oklch(0.74 0.17 295);
+
   /* pops */
   --color-pop-pink: oklch(0.68 0.24 350);
+  /* CTA fill: white text needs a deeper pink than the display accent */
+  --color-pop-pink-deep: oklch(0.52 0.22 350);
   --color-pop-lime: oklch(0.85 0.21 128);
   --color-pop-sun: oklch(0.85 0.17 90);
 
@@ -26,7 +37,9 @@
   --shadow-brick: 0 2px 0 0 oklch(0 0 0 / 0.12);
   --shadow-brick-lift: 0 10px 24px -8px oklch(0 0 0 / 0.28);
 
-  --animate-brick-in: brick-in 0.45s cubic-bezier(0.22, 1.2, 0.36, 1) both;
+  /* a brick is tapped down and stays down: fast, decelerating, no rebound
+     (ease-out-quint; the overshoot curve read as bounce) */
+  --animate-brick-in: brick-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
 
   @keyframes brick-in {
     from {
@@ -46,7 +59,58 @@ body {
   font-family: var(--font-sans);
 }
 
-/* kiln mode — fired dark clay */
+/* One focus language everywhere. Lives in @layer base so a component can
+   still override the offset with a utility; an unlayered rule would beat
+   every Tailwind utility no matter its specificity (cards clip their own
+   children, so their ring has to be drawn inside). The colour is
+   scheme-aware to clear 3:1 on both the mortar field and the dark kiln. */
+@layer base {
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 3px solid var(--color-pop-pink-deep);
+    outline-offset: 2px;
+    transition-property: none;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+      outline-color: var(--color-pop-pink);
+    }
+  }
+}
+
+::placeholder {
+  color: color-mix(in oklch, var(--color-ink) 70%, transparent);
+  opacity: 1;
+}
+
+/* reduced motion: bricks appear by crossfade, nothing pulses, transform
+   hovers are gated with motion-safe: variants at the call sites */
+@media (prefers-reduced-motion: reduce) {
+  .animate-brick-in {
+    animation: brick-fade 0.25s linear both;
+  }
+  .animate-pulse {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+@keyframes brick-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  ::placeholder {
+    color: color-mix(in oklch, var(--color-chalk) 70%, transparent);
+  }
+}
+
+/* kiln mode; fired dark clay */
 @media (prefers-color-scheme: dark) {
   body {
     background-color: var(--color-kiln-deep);

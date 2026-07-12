@@ -7,7 +7,7 @@ use governor::{Quota, RateLimiter};
 use serde::de::DeserializeOwned;
 
 /// Shared HTTP client with a global token bucket for the AppView and
-/// 429/5xx retry with backoff. Built before any source — every upstream
+/// 429/5xx retry with backoff. Built before any source; every upstream
 /// call goes through here.
 pub struct Http {
     client: reqwest::Client,
@@ -30,7 +30,7 @@ pub enum HttpError {
 pub enum Bucket {
     /// Rate-limited against the shared AppView budget
     Appview,
-    /// Other hosts (individual PDSes, plc.directory, Steam) — the per-source
+    /// Other hosts (individual PDSes, plc.directory, Steam); the per-source
     /// callers bound their own concurrency instead
     Unmetered,
 }

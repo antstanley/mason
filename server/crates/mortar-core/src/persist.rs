@@ -4,7 +4,7 @@
 //! IndexedDB after serving a page and imports it on startup, turning the
 //! post-idle rebuild from seconds of network fan-out into milliseconds.
 //!
-//! Snapshots themselves are NOT persisted — they hold locks and in-flight
+//! Snapshots themselves are NOT persisted; they hold locks and in-flight
 //! state, and the seed-carrying cursor already rebuilds them
 //! deterministically from these warm caches.
 
@@ -16,7 +16,7 @@ use crate::cache::{Caches, StdDocs};
 use crate::model::Brick;
 use crate::sources::bluesky::{AuthorYield, Follow};
 
-/// Bump when any persisted shape changes — imports of older bundles are
+/// Bump when any persisted shape changes; imports of older bundles are
 /// discarded wholesale (they're just caches).
 pub const VERSION: u32 = 1;
 

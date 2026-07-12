@@ -1,6 +1,6 @@
 //! mortar compiled for the browser: a thin wasm-bindgen wrapper around
 //! mortar-core, driven by the SvelteKit service worker. State lives in a
-//! thread_local — the SW is single-threaded and may be killed at any idle
+//! thread_local; the SW is single-threaded and may be killed at any idle
 //! moment; the cursor's embedded seed makes rebuilds deterministic.
 
 use std::cell::RefCell;
@@ -20,7 +20,7 @@ fn state() -> Arc<AppState> {
         let mut slot = cell.borrow_mut();
         if slot.is_none() {
             console_error_panic_hook::set_once();
-            // Steam's storefront API has no CORS headers — disabled in the
+            // Steam's storefront API has no CORS headers; disabled in the
             // browser build. Point steam_store_base at a proxy and flip
             // steam_enabled via init_config to bring trailers back.
             *slot = Some(Arc::new(AppState::new(Config {
@@ -49,7 +49,7 @@ pub fn init_config(steam_proxy_base: Option<String>) {
     });
 }
 
-/// Snapshot of the warm caches as JSON — the service worker stores this in
+/// Snapshot of the warm caches as JSON; the service worker stores this in
 /// IndexedDB after serving a page, so a reaped SW instance wakes up warm.
 #[wasm_bindgen]
 pub async fn export_caches() -> Result<String, JsValue> {
@@ -59,7 +59,7 @@ pub async fn export_caches() -> Result<String, JsValue> {
 }
 
 /// Restore a previously exported bundle. Anything unparseable or stale is
-/// silently discarded — it's only a cache.
+/// silently discarded; it's only a cache.
 #[wasm_bindgen]
 pub async fn import_caches(json: String) {
     if let Ok(bundle) = serde_json::from_str(&json) {

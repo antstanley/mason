@@ -5,7 +5,7 @@
 	import FeedGrid from '$lib/components/FeedGrid.svelte';
 	import HandleForm from '$lib/components/HandleForm.svelte';
 
-	// the URL is the source of truth: /?actor=handle — shareable walls
+	// the URL is the source of truth: /?actor=handle; shareable walls
 	const actor = $derived(page.url.searchParams.get('actor'));
 
 	$effect(() => {
@@ -16,7 +16,8 @@
 </script>
 
 {#if actor}
-	<main class="pb-8">
+	<main id="wall" class="pb-8">
+		<h1 class="sr-only">@{actor}'s wall on mason</h1>
 		<FeedGrid />
 	</main>
 {:else}

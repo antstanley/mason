@@ -11,7 +11,7 @@ pub enum AppError {
 }
 
 impl AppError {
-    /// (http status, machine code) — consumed by the axum IntoResponse in
+    /// (http status, machine code); consumed by the axum IntoResponse in
     /// mortar-server and the Response builder in the service worker.
     pub fn status_and_code(&self) -> (u16, &'static str) {
         match self {

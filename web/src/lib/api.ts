@@ -8,7 +8,7 @@ const BASE: string = import.meta.env.PUBLIC_MASON_SERVER_URL ?? "";
 
 export const localMode = BASE === "";
 
-/** Interception only applies once the SW CONTROLS this page — `ready`
+/** Interception only applies once the SW CONTROLS this page; `ready`
  *  resolves at activation, which can precede clients.claim() taking effect.
  *  Fetching in that gap goes to the network and 404s on a static host. */
 async function swControlsPage(): Promise<void> {
@@ -21,7 +21,7 @@ async function swControlsPage(): Promise<void> {
         once: true,
       }),
     ),
-    // hard-reloaded pages stay uncontrolled by design — don't hang forever
+    // hard-reloaded pages stay uncontrolled by design; don't hang forever
     new Promise<void>((resolve) => setTimeout(resolve, 2000)),
   ]);
 }
