@@ -12,7 +12,7 @@
 	{/if}
 	<div class="flex flex-col gap-3 p-4">
 		<span
-			class="w-fit rounded-full bg-brick-blog/15 px-2.5 py-0.5 text-[0.7rem] font-bold tracking-wide text-brick-blog uppercase"
+			class="w-fit rounded-full bg-brick-blog/15 px-2.5 py-0.5 text-[0.7rem] font-bold tracking-wide text-brick-blog-ink uppercase dark:text-brick-blog"
 		>
 			{brick.publication.name}
 		</span>

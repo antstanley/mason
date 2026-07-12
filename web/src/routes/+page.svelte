@@ -16,7 +16,8 @@
 </script>
 
 {#if actor}
-	<main class="pb-8">
+	<main id="wall" class="pb-8">
+		<h1 class="sr-only">@{actor}'s wall on mason</h1>
 		<FeedGrid />
 	</main>
 {:else}

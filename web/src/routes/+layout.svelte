@@ -1,7 +1,6 @@
 <script lang="ts">
 	import '../app.css';
 	import { browser } from '$app/environment';
-	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import favicon from '$lib/assets/favicon.svg';
 	import { localMode } from '$lib/api';
@@ -33,19 +32,24 @@
 
 <div class="mx-auto min-h-screen max-w-[1800px] px-4 sm:px-6">
 	{#if actor}
-		<header class="flex items-center justify-between py-4">
-			<a href="/" class="font-display text-2xl font-black tracking-tight">
-				mason <span class="text-pop-pink">🧱</span>
+		<a
+			href="#wall"
+			class="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-full focus:bg-chalk focus:px-4 focus:py-2 focus:font-semibold dark:focus:bg-kiln"
+		>
+			skip to the wall
+		</a>
+		<header class="flex items-center justify-between py-3">
+			<a href="/" class="inline-flex min-h-11 items-center font-display text-2xl font-black tracking-tight">
+				mason&nbsp;<span aria-hidden="true">🧱</span>
 			</a>
 			<div class="flex items-center gap-3 text-sm">
-				<span class="font-semibold opacity-70">@{actor}</span>
-				<button
-					type="button"
-					onclick={() => void goto('/')}
-					class="cursor-pointer rounded-full border-2 border-ink/15 px-3 dark:border-chalk/20 py-1 font-semibold transition-colors hover:border-pop-pink hover:text-pop-pink"
+				<span class="font-semibold opacity-75">@{actor}</span>
+				<a
+					href="/"
+					class="inline-flex min-h-11 items-center rounded-full border-2 border-ink/15 px-4 font-semibold transition-colors hover:border-pop-pink hover:text-pop-pink dark:border-chalk/20"
 				>
 					switch
-				</button>
+				</a>
 			</div>
 		</header>
 	{/if}

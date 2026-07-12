@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tick, untrack, type Snippet } from 'svelte';
+	import { colsForWidth } from '$lib/columns';
 	import type { Brick } from '$lib/types';
 
 	let {
@@ -10,18 +11,16 @@
 		brick: Snippet<[Brick]>;
 	} = $props();
 
+	type Placed = { item: Brick; fresh: boolean };
+
 	let container = $state<HTMLElement | null>(null);
 	let colCount = $state(0);
-	let columns = $state<Brick[][]>([]);
+	let columns = $state<Placed[][]>([]);
 	let placedCount = 0;
 	let placing = false;
-
-	function colsForWidth(width: number): number {
-		if (width < 640) return 1;
-		if (width < 1024) return 2;
-		if (width < 1440) return 3;
-		return 4;
-	}
+	// bricks that have already made their entrance — a column-count rebuild
+	// re-places them WITHOUT replaying the drop-in animation
+	const entered = new Set<string>();
 
 	// Measure columns through the live DOM, not element bindings: the keyed
 	// each reuses surviving column divs across rebuilds, so bind:this refs
@@ -51,7 +50,9 @@
 			while (placedCount < items.length) {
 				const item = items[placedCount];
 				placedCount += 1;
-				columns[shortestColumn()].push(item);
+				const fresh = !entered.has(item.id);
+				entered.add(item.id);
+				columns[shortestColumn()].push({ item, fresh });
 				// placement must be sequential: each brick lands in the column
 				// whose height reflects the previous brick
 				// oxlint-disable-next-line no-await-in-loop
@@ -87,6 +88,7 @@
 		const len = items.length;
 		untrack(() => {
 			if (len < placedCount) {
+				entered.clear();
 				rebuild(colCount || 1);
 			} else if (len > placedCount) {
 				void placePending();
@@ -98,9 +100,9 @@
 <div bind:this={container} class="flex items-start gap-5">
 	{#each { length: colCount } as _, i (i)}
 		<div class="flex min-w-0 flex-1 flex-col gap-5">
-			{#each columns[i] as item (item.id)}
-				<div class="animate-brick-in">
-					{@render brick(item)}
+			{#each columns[i] as placed (placed.item.id)}
+				<div class={placed.fresh ? 'animate-brick-in' : undefined}>
+					{@render brick(placed.item)}
 				</div>
 			{/each}
 		</div>
