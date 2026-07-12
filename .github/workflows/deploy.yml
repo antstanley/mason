@@ -1,6 +1,10 @@
 name: deploy
 
+# Two entry points, one definition. A release calls this, because cutting a
+# release IS shipping; a manual dispatch covers a hotfix or a re-deploy of
+# unchanged code.
 on:
+  workflow_call:
   workflow_dispatch:
 
 permissions:

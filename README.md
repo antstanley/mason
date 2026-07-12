@@ -85,10 +85,14 @@ mason"** PR open collecting every pending changeset. Merging *that* PR bumps the
 version everywhere, writes `CHANGELOG.md`, tags, and cuts the GitHub release.
 Nothing is published to npm: the release is the artifact.
 
-**Releasing is not deploying.** They are separate on purpose. Cutting a release
-tags the code and writes the notes; the live site only changes when the deploy
-workflow is dispatched (see below). A release can sit unshipped, and a deploy can
-ship an unreleased `main`.
+**A release is a ship.** Merging the version PR bumps, changelogs, tags, cuts the
+GitHub release, and then deploys to production, so the tag, the notes and the live
+site always describe the same code. There is no such thing as a released version
+that never shipped.
+
+Merging an ordinary PR to `main` does not deploy: it only updates the pending
+version PR. The deploy workflow can still be dispatched by hand for a hotfix, or
+to re-deploy unchanged code.
 
 What the numbers mean here, for an app with no public API:
 
