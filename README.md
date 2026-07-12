@@ -66,6 +66,46 @@ just clean        # reclaim the cargo target dir (~3GB)
 
 Try actor `demo` for an offline fixture wall.
 
+## Releases
+
+mason ships as one thing, so it carries one version. The root `package.json` is
+the source of truth, owned by [changesets](https://github.com/changesets/changesets);
+`pnpm version` propagates that number to `web/package.json`, the Rust workspace,
+and `Cargo.lock`, so they cannot drift apart (they had: 0.0.1, 0.1.0 and v0.1.0
+all at once).
+
+Add a changeset with any user-visible change:
+
+```sh
+pnpm changeset      # describe the change, pick major/minor/patch
+```
+
+Commit the generated file. On merge to `main`, CI keeps a **"chore: version
+mason"** PR open collecting every pending changeset. Merging *that* PR bumps the
+version everywhere, writes `CHANGELOG.md`, tags, and cuts the GitHub release.
+Nothing is published to npm: the release is the artifact.
+
+**A release is a ship.** Merging the version PR bumps, changelogs, tags, cuts the
+GitHub release, and then deploys to production, so the tag, the notes and the live
+site always describe the same code. There is no such thing as a released version
+that never shipped.
+
+Merging an ordinary PR to `main` does not deploy: it only updates the pending
+version PR. The deploy workflow can still be dispatched by hand for a hotfix, or
+to re-deploy unchanged code.
+
+What the numbers mean here, for an app with no public API:
+
+| bump | when |
+|---|---|
+| **major** | the wall itself works differently, or a shared `?actor=` link stops meaning what it meant |
+| **minor** | a new brick kind, a new surface, a visible capability (offline install, link previews) |
+| **patch** | fixes and polish nobody has to relearn anything for |
+
+Infrastructure-only changes (CI, deploy config, dependency bumps that change
+nothing a visitor can see) need no changeset. Forgot one? Add it in a follow-up
+PR; it joins the pending pile and lands in the next version.
+
 ## Deploy (AWS via blogwright)
 
 The static local-mode build deploys to S3 + CloudFront with
