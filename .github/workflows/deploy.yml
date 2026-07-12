@@ -5,6 +5,10 @@ name: deploy
 # unchanged code.
 on:
   workflow_call:
+    inputs:
+      refresh:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       refresh:
