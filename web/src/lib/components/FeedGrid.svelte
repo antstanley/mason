@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { feed } from '$lib/state/feed.svelte';
@@ -18,11 +19,13 @@
 
 	// the dead-end fix: the failed handle stays editable, right here
 	$effect(() => {
-		if (feed.error === 'handle-not-found') {
-			retryValue = currentActor;
+		if (feed.error !== 'handle-not-found') return;
+		retryValue = currentActor;
+		// select() only works once Svelte has written the value to the DOM
+		void tick().then(() => {
 			retryInput?.focus();
 			retryInput?.select();
-		}
+		});
 	});
 
 	function retrySubmit(event: SubmitEvent) {
@@ -118,10 +121,8 @@
 			</button>
 		</div>
 	{:else if feed.loading}
-		<div class="grid grid-cols-1 gap-5 pt-5 sm:grid-cols-2 lg:grid-cols-3 min-[1440px]:grid-cols-4">
-			{#each { length: 4 } as _, i (i)}
-				<SkeletonCard variant={i} />
-			{/each}
+		<div class="pt-5">
+			<SkeletonGrid count={4} />
 		</div>
 	{/if}
 	{#if feed.done && !feed.error}

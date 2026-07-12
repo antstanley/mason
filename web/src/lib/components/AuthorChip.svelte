@@ -4,7 +4,7 @@
 	let { author }: { author: Author } = $props();
 </script>
 
-<div class="flex items-center gap-2">
+<div class="flex min-w-0 items-center gap-2">
 	{#if author.avatar}
 		<img src={author.avatar} alt="" class="size-7 rounded-full border border-ink/10" loading="lazy" />
 	{:else}

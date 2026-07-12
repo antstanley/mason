@@ -31,7 +31,7 @@
 			</p>
 		</div>
 
-		<form onsubmit={submit} class="flex w-full gap-2">
+		<form onsubmit={submit} class="flex w-full flex-col gap-2 sm:flex-row">
 			<label class="sr-only" for="handle">Your Bluesky handle</label>
 			<input
 				id="handle"
@@ -46,7 +46,7 @@
 			/>
 			<button
 				type="submit"
-				class="shrink-0 cursor-pointer rounded-full bg-pop-pink-deep px-6 py-3 font-display font-bold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95"
+				class="shrink-0 cursor-pointer rounded-full bg-pop-pink-deep px-6 py-3 max-sm:w-full font-display font-bold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95"
 			>
 				lay bricks
 			</button>
@@ -58,7 +58,7 @@
 			</p>
 			<a
 				href="/?actor=demo"
-				class="font-semibold text-brick-post-ink hover:underline dark:text-brick-post"
+				class="inline-flex min-h-11 items-center px-2 font-semibold text-brick-post-ink hover:underline dark:text-brick-post"
 			>
 				don't have one? wander the demo wall →
 			</a>

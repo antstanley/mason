@@ -14,7 +14,7 @@
 			src={img.src}
 			alt={img.alt}
 			loading="lazy"
-			class="w-full object-cover"
+			class="w-full bg-brick-post/15 object-cover"
 			style:aspect-ratio={img.aspectRatio ? `${img.aspectRatio.width} / ${img.aspectRatio.height}` : undefined}
 		/>
 	{/if}
@@ -28,7 +28,7 @@
 				<p class="line-clamp-2 text-xs opacity-75">{brick.external.description}</p>
 			</div>
 		{/if}
-		<div class="flex items-center justify-between gap-2">
+		<div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
 			<AuthorChip author={brick.author} />
 			<div class="flex shrink-0 gap-2 text-xs font-semibold opacity-75">
 				<span aria-label="{brick.likeCount} likes"><span aria-hidden="true">♥</span> {brick.likeCount}</span>

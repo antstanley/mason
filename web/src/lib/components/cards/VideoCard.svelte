@@ -36,7 +36,13 @@
 			</button>
 		{:else}
 			{#if brick.poster}
-				<img src={brick.poster} alt="" loading="lazy" class="w-full object-cover" style:aspect-ratio={ratio} />
+				<img
+					src={brick.poster}
+					alt=""
+					loading="lazy"
+					class="w-full bg-brick-video/15 object-cover"
+					style:aspect-ratio={ratio}
+				/>
 			{:else}
 				<div class="w-full bg-brick-video/20" style:aspect-ratio={ratio}></div>
 			{/if}
@@ -48,7 +54,7 @@
 					player.claim(brick.id);
 					playRequested = true;
 				}}
-				class="absolute inset-0 grid cursor-pointer place-items-center"
+				class="absolute inset-0 grid cursor-pointer place-items-center focus-visible:outline-offset-[-3px]"
 				aria-label="Play video: {brick.title || sourceName + ' video'}"
 			>
 				<span
@@ -72,7 +78,7 @@
 		{#if brick.game}
 			<p class="text-sm opacity-75">{brick.game.name}</p>
 		{/if}
-		<div class="flex items-center justify-between gap-2">
+		<div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
 			{#if brick.author}
 				<AuthorChip author={brick.author} />
 			{:else}

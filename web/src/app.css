@@ -59,11 +59,23 @@ body {
   font-family: var(--font-sans);
 }
 
-/* one focus language everywhere: a pop-pink ring, offset so it reads on
-   any fill (including the pink CTA itself) */
-:where(a, button, input, select, textarea, [tabindex]):focus-visible {
-  outline: 3px solid var(--color-pop-pink);
-  outline-offset: 2px;
+/* One focus language everywhere. Lives in @layer base so a component can
+   still override the offset with a utility — an unlayered rule would beat
+   every Tailwind utility no matter its specificity (cards clip their own
+   children, so their ring has to be drawn inside). The colour is
+   scheme-aware to clear 3:1 on both the mortar field and the dark kiln. */
+@layer base {
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 3px solid var(--color-pop-pink-deep);
+    outline-offset: 2px;
+    transition-property: none;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+      outline-color: var(--color-pop-pink);
+    }
+  }
 }
 
 ::placeholder {

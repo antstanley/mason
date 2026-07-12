@@ -8,7 +8,7 @@
 
 <BrickShell accent="blog" href={brick.url}>
 	{#if brick.coverImage}
-		<img src={brick.coverImage} alt="" loading="lazy" class="aspect-[8/5] w-full object-cover" />
+		<img src={brick.coverImage} alt="" loading="lazy" class="aspect-[8/5] w-full bg-brick-blog/15 object-cover" />
 	{/if}
 	<div class="flex flex-col gap-3 p-4">
 		<span
