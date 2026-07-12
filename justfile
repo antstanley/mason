@@ -1,4 +1,4 @@
-# mason — one wall, every brick
+# mason: one wall, every brick
 # default mode is LOCAL: no server, mortar runs as wasm in a service worker
 
 # build the wasm feed engine into the web app

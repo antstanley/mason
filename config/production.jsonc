@@ -1,9 +1,10 @@
-// blogwright deployment config — mason production
+// blogwright deployment config for mason production
 // (region is an assumption: change it before running `blogwright bootstrap`)
 {
 	"region": "eu-west-1",
 	"siteName": "mason",
-	// domain is not committed — CI injects it from the production environment's
+	"app": "mason", // value of the `app` tag on every AWS resource
+	// domain is not committed; CI injects it from the production environment's
 	// PRODUCTION_DOMAIN secret (--domain); pass it the same way at bootstrap
 	"githubRepo": "antstanley/mason", // provisions the GitHub OIDC deploy role at bootstrap
 

@@ -6,6 +6,15 @@ name: deploy
 on:
   workflow_call:
   workflow_dispatch:
+    inputs:
+      refresh:
+        description: >-
+          Re-upload every file, even unchanged ones. S3 writes object metadata
+          only on a PUT, so content-type and tag fixes never reach objects the
+          ETag check would skip. Needed once after a blogwright upgrade that
+          changes metadata; invalidates the whole CDN, so leave it off otherwise.
+        type: boolean
+        default: false
 
 permissions:
   id-token: write # GitHub OIDC → blogwright deploy role, no stored keys
@@ -42,7 +51,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      # heavy toolchain work happens here, not in the builder MicroVM —
+      # heavy toolchain work happens here, not in the builder MicroVM -
       # the pkg rides into the deploy zip via config sourceInclude
       - name: Build wasm feed engine
         run: |
@@ -60,8 +69,9 @@ jobs:
       - name: Deploy to production
         env:
           PRODUCTION_DOMAIN: ${{ secrets.PRODUCTION_DOMAIN }}
+          REFRESH: ${{ inputs.refresh && '--refresh' || '' }}
         # --domain only when the secret is set; otherwise the CloudFront
         # default domain serves the site
         run: |
           cd web
-          pnpm exec blogwright deploy production ${PRODUCTION_DOMAIN:+--domain "$PRODUCTION_DOMAIN"}
+          pnpm exec blogwright deploy production ${PRODUCTION_DOMAIN:+--domain "$PRODUCTION_DOMAIN"} $REFRESH

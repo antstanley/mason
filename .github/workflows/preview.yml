@@ -47,7 +47,7 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
-      # heavy toolchain work happens here, not in the builder MicroVM —
+      # heavy toolchain work happens here, not in the builder MicroVM -
       # the pkg rides into the deploy zip via config sourceInclude
       - name: Build wasm feed engine
         run: |
@@ -62,10 +62,14 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/preview-mason-gh
           aws-region: ${{ env.AWS_REGION }}
 
+      # --refresh always: a preview exists to tell the truth about what
+      # production will do, and object metadata (content types, tags) only
+      # lands on a PUT. The preview distribution has caching disabled, so the
+      # only cost is re-uploading a few MB.
       - name: Deploy preview
         run: >
           cd web && pnpm exec blogwright preview deploy "$PREVIEW_ID"
-          --domain ${{ secrets.PREVIEW_DOMAIN }}
+          --domain ${{ secrets.PREVIEW_DOMAIN }} --refresh
 
       - name: Comment preview URL
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -109,7 +113,7 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/preview-mason-gh
           aws-region: ${{ env.AWS_REGION }}
 
-      # teardown is a prefix delete — no build needed
+      # teardown is a prefix delete; no build needed
       - name: Destroy preview
         run: cd web && pnpm exec blogwright preview destroy "$PREVIEW_ID"
 

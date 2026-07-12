@@ -1,4 +1,4 @@
-// blogwright PR-preview stack — one shared distribution serves every PR at
+// blogwright PR-preview stack. One shared distribution serves every PR at
 // https://pr-<n>.<domain>. The domain is deliberately NOT committed here:
 // CI passes it as `--domain ${{ secrets.PREVIEW_DOMAIN }}`, and the one-time
 // `blogwright preview bootstrap --domain <fqdn>` does the same locally.
@@ -6,6 +6,7 @@
 {
 	"region": "eu-west-1",
 	"siteName": "mason",
+	"app": "mason", // value of the `app` tag on every AWS resource
 	"githubRepo": "antstanley/mason",
 
 	"spa": true,
