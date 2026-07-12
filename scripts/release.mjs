@@ -41,3 +41,10 @@ execFileSync('gh', ['release', 'create', tag, '--title', `mason ${tag}`, '--note
 	stdio: 'inherit'
 });
 console.log(`released ${tag}`);
+
+// The changesets action decides whether anything shipped by parsing this exact
+// line out of the publish script's stdout (the shape `changeset publish` emits).
+// Without it, `steps.changesets.outputs.published` stays false and the deploy
+// job that depends on it is skipped, so a release would be tagged but never
+// actually shipped.
+console.log(`New tag:  mason@${version}`);
