@@ -6,7 +6,7 @@
 	let value = $state(lastHandle.value);
 	let input = $state<HTMLInputElement | null>(null);
 
-	// the landing has one job — the first keystroke should land in it
+	// the landing has one job; the first keystroke should land in it
 	$effect(() => input?.focus());
 
 	function submit(event: SubmitEvent) {
@@ -27,7 +27,7 @@
 		<div>
 			<h1 class="font-display text-6xl font-black tracking-tight">mason</h1>
 			<p class="mt-3 text-lg text-balance opacity-80">
-				the atmosphere, browsable — posts, blogs and video from everyone you follow, in one wall
+				posts, blogs and video from everyone you follow, laid into one wall
 			</p>
 		</div>
 
@@ -54,13 +54,13 @@
 
 		<div class="flex flex-col items-center gap-2 text-sm">
 			<p class="opacity-75">
-				no login — mason just reads your public follows, right here in your browser
+				no login. mason reads your public follows in your own browser, and nowhere else.
 			</p>
 			<a
 				href="/?actor=demo"
 				class="inline-flex min-h-11 items-center px-2 font-semibold text-brick-post-ink hover:underline dark:text-brick-post"
 			>
-				don't have one? wander the demo wall →
+				no handle? wander the demo wall
 			</a>
 		</div>
 	</div>

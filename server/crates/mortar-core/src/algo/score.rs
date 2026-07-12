@@ -1,4 +1,4 @@
-//! The grout score. Pure functions — no clocks, no IO; `now` is always a
+//! The grout score. Pure functions; no clocks, no IO; `now` is always a
 //! parameter so tests are exact.
 
 use chrono::{DateTime, Utc};
@@ -39,13 +39,13 @@ pub fn author_key(brick: &Brick) -> &str {
 fn engagement(brick: &Brick) -> f64 {
     match brick {
         Brick::Post(b) => (b.like_count + 2 * b.repost_count) as f64,
-        // no comparable signal for blogs/trailers — neutral
+        // no comparable signal for blogs/trailers; neutral
         Brick::Blog(_) | Brick::Video(_) => 0.0,
     }
 }
 
 /// recency_decay × engagement_boost. Only meaningful relative to bricks of
-/// the same kind — cross-kind balance is the mixer's job, not the score's.
+/// the same kind; cross-kind balance is the mixer's job, not the score's.
 pub fn grout(brick: &Brick, now: DateTime<Utc>) -> f64 {
     let age_hours = created_at(brick)
         .map(|t| (now - t).num_seconds().max(0) as f64 / 3600.0)

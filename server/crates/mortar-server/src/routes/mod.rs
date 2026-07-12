@@ -14,7 +14,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/health", get(health::health))
         .route("/api/feed", get(feed::feed))
         .layer(TraceLayer::new_for_http())
-        // server mode is called directly from the static SPA's origin —
+        // server mode is called directly from the static SPA's origin -
         // there is no proxy anymore
         .layer(CorsLayer::permissive())
         .with_state(state)

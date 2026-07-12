@@ -4,12 +4,12 @@
   --font-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
   --font-sans: system-ui, -apple-system, sans-serif;
 
-  /* surfaces — the field between bricks is MORTAR: cool stone, chroma ~0.
+  /* surfaces; the field between bricks is MORTAR: cool stone, chroma ~0.
      Warmth lives in the ink, the accents, and the content, never in the
      body background (the cream default was on our own anti-reference list) */
   --color-plaster: oklch(0.955 0.004 260); /* mortar white */
   --color-plaster-deep: oklch(0.9 0.006 260);
-  --color-kiln: oklch(0.25 0.03 50); /* fired clay — dark surfaces */
+  --color-kiln: oklch(0.25 0.03 50); /* fired clay; dark surfaces */
   --color-kiln-deep: oklch(0.2 0.028 50);
   --color-ink: oklch(0.28 0.02 40); /* warm ink on cool stone */
   --color-chalk: oklch(0.985 0.002 260); /* card face */
@@ -19,7 +19,7 @@
   --color-brick-blog: oklch(0.7 0.19 45); /* tangerine */
   --color-brick-video: oklch(0.58 0.22 295); /* violet */
 
-  /* text-safe accent variants — AA on light tints/surfaces where the
+  /* text-safe accent variants; AA on light tints/surfaces where the
      display accents fall short (measured in the 2026-07 critique) */
   --color-brick-post-ink: oklch(0.48 0.14 237);
   --color-brick-blog-ink: oklch(0.47 0.16 45);
@@ -38,7 +38,7 @@
   --shadow-brick-lift: 0 10px 24px -8px oklch(0 0 0 / 0.28);
 
   /* a brick is tapped down and stays down: fast, decelerating, no rebound
-     (ease-out-quint — the overshoot curve read as bounce) */
+     (ease-out-quint; the overshoot curve read as bounce) */
   --animate-brick-in: brick-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
 
   @keyframes brick-in {
@@ -60,7 +60,7 @@ body {
 }
 
 /* One focus language everywhere. Lives in @layer base so a component can
-   still override the offset with a utility — an unlayered rule would beat
+   still override the offset with a utility; an unlayered rule would beat
    every Tailwind utility no matter its specificity (cards clip their own
    children, so their ring has to be drawn inside). The colour is
    scheme-aware to clear 3:1 on both the mortar field and the dark kiln. */
@@ -110,7 +110,7 @@ body {
   }
 }
 
-/* kiln mode — fired dark clay */
+/* kiln mode; fired dark clay */
 @media (prefers-color-scheme: dark) {
   body {
     background-color: var(--color-kiln-deep);

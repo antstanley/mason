@@ -20,7 +20,7 @@
 </script>
 
 <svelte:head>
-	<title>{actor ? `@${actor} · mason` : 'mason — an atproto discovery wall'}</title>
+	<title>{actor ? `@${actor} · mason` : 'mason · one wall, every brick'}</title>
 	<link rel="icon" href={favicon} />
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />

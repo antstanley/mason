@@ -7,7 +7,7 @@
 
 	let { brick }: { brick: VideoBrick } = $props();
 
-	// The <video> element does not exist until the user clicks — the Wall
+	// The <video> element does not exist until the user clicks; the Wall
 	// never plays anything on its own.
 	let playRequested = $state(false);
 

@@ -1,4 +1,4 @@
-//! M0 fixture bricks — a deterministic wall of fake content in all three
+//! M0 fixture bricks; a deterministic wall of fake content in all three
 //! kinds, so the whole pipe (cursor paging included) works before any real
 //! upstream API is wired in. Replaced by real sources from M1 onward.
 
@@ -123,7 +123,7 @@ fn brick(i: usize) -> Brick {
                 url: format!("https://example.com/video/{i}"),
                 author: (!steam).then(|| author(i)),
                 title: if steam {
-                    format!("{game} — Launch Trailer")
+                    format!("{game}: Launch Trailer")
                 } else {
                     POST_TEXTS[i % POST_TEXTS.len()].into()
                 },

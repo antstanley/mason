@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Click-to-play HLS player for both Bluesky video and Steam trailers.
-	// This component only ever mounts from an explicit user gesture — videos
+	// This component only ever mounts from an explicit user gesture; videos
 	// on the Wall never start on their own. It pauses itself when scrolled
 	// out of view, and reports buffering so slow connections never see a
 	// silent black box.
@@ -50,11 +50,11 @@
 				hls.loadSource(playlist);
 				hls.attachMedia(el);
 			}
-			// inside the user's click gesture chain — allowed with sound
+			// inside the user's click gesture chain; allowed with sound
 			el.play().catch(() => {});
 		})();
 
-		// a brick that leaves the wall goes quiet — no off-screen audio
+		// a brick that leaves the wall goes quiet; no off-screen audio
 		const io = new IntersectionObserver(
 			(entries) => {
 				if (!entries[0].isIntersecting && !el.paused) el.pause();
@@ -82,7 +82,9 @@
 
 {#if failed}
 	<div class="grid w-full place-items-center bg-kiln text-chalk" style:aspect-ratio={aspectRatio}>
-		<p class="p-4 text-center text-sm font-semibold">this video refused to be a brick 🧱💔</p>
+		<p class="p-4 text-center text-sm font-semibold">
+			this video would not play here. open it at the source instead.
+		</p>
 	</div>
 {:else}
 	<div class="relative">

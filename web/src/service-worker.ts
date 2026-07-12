@@ -4,7 +4,7 @@
 // mortar-in-the-browser: this service worker runs the same Rust feed engine
 // as the native server, compiled to wasm, and answers /api/feed without any
 // backend. The SW may be reaped after ~30s idle, so the warm caches are
-// persisted to IndexedDB after each served page and imported on startup —
+// persisted to IndexedDB after each served page and imported on startup -
 // a wake-up costs an IDB read instead of a cold network fan-out. (The
 // cursor's embedded seed covers correctness either way.)
 
@@ -65,7 +65,7 @@ const ensureInit = () =>
       const saved = await idbGet(IDB_KEY);
       if (typeof saved === "string") await import_caches(saved);
     } catch {
-      // no persisted caches (or unreadable) — start cold
+      // no persisted caches (or unreadable); start cold
     }
   })());
 

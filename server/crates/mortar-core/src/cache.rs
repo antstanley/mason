@@ -18,7 +18,7 @@ use crate::sources::bluesky::{AuthorYield, Follow};
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct StdDocs {
     pub bricks: Vec<Brick>,
-    /// post URIs suppressed via bskyPostRef — the blog card wins
+    /// post URIs suppressed via bskyPostRef; the blog card wins
     pub suppressed_posts: Vec<String>,
 }
 
@@ -78,7 +78,7 @@ impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
         (value, true)
     }
 
-    /// Live entries as (key, unwrapped value, absolute unix-ms expiry) —
+    /// Live entries as (key, unwrapped value, absolute unix-ms expiry) -
     /// Instants don't survive process death, wall-clock timestamps do.
     pub async fn export_map<T>(&self, unwrap: impl Fn(&V) -> T) -> Vec<(K, T, u64)> {
         let now = Instant::now();

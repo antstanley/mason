@@ -1,6 +1,6 @@
 //! standard.site blog ingestion: DID doc → PDS → listRecords
 //! site.standard.document (+ its site.standard.publication). Blog cards are
-//! metadata + link-out only — the `content` union is platform-specific
+//! metadata + link-out only; the `content` union is platform-specific
 //! (Leaflet, pckt, WordPress all differ) and is never rendered.
 
 use serde::Deserialize;
@@ -8,7 +8,7 @@ use serde::Deserialize;
 use crate::http::{Bucket, Http, HttpError};
 use crate::model::{Author, BlogBrick, Brick, Publication};
 
-/// (bricks, suppressed post uris from bskyPostRef — the blog card wins over
+/// (bricks, suppressed post uris from bskyPostRef; the blog card wins over
 /// its cross-posted skeet)
 pub struct StandardSiteYield {
     pub bricks: Vec<Brick>,
@@ -55,7 +55,7 @@ pub async fn get_documents(
     );
     let listing: ListRecords = match http.get_json(&url, Bucket::Unmetered).await {
         Ok(l) => l,
-        // repos without the collection 400 on some PDS implementations —
+        // repos without the collection 400 on some PDS implementations -
         // that's just "no blog here"
         Err(HttpError::Status(400 | 404)) => {
             return Ok(StandardSiteYield {
@@ -120,7 +120,7 @@ struct DocumentRecord {
     title: String,
     /// AT-URI of the publication record (repo part may be a handle),
     /// or a plain https URL. Required by the lexicon but absent in some
-    /// real records — those are skipped (a card that links nowhere is
+    /// real records; those are skipped (a card that links nowhere is
     /// not wall-worthy).
     site: Option<String>,
     published_at: String,
@@ -177,7 +177,7 @@ struct StrongRef {
     uri: String,
 }
 
-/// Log-and-skip on unknown shapes — the lexicon is young, parse defensively.
+/// Log-and-skip on unknown shapes; the lexicon is young, parse defensively.
 fn parse_document(value: serde_json::Value) -> Option<DocumentRecord> {
     match serde_json::from_value(value) {
         Ok(doc) => Some(doc),
@@ -189,7 +189,7 @@ fn parse_document(value: serde_json::Value) -> Option<DocumentRecord> {
 }
 
 async fn fetch_publication(http: &Http, pds: &str, fallback_repo: &str, site: &str) -> Publication {
-    // site may be a plain https URL — publication is implied
+    // site may be a plain https URL; publication is implied
     if let Some(rest) = site.strip_prefix("https://") {
         let host = rest.split('/').next().unwrap_or(rest);
         return Publication {

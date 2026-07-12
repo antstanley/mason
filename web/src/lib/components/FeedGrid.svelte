@@ -34,7 +34,7 @@
 		if (!handle) return;
 		lastHandle.remember(handle);
 		if (handle === currentActor) {
-			// same handle, fresh attempt — URL wouldn't change, reset directly
+			// same handle, fresh attempt; URL wouldn't change, reset directly
 			feed.reset(handle);
 		} else {
 			void goto(`/?actor=${encodeURIComponent(handle)}`);
@@ -70,16 +70,16 @@
 	<div class="mx-auto max-w-md py-20 text-center">
 		<p class="text-5xl" aria-hidden="true">🧱💥</p>
 		<h1 class="font-display mt-4 text-2xl font-bold">
-			{feed.error === 'handle-not-found' ? 'That handle isn’t on the wall' : 'The wall crumbled'}
+			{feed.error === 'handle-not-found' ? 'no wall for that handle' : "the wall wouldn't load"}
 		</h1>
 		<p class="mt-2 opacity-75">
 			{feed.error === 'handle-not-found'
-				? 'Check the spelling — handles look like name.bsky.social — or try another one:'
-				: 'Something went wrong fetching this feed.'}
+				? 'handles look like name.bsky.social. check the spelling, or try someone else:'
+				: 'mason could not reach the network. check your connection and try again.'}
 		</p>
 		{#if feed.error === 'handle-not-found'}
 			<form onsubmit={retrySubmit} class="mt-6 flex gap-2">
-				<label class="sr-only" for="retry-handle">Bluesky handle</label>
+				<label class="sr-only" for="retry-handle">Your Bluesky handle</label>
 				<input
 					id="retry-handle"
 					bind:this={retryInput}
@@ -106,6 +106,14 @@
 				try again
 			</button>
 		{/if}
+		<p class="mt-6 text-sm">
+			<a
+				href="/?actor=demo"
+				class="inline-flex min-h-11 items-center px-2 font-semibold text-brick-post-ink hover:underline dark:text-brick-post"
+			>
+				or wander the demo wall
+			</a>
+		</p>
 	</div>
 {:else}
 	<Masonry items={feed.items} {brick} />
@@ -117,7 +125,7 @@
 				onclick={() => void feed.loadMore()}
 				class="cursor-pointer rounded-full border-2 border-brick-blog/60 bg-chalk px-6 py-3 font-display font-bold shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95 dark:bg-kiln"
 			>
-				couldn’t lay more bricks — tap to retry
+				more bricks did not arrive. tap to retry
 			</button>
 		</div>
 	{:else if feed.loading}
@@ -127,7 +135,7 @@
 	{/if}
 	{#if feed.done && !feed.error}
 		<p class="py-16 text-center font-display text-lg font-bold opacity-70">
-			🏁 you've reached the bottom of the internet
+			that is every brick. the wall is finished.
 		</p>
 	{/if}
 {/if}

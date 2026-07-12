@@ -1,4 +1,4 @@
-//! mortar-core: everything mason's feed engine needs, compiled two ways —
+//! mortar-core: everything mason's feed engine needs, compiled two ways -
 //! into the native axum server (mortar-server) and into a browser service
 //! worker (mortar-wasm). Platform differences live in `platform`.
 

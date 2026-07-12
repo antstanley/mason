@@ -18,7 +18,7 @@
 	let columns = $state<Placed[][]>([]);
 	let placedCount = 0;
 	let placing = false;
-	// bricks that have already made their entrance — a column-count rebuild
+	// bricks that have already made their entrance; a column-count rebuild
 	// re-places them WITHOUT replaying the drop-in animation
 	const entered = new Set<string>();
 
@@ -84,7 +84,7 @@
 
 	$effect(() => {
 		// track items growth (endless scroll appends) and shrink (reset);
-		// untrack the placement work — it reads and writes column state
+		// untrack the placement work; it reads and writes column state
 		const len = items.length;
 		untrack(() => {
 			if (len < placedCount) {

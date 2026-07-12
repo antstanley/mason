@@ -1,6 +1,6 @@
 <script lang="ts">
 	// The front door shows the product: a real (demo) wall, laid behind the
-	// handle form. Not decoration — it's the one thing that explains mason
+	// handle form. Not decoration; it's the one thing that explains mason
 	// without a word of copy. Inert: aria-hidden, no pointer events, and it
 	// simply never appears if the feed can't load.
 	import { fetchFeed } from '$lib/api';

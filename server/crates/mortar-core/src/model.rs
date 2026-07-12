@@ -117,7 +117,7 @@ pub struct VideoBrick {
     pub author: Option<Author>,
     pub title: String,
     pub poster: Option<String>,
-    /// HLS m3u8 URL — Bluesky `playlist` or Steam `hls_h264`
+    /// HLS m3u8 URL; Bluesky `playlist` or Steam `hls_h264`
     pub playlist: String,
     pub aspect_ratio: Option<AspectRatio>,
     pub source: VideoSource,
