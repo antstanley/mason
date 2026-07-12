@@ -2,7 +2,6 @@
 	import '../app.css';
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
-	import favicon from '$lib/assets/favicon.svg';
 	import { localMode } from '$lib/api';
 
 	let { children } = $props();
@@ -21,7 +20,6 @@
 
 <svelte:head>
 	<title>{actor ? `@${actor} · mason` : 'mason · one wall, every brick'}</title>
-	<link rel="icon" href={favicon} />
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link

@@ -15,7 +15,8 @@
 		"fmt": "oxfmt src",
 		"fmt:check": "oxfmt --check src",
 		"knip": "knip",
-		"og": "node scripts/render-og.mjs"
+		"og": "node scripts/render-og.mjs",
+		"icons": "node scripts/render-icons.mjs"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-static": "^3.0.10",

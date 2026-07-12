@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="mason">
+  <title>mason</title>
+  <!-- A wall, not a letterform: at 16px a staggered bond of colour-coded
+       bricks stays legible where an "m" turns to mush. Colours are mason's
+       own tokens, fired on kiln. -->
+  <rect width="32" height="32" rx="7" fill="#20120a" />
+  <g>
+    <!-- course 1 -->
+    <rect x="4" y="5" width="12" height="6.5" rx="2" fill="#009de2" />
+    <rect x="18" y="5" width="10" height="6.5" rx="2" fill="#fa6e1d" />
+    <!-- course 2, offset like a real bond -->
+    <rect x="4" y="13" width="8" height="6.5" rx="2" fill="#8851eb" />
+    <rect x="14" y="13" width="14" height="6.5" rx="2" fill="#009de2" />
+    <!-- course 3 -->
+    <rect x="4" y="21" width="14" height="6.5" rx="2" fill="#fa6e1d" />
+    <rect x="20" y="21" width="8" height="6.5" rx="2" fill="#8851eb" />
+  </g>
+</svg>
