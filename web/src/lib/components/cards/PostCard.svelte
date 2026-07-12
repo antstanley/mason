@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { PostBrick } from '$lib/types';
+	import { clientUrl } from '$lib/state/client.svelte';
 	import BrickShell from '../BrickShell.svelte';
 	import AuthorChip from '../AuthorChip.svelte';
 
@@ -8,7 +9,7 @@
 	const img = $derived(brick.images[0] ?? null);
 </script>
 
-<BrickShell accent="post" href={brick.url}>
+<BrickShell accent="post" href={clientUrl(brick.url)}>
 	{#if img}
 		<img
 			src={img.src}

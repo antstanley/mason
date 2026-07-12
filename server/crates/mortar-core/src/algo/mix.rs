@@ -108,8 +108,27 @@ pub fn lay_next(
             .map(|(index, _)| index)
     };
 
-    // hard diversity constraint, relaxed only when nothing qualifies
-    let index = pick(true).or_else(|| pick(false))?;
+    // The diversity window is a hard constraint while any other author has a
+    // brick to offer. When it truly cannot be honoured (a wall built from one
+    // author's feed), fall back to the author holding the FEWEST bricks on the
+    // wall so far, not to the highest score: scoring again would just re-pick
+    // the dominant author, which is how a first page ended up belonging to one
+    // person.
+    let index = pick(true).or_else(|| {
+        let mut wall_counts: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for brick in wall {
+            *wall_counts.entry(score::author_key(brick)).or_insert(0) += 1;
+        }
+        pool.iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| {
+                let laid = |x: &Brick| *wall_counts.get(score::author_key(x)).unwrap_or(&0);
+                let s = |x: &Brick| score::grout(x, now) * jitter(seed, x.id());
+                laid(a).cmp(&laid(b)).then_with(|| s(b).total_cmp(&s(a)))
+            })
+            .map(|(i, _)| i)
+    })?;
     Some(pool.remove(index))
 }
 
@@ -133,7 +152,7 @@ pub fn lay(
 mod tests {
     use super::*;
     use crate::model::*;
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
 
     fn now() -> DateTime<Utc> {
         DateTime::parse_from_rfc3339("2026-07-11T00:00:00Z")
@@ -312,5 +331,70 @@ mod tests {
         lay(&mut pool, &mut wall, 48, 11, now());
         let trailers = wall.iter().filter(|b| kind_index(b) == 3).count();
         assert!(trailers >= 2, "only {trailers} trailers laid in 48 bricks");
+    }
+
+    /// Half of the fix for the wall whose first page belonged to one person.
+    /// The mixer cannot un-dominate a dominated pool (see the admission cap in
+    /// snapshot.rs, which is the other half); what it MUST do is space out the
+    /// authors it is given. Pool here is what admission really yields: at most
+    /// four bricks per author.
+    #[test]
+    fn no_author_owns_the_first_page() {
+        let mut pool = Vec::new();
+        for author in 0..10 {
+            for n in 0..4 {
+                pool.push(post(author * 10 + n, author));
+            }
+        }
+        let mut wall = Vec::new();
+        lay(&mut pool, &mut wall, 24, 4, now());
+
+        let mut counts: HashMap<&str, usize> = HashMap::new();
+        for brick in &wall {
+            *counts.entry(score::author_key(brick)).or_insert(0) += 1;
+        }
+        let loudest = *counts.values().max().unwrap();
+        assert!(
+            loudest <= 4,
+            "one author took {loudest} of the first {} bricks: {counts:?}",
+            wall.len()
+        );
+        assert!(
+            counts.len() >= 7,
+            "only {} authors on the page",
+            counts.len()
+        );
+    }
+
+    /// Even when the pool holds NOTHING but one author, the wall should still
+    /// be laid rather than hang. Domination is only acceptable when it is the
+    /// literal truth about the pool.
+    #[test]
+    fn single_author_pool_still_lays() {
+        let mut pool: Vec<Brick> = (0..10).map(|i| post(i, 7)).collect();
+        let mut wall = Vec::new();
+        lay(&mut pool, &mut wall, 10, 1, now());
+        assert_eq!(wall.len(), 10);
+    }
+
+    /// The relaxed path must spread the load, not re-pick the top scorer.
+    #[test]
+    fn relaxation_prefers_the_least_represented_author() {
+        // two authors only, so the 8-brick window cannot be honoured
+        let mut pool: Vec<Brick> = (0..6).map(|i| post(i, 0)).collect();
+        pool.extend((6..12).map(|i| post(i, 1)));
+        let mut wall = Vec::new();
+        lay(&mut pool, &mut wall, 12, 2, now());
+
+        let mut counts: HashMap<&str, usize> = HashMap::new();
+        for brick in &wall {
+            *counts.entry(score::author_key(brick)).or_insert(0) += 1;
+        }
+        assert_eq!(counts.len(), 2);
+        let (min, max) = (
+            *counts.values().min().unwrap(),
+            *counts.values().max().unwrap(),
+        );
+        assert!(max - min <= 1, "load was not spread: {counts:?}");
     }
 }

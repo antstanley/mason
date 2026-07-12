@@ -8,7 +8,7 @@
 //! the same seed rebuilds a closely-matching wall; continuity is
 //! best-effort, determinism of jitter is exact.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,7 +20,7 @@ use rand_chacha::ChaCha8Rng;
 use tokio::sync::{Mutex, Notify};
 use xxhash_rust::xxh3::xxh3_64_with_seed;
 
-use super::mix;
+use super::{mix, score};
 use crate::cache::{STD_DOCS_NEGATIVE_TTL, STD_DOCS_POSITIVE_TTL, StdDocs};
 use crate::error::AppError;
 use crate::model::{Author, Brick};
@@ -33,8 +33,14 @@ use crate::state::AppState;
 const COHORT_SIZE: usize = 100;
 /// Of which: authors that yielded content in recent snapshots.
 const KNOWN_ACTIVE: usize = 60;
-/// First paint: respond once this many authors have answered…
-const FIRST_PAINT_AUTHORS: usize = 40;
+/// First paint: respond once the pool holds bricks from this many DISTINCT
+/// authors. It used to count bricks, which is how a single chatty account
+/// could own the whole first screen: 30 of its posts cleared a brick-count
+/// gate long before anyone else's feed arrived.
+const FIRST_PAINT_AUTHORS: usize = 12;
+/// No author may hold more than this many bricks in the pool. The mixer's
+/// diversity window can only space authors out if the pool HAS other authors.
+const MAX_BRICKS_PER_AUTHOR: usize = 4;
 /// …or this much time has passed, whichever comes first.
 const FIRST_PAINT_DEADLINE: Duration = Duration::from_secs(3);
 /// Per-slot caps on bricks held per snapshot: posts / blogs / Bluesky videos
@@ -77,6 +83,7 @@ impl Snapshot {
                 wall: Vec::new(),
                 seen: HashSet::new(),
                 kind_counts: [0; 4],
+                author_counts: HashMap::new(),
                 warming: true,
             }),
             progress: Notify::new(),
@@ -90,20 +97,37 @@ struct Inner {
     seen: HashSet<String>,
     /// pool+wall population per kind, checked against KIND_CAPS
     kind_counts: [usize; 4],
+    /// bricks admitted per author, checked against MAX_BRICKS_PER_AUTHOR
+    author_counts: HashMap<String, usize>,
     warming: bool,
 }
 
 impl Inner {
-    /// Insert into the pool unless a duplicate or over its kind's cap.
-    fn admit(&mut self, brick: &Brick) {
+    /// Insert into the pool unless it is a duplicate, stale, over its kind's
+    /// cap, or its author already holds their share.
+    fn admit(&mut self, brick: &Brick, now: chrono::DateTime<Utc>) {
+        if !score::is_fresh(brick, now) {
+            return;
+        }
         let slot = kind_slot(brick);
         if self.kind_counts[slot] >= KIND_CAPS[slot] {
             return;
         }
+        let author = score::author_key(brick).to_string();
+        let held = self.author_counts.entry(author).or_insert(0);
+        if *held >= MAX_BRICKS_PER_AUTHOR {
+            return;
+        }
         if self.seen.insert(brick.id().to_string()) {
+            *held += 1;
             self.kind_counts[slot] += 1;
             self.pool.push(brick.clone());
         }
+    }
+
+    /// Distinct authors currently represented in the pool and on the wall.
+    fn distinct_authors(&self) -> usize {
+        self.author_counts.values().filter(|n| **n > 0).count()
     }
 }
 
@@ -148,7 +172,7 @@ pub async fn get_or_build(
     loop {
         {
             let inner = snapshot.inner.lock().await;
-            if !inner.warming || inner.pool.len() + inner.wall.len() >= FIRST_PAINT_AUTHORS * 4 {
+            if !inner.warming || inner.distinct_authors() >= FIRST_PAINT_AUTHORS {
                 break;
             }
         }
@@ -197,9 +221,10 @@ async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, see
         let featured = featured_sample(&state, seed).await;
         let bricks = hydrate_trailers(&state, featured).await;
         tracing::debug!("steam featured yielded {} trailer bricks", bricks.len());
+        let now = Utc::now();
         let mut inner = snapshot.inner.lock().await;
         for brick in &bricks {
-            inner.admit(brick);
+            inner.admit(brick, now);
         }
         drop(inner);
         snapshot.progress.notify_waiters();
@@ -243,8 +268,9 @@ async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, see
                         inner.pool.retain(|b| b.id() != uri);
                     }
                 }
+                let now = Utc::now();
                 for brick in docs.bricks.iter().chain(yield_.bricks.iter()) {
-                    inner.admit(brick);
+                    inner.admit(brick, now);
                 }
             }
             snapshot.progress.notify_waiters();
@@ -260,9 +286,10 @@ async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, see
     if state.config.steam_enabled && !mentioned_appids.is_empty() {
         tracing::debug!("steam mentions: hydrating {}", mentioned_appids.len());
         let bricks = hydrate_trailers(&state, mentioned_appids).await;
+        let now = Utc::now();
         let mut inner = snapshot.inner.lock().await;
         for brick in &bricks {
-            inner.admit(brick);
+            inner.admit(brick, now);
         }
     }
 
@@ -535,4 +562,85 @@ async fn record_activity(state: &Arc<AppState>, viewer: &str, mut yielding: Vec<
         .activity
         .insert(viewer.to_string(), Arc::new(yielding))
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Author, PostBrick};
+
+    fn post(id: usize, author: usize, hours_old: i64) -> Brick {
+        Brick::Post(PostBrick {
+            id: format!("post-{id}"),
+            url: String::new(),
+            author: Author {
+                did: format!("did:plc:a{author}"),
+                handle: format!("a{author}.test"),
+                display_name: None,
+                avatar: None,
+            },
+            text: "t".into(),
+            created_at: (Utc::now() - chrono::TimeDelta::hours(hours_old)).to_rfc3339(),
+            like_count: 0,
+            repost_count: 0,
+            images: vec![],
+            external: None,
+        })
+    }
+
+    fn inner() -> Inner {
+        Inner {
+            pool: Vec::new(),
+            wall: Vec::new(),
+            seen: HashSet::new(),
+            kind_counts: [0; 4],
+            author_counts: HashMap::new(),
+            warming: true,
+        }
+    }
+
+    /// The root cause of the one-author wall: nothing stopped a chatty account
+    /// pouring its whole feed into the pool, and the mixer cannot space out
+    /// authors that are not there.
+    #[test]
+    fn one_author_cannot_flood_the_pool() {
+        let mut i = inner();
+        let now = Utc::now();
+        for n in 0..30 {
+            i.admit(&post(n, 0, 1), now);
+        }
+        assert_eq!(i.pool.len(), MAX_BRICKS_PER_AUTHOR);
+    }
+
+    /// First paint used to gate on brick count, so 30 bricks from one author
+    /// could open the wall. It gates on distinct authors now.
+    #[test]
+    fn distinct_authors_is_what_opens_the_wall() {
+        let mut i = inner();
+        let now = Utc::now();
+        for n in 0..30 {
+            i.admit(&post(n, 0, 1), now);
+        }
+        assert_eq!(
+            i.distinct_authors(),
+            1,
+            "one loud author is still one author"
+        );
+
+        for author in 1..FIRST_PAINT_AUTHORS {
+            i.admit(&post(100 + author, author, 1), now);
+        }
+        assert_eq!(i.distinct_authors(), FIRST_PAINT_AUTHORS);
+    }
+
+    /// Stale bricks never enter the pool, so they cannot be laid.
+    #[test]
+    fn stale_bricks_are_not_admitted() {
+        let mut i = inner();
+        let now = Utc::now();
+        i.admit(&post(1, 0, 2), now); // 2 hours old
+        i.admit(&post(2, 1, 71), now); // just inside the 72h window
+        i.admit(&post(3, 2, 73), now); // just outside it
+        assert_eq!(i.pool.len(), 2);
+    }
 }
