@@ -1,0 +1,7 @@
+# Every change needs a review from a human owner.
+#
+# This exists to be the thing github-actions[bot] cannot satisfy: Actions is
+# allowed to open pull requests (changesets needs that to raise the version PR),
+# and the same GitHub setting also lets it approve them. Requiring a CODEOWNERS
+# review closes that door, because the bot is not an owner here.
+* @antstanley
