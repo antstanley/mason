@@ -5,7 +5,7 @@
 	// simply never appears if the feed can't load.
 	import { fetchFeed } from '$lib/api';
 	import type { Brick } from '$lib/types';
-	import Masonry from './Masonry.svelte';
+	import Bento from './Bento.svelte';
 	import PostCard from './cards/PostCard.svelte';
 	import BlogCard from './cards/BlogCard.svelte';
 	import VideoCard from './cards/VideoCard.svelte';
@@ -38,7 +38,7 @@
 		inert
 	>
 		<div class="px-4 pt-4 sm:px-6">
-			<Masonry items={bricks} {brick} />
+			<Bento items={bricks} {brick} />
 		</div>
 	</div>
 {/if}

@@ -5,6 +5,8 @@
 	import { feed } from '$lib/state/feed.svelte';
 	import { cleanHandle, lastHandle } from '$lib/state/handle.svelte';
 	import type { Brick } from '$lib/types';
+	import { layout } from '$lib/state/layout.svelte';
+	import Bento from './Bento.svelte';
 	import Masonry from './Masonry.svelte';
 	import PostCard from './cards/PostCard.svelte';
 	import BlogCard from './cards/BlogCard.svelte';
@@ -160,7 +162,11 @@
 		</p>
 	</div>
 {:else}
-	<Masonry items={feed.items} {brick} />
+	{#if layout.id === 'masonry'}
+		<Masonry items={feed.items} {brick} />
+	{:else}
+		<Bento items={feed.items} {brick} />
+	{/if}
 	<div bind:this={sentinel} class="h-1"></div>
 	{#if feed.error && feed.items.length > 0}
 		<div class="flex justify-center py-10">

@@ -4,6 +4,8 @@
 	import { page } from '$app/state';
 	import { localMode } from '$lib/api';
 	import ClientPicker from '$lib/components/ClientPicker.svelte';
+	import LayoutPicker from '$lib/components/LayoutPicker.svelte';
+	import SwitchWall from '$lib/components/SwitchWall.svelte';
 
 	let { children } = $props();
 
@@ -29,7 +31,7 @@
 	/>
 </svelte:head>
 
-<div class="mx-auto min-h-screen max-w-[1800px] px-4 sm:px-6">
+<div class="mx-auto min-h-screen max-w-[1800px] px-4 sm:px-6 {actor ? 'pb-24 md:pb-0' : ''}">
 	{#if actor}
 		<a
 			href="#wall"
@@ -37,19 +39,16 @@
 		>
 			skip to the wall
 		</a>
-		<header class="flex items-center justify-between py-3">
-			<a href="/" class="inline-flex min-h-11 items-center font-display text-2xl font-black tracking-tight">
+		<header
+			class="fixed inset-x-0 bottom-0 z-20 flex flex-col gap-2 border-t border-ink/10 bg-plaster/95 px-4 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] md:static md:z-auto md:flex-row md:flex-wrap md:items-center md:justify-between md:border-0 md:bg-transparent md:px-0 md:py-3 dark:border-chalk/10 dark:bg-kiln-deep/95 md:dark:bg-transparent"
+		>
+			<a href="/" class="hidden min-h-11 items-center font-display text-2xl font-black tracking-tight md:inline-flex">
 				mason&nbsp;<span aria-hidden="true">🧱</span>
 			</a>
-			<div class="flex items-center gap-3 text-sm">
+			<div class="flex flex-wrap items-center justify-between gap-3 text-sm md:justify-end">
+				<LayoutPicker />
 				<ClientPicker />
-				<span class="font-semibold opacity-75">@{actor}</span>
-				<a
-					href="/"
-					class="inline-flex min-h-11 items-center rounded-full border-2 border-ink/15 px-4 font-semibold transition-colors hover:border-pop-pink hover:text-pop-pink dark:border-chalk/20"
-				>
-					switch
-				</a>
+				<SwitchWall actor={actor ?? ''} />
 			</div>
 		</header>
 	{/if}

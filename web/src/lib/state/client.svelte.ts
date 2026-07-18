@@ -5,7 +5,7 @@ import { browser } from "$app/environment";
  *  alternative client should not be bounced into an app they do not use. */
 export const CLIENTS = [
   { id: "bsky.app", label: "Bluesky", host: "bsky.app" },
-  { id: "mu.social", label: "mu.social", host: "mu.social" },
+  { id: "mu.social", label: "Mu Social", host: "mu.social" },
   { id: "blacksky.community", label: "Blacksky", host: "blacksky.community" },
 ] as const;
 
