@@ -1,12 +1,34 @@
 <script lang="ts">
 	// Brand marks for the client picker: each service's own logo, lifted from its
 	// site. Every icon sits in the same square slot so the rows stay aligned.
+	// `size` is overridable so the trigger can grow the mark on mobile (where it
+	// stands alone) without touching the dropdown rows.
 	import type { ClientId } from '$lib/state/client.svelte';
 
-	let { id }: { id: ClientId } = $props();
+	let {
+		id,
+		size = 'size-[1.3em]',
+		dense = false
+	}: { id: ClientId; size?: string; dense?: boolean } = $props();
+
+	// The butterfly fills its viewBox; the mu wordmark and the blacksky starburst
+	// sit smaller and lighter in theirs, so nudge each up to read at the same
+	// weight in the same slot. `dense` (the dropdown rows) trims that nudge back
+	// ~10%, where the marks sit alongside their labels and can be a touch smaller.
+	const FULL: Record<ClientId, string> = {
+		'bsky.app': '',
+		'mu.social': 'scale-[1.5]',
+		'blacksky.community': 'scale-[1.3]'
+	};
+	const DENSE: Record<ClientId, string> = {
+		'bsky.app': '',
+		'mu.social': 'scale-[1.35]',
+		'blacksky.community': 'scale-[1.17]'
+	};
+	const boost = $derived(dense ? DENSE[id] : FULL[id]);
 </script>
 
-<span class="inline-grid size-[1.3em] shrink-0 place-items-center" aria-hidden="true">
+<span class="inline-grid shrink-0 place-items-center {size} {boost}" aria-hidden="true">
 	{#if id === 'bsky.app'}
 		<svg
 			class="max-h-full max-w-full"
