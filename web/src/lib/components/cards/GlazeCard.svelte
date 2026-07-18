@@ -31,6 +31,9 @@
 	);
 
 	let showAlt = $state(false);
+	// touch has no hover, so a corner button taps the pill + caption into view
+	// there; on a device that can hover this stays false and hover drives it
+	let revealed = $state(false);
 	// the committed slide (what the counter shows); `anchor` mirrors it for the
 	// threshold maths, which must not depend on reactive timing
 	let index = $state(0);
@@ -183,14 +186,52 @@
 		     stays put while the caption slides up underneath it. On touch, where
 		     there is no hover, both stay shown. -->
 		<div class="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col items-start">
-			<div
-				class="m-3 max-w-[calc(100%-1.5rem)] rounded-full bg-chalk py-1.5 pr-4 pl-1.5 opacity-0 shadow-brick transition-opacity duration-300 dark:bg-kiln [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none"
-			>
-				<AuthorChip author={brick.author} avatarClass="size-10" />
+			<!-- the pill, with the touch reveal button riding on its line so the
+			     button moves up and down with it (fixed at the bottom-right only
+			     because the row is, until the caption lifts them both) -->
+			<div class="flex w-full items-center justify-between gap-2">
+				<div
+					class="m-3 min-w-0 rounded-full bg-chalk py-1.5 pr-4 pl-1.5 opacity-0 shadow-brick transition-opacity duration-300 dark:bg-kiln [@media(hover:hover)]:group-hover:opacity-100 motion-reduce:transition-none {revealed
+						? '[@media(hover:none)]:opacity-100'
+						: ''}"
+				>
+					<AuthorChip author={brick.author} avatarClass="size-10" />
+				</div>
+				<!-- touch-only: no hover to reveal the pill and caption, so this taps
+				     them up (and back down). Hidden where hover works. -->
+				<button
+					type="button"
+					onclick={() => (revealed = !revealed)}
+					aria-label={revealed ? 'Hide post details' : 'Show post details'}
+					aria-expanded={revealed}
+					class="pointer-events-auto m-3 hidden size-9 shrink-0 place-items-center rounded-lg bg-ink/15 text-chalk backdrop-blur-sm [@media(hover:none)]:grid"
+				>
+					<!-- lucide chevrons-up / chevrons-down -->
+					<svg
+						viewBox="0 0 24 24"
+						class="size-5"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						{#if revealed}
+							<path d="m7 6 5 5 5-5" />
+							<path d="m7 13 5 5 5-5" />
+						{:else}
+							<path d="m17 11-5-5-5 5" />
+							<path d="m17 18-5-5-5 5" />
+						{/if}
+					</svg>
+				</button>
 			</div>
 			{#if brick.text || alts.length}
 				<div
-					class="max-h-0 w-full overflow-hidden opacity-0 transition-all duration-300 ease-out [@media(hover:hover)]:group-hover:max-h-40 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:none)]:max-h-40 [@media(hover:none)]:opacity-100 motion-reduce:transition-none"
+					class="max-h-0 w-full overflow-hidden opacity-0 transition-all duration-300 ease-out [@media(hover:hover)]:group-hover:max-h-40 [@media(hover:hover)]:group-hover:opacity-100 motion-reduce:transition-none {revealed
+						? '[@media(hover:none)]:max-h-40 [@media(hover:none)]:opacity-100'
+						: ''}"
 				>
 					<div
 						class="flex w-full items-start gap-2 border-t border-chalk/25 bg-chalk/55 p-3 backdrop-blur-md dark:border-kiln/30 dark:bg-kiln/50"
