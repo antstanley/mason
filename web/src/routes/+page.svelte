@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { feed } from '$lib/state/feed.svelte';
+	import { layout } from '$lib/state/layout.svelte';
 	import FeedGrid from '$lib/components/FeedGrid.svelte';
 	import HandleForm from '$lib/components/HandleForm.svelte';
 
@@ -10,8 +11,12 @@
 
 	$effect(() => {
 		const current = actor;
+		// the glaze layout is also an algorithm: choosing it re-fetches an
+		// images-only wall, the same way switching actor does. Tracking layout.id
+		// makes the switch to (or from) glaze a fresh wall.
+		const mode = layout.id === 'glaze' ? 'glaze' : undefined;
 		// untrack: reset mutates feed state; tracking it would loop this effect
-		if (current) untrack(() => feed.reset(current));
+		if (current) untrack(() => feed.reset(current, mode));
 	});
 </script>
 

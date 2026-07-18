@@ -5,10 +5,15 @@
 
 	let {
 		items,
-		brick
+		brick,
+		filler = false
 	}: {
 		items: Brick[];
 		brick: Snippet<[Brick]>;
+		// glaze wall: lay the whole grid on a muted field so every gap the dense
+		// packing leaves — the holes between bricks and the seams around them —
+		// reads as a solid muted filler block, grout between the pictures.
+		filler?: boolean;
 	} = $props();
 
 	// A bento wall is a CSS grid, not a hand-packed set of columns. Every brick
@@ -79,7 +84,9 @@
 
 <div
 	bind:this={container}
-	class="grid items-start gap-3"
+	class="grid items-start gap-3 {filler
+		? 'rounded-3xl bg-ink/[0.11] p-3 ring-1 ring-ink/10 ring-inset dark:bg-chalk/[0.09] dark:ring-chalk/10'
+		: ''}"
 	style:grid-template-columns="repeat({cols}, minmax(0, 1fr))"
 	style:grid-auto-rows="{ROW}px"
 	style:grid-auto-flow="row dense"

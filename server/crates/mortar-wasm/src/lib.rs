@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use mortar_core::config::Config;
 use mortar_core::feed::handle_feed;
+use mortar_core::mode::Mode;
 use mortar_core::state::AppState;
 use wasm_bindgen::prelude::*;
 
@@ -49,13 +50,19 @@ pub async fn import_caches(json: String) {
     }
 }
 
-/// One feed page as a JSON string (FeedResponse). Errors throw a JSON string
-/// `{"status": u16, "error": code, "message": ...}` so the service worker
-/// can build a Response with the right status.
+/// One feed page as a JSON string (FeedResponse). `mode` is the wall variant
+/// ("glaze" for the image wall; anything else is the full wall). Errors throw a
+/// JSON string `{"status": u16, "error": code, "message": ...}` so the service
+/// worker can build a Response with the right status.
 #[wasm_bindgen]
-pub async fn feed_page(actor: String, cursor: Option<String>) -> Result<String, JsValue> {
+pub async fn feed_page(
+    actor: String,
+    cursor: Option<String>,
+    mode: Option<String>,
+) -> Result<String, JsValue> {
     let state = state();
-    match handle_feed(&state, &actor, cursor.as_deref()).await {
+    let mode = Mode::from_query(mode.as_deref());
+    match handle_feed(&state, &actor, cursor.as_deref(), mode).await {
         Ok(response) => {
             serde_json::to_string(&response).map_err(|e| JsValue::from_str(&e.to_string()))
         }

@@ -160,14 +160,24 @@ fn brick(i: usize) -> Brick {
                 repost_count: (i as u64 * 7) % 120,
                 images: if with_image {
                     let h = [500, 700, 900, 620][i % 4];
-                    vec![ImageEmbed {
-                        src: format!("https://picsum.photos/seed/img{i}/800/{h}"),
-                        alt: "fixture image".into(),
-                        aspect_ratio: Some(AspectRatio {
-                            width: 800,
-                            height: h,
-                        }),
-                    }]
+                    // vary the count so the glaze wall shows every layout:
+                    // single, the 2- and 3-up grids, and the 4+ carousel
+                    let n = match (i / 3) % 4 {
+                        1 => 2,
+                        2 => 3,
+                        3 => 5,
+                        _ => 1,
+                    };
+                    (0..n)
+                        .map(|k| ImageEmbed {
+                            src: format!("https://picsum.photos/seed/img{i}-{k}/800/{h}"),
+                            alt: format!("fixture image {} of {n}", k + 1),
+                            aspect_ratio: Some(AspectRatio {
+                                width: 800,
+                                height: h,
+                            }),
+                        })
+                        .collect()
                 } else {
                     vec![]
                 },

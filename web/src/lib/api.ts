@@ -26,12 +26,17 @@ async function swControlsPage(): Promise<void> {
   ]);
 }
 
-export async function fetchFeed(actor: string, cursor?: string | null): Promise<FeedResponse> {
+export async function fetchFeed(
+  actor: string,
+  cursor?: string | null,
+  mode?: string,
+): Promise<FeedResponse> {
   if (localMode && browser && "serviceWorker" in navigator) {
     await swControlsPage();
   }
   const params = new URLSearchParams({ actor });
   if (cursor) params.set("cursor", cursor);
+  if (mode) params.set("mode", mode);
   const res = await fetch(`${BASE}/api/feed?${params}`);
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;

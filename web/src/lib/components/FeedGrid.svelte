@@ -9,9 +9,15 @@
 	import Bento from './Bento.svelte';
 	import Masonry from './Masonry.svelte';
 	import PostCard from './cards/PostCard.svelte';
+	import GlazeCard from './cards/GlazeCard.svelte';
 	import BlogCard from './cards/BlogCard.svelte';
 	import VideoCard from './cards/VideoCard.svelte';
 	import SkeletonGrid from './SkeletonGrid.svelte';
+
+	// glaze is a layout AND the images-only algorithm; on the retry paths, keep
+	// whichever wall the reader is on
+	const isGlaze = $derived(layout.id === 'glaze');
+	const currentMode = $derived(isGlaze ? 'glaze' : undefined);
 
 	let sentinel = $state<HTMLElement | null>(null);
 	let retryInput = $state<HTMLInputElement | null>(null);
@@ -45,7 +51,7 @@
 		lastHandle.remember(handle);
 		if (handle === currentActor) {
 			// same handle, fresh attempt; URL wouldn't change, reset directly
-			feed.reset(handle);
+			feed.reset(handle, currentMode);
 		} else {
 			void goto(`/?actor=${encodeURIComponent(handle)}`);
 		}
@@ -110,7 +116,11 @@
 
 {#snippet brick(item: Brick)}
 	{#if item.kind === 'post'}
-		<PostCard brick={item} />
+		{#if isGlaze}
+			<GlazeCard brick={item} />
+		{:else}
+			<PostCard brick={item} />
+		{/if}
 	{:else if item.kind === 'blog'}
 		<BlogCard brick={item} />
 	{:else}
@@ -158,7 +168,7 @@
 		{:else}
 			<button
 				type="button"
-				onclick={() => feed.reset(currentActor)}
+				onclick={() => feed.reset(currentActor, currentMode)}
 				class="mt-6 cursor-pointer rounded-full bg-pop-pink-deep px-6 py-3 font-display font-bold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95"
 			>
 				try again
@@ -176,6 +186,8 @@
 {:else}
 	{#if layout.id === 'masonry'}
 		<Masonry items={feed.items} {brick} />
+	{:else if layout.id === 'glaze'}
+		<Bento items={feed.items} {brick} filler />
 	{:else}
 		<Bento items={feed.items} {brick} />
 	{/if}

@@ -10,10 +10,12 @@ class FeedState {
   error = $state<string | null>(null);
 
   #actor = "";
+  #mode: string | undefined;
   #seen = new Set<string>();
 
-  reset(actor: string) {
+  reset(actor: string, mode?: string) {
     this.#actor = actor;
+    this.#mode = mode;
     this.items = [];
     this.cursor = null;
     this.done = false;
@@ -28,7 +30,7 @@ class FeedState {
     this.loading = true;
     this.error = null;
     try {
-      const page = await fetchFeed(this.#actor, this.cursor);
+      const page = await fetchFeed(this.#actor, this.cursor, this.#mode);
       // belt-and-braces dedupe across pages
       const fresh = page.items.filter((b) => !this.#seen.has(b.id));
       for (const b of fresh) this.#seen.add(b.id);

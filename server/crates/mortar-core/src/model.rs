@@ -19,6 +19,13 @@ impl Brick {
         }
     }
 
+    /// A brick fit for a glaze wall: a Bluesky post carrying at least one image.
+    /// Native-video posts and text- or link-only posts are not image bricks, so
+    /// neither reaches the image wall.
+    pub fn is_image_post(&self) -> bool {
+        matches!(self, Brick::Post(p) if !p.images.is_empty())
+    }
+
     /// Cover this brick's media behind a reveal. Only posts and native videos
     /// carry a blur; blogs and archived streams come from sources the Bluesky
     /// labels never reach, so there is nothing to set on them.

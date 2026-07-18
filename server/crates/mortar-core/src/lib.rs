@@ -9,6 +9,7 @@ pub mod error;
 pub mod feed;
 pub mod fixtures;
 pub mod http;
+pub mod mode;
 pub mod model;
 pub mod persist;
 pub mod platform;

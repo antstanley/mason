@@ -141,11 +141,12 @@ async function serveFeed(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const actor = url.searchParams.get("actor");
   const cursor = url.searchParams.get("cursor") ?? undefined;
+  const mode = url.searchParams.get("mode") ?? undefined;
   if (!actor) {
     return json({ error: "bad_request", message: "missing required parameter: actor" }, 400);
   }
   try {
-    const body = await feed_page(actor, cursor);
+    const body = await feed_page(actor, cursor, mode);
     return new Response(body, {
       status: 200,
       headers: { "content-type": "application/json" },
