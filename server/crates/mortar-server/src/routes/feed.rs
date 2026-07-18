@@ -5,7 +5,7 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mortar_core::error::AppError;
-use mortar_core::feed::handle_feed;
+use mortar_core::feed::{FeedIntent, handle_feed};
 use mortar_core::mode::Mode;
 use mortar_core::model::FeedResponse;
 use mortar_core::state::AppState;
@@ -17,6 +17,10 @@ pub struct FeedParams {
     pub cursor: Option<String>,
     /// The wall variant: "glaze" for the image wall, absent for the full wall.
     pub mode: Option<String>,
+    /// "preview" or "freeze" drive the warm-then-commit first screen; absent is
+    /// a normal committed page. Server mode serves the same SPA, so it honours
+    /// these exactly as the wasm front does.
+    pub intent: Option<String>,
 }
 
 pub struct ErrorResponse(AppError);
@@ -37,7 +41,8 @@ pub async fn feed(
         .actor
         .ok_or(ErrorResponse(AppError::BadRequest("actor")))?;
     let mode = Mode::from_query(params.mode.as_deref());
-    handle_feed(&state, &actor, params.cursor.as_deref(), mode)
+    let intent = FeedIntent::from_query(params.intent.as_deref());
+    handle_feed(&state, &actor, params.cursor.as_deref(), mode, intent)
         .await
         .map(Json)
         .map_err(ErrorResponse)

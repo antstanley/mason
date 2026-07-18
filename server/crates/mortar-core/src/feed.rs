@@ -15,17 +15,59 @@ use crate::state::AppState;
 
 pub const PAGE_SIZE: usize = 24;
 
+/// What a feed request is for.
+///
+/// The wasm front polls `Preview` while a wall warms — each poll lays a fresh,
+/// non-committed first screen from the growing pool, which the client reflows —
+/// then asks `Freeze` exactly once to commit that screen and begin paging. The
+/// native server (and any client without the preview loop) asks `Normal`, which
+/// waits for a good mix before committing the first page so it does not open on
+/// nothing but posts.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum FeedIntent {
+    #[default]
+    Normal,
+    Preview,
+    Freeze,
+}
+
+impl FeedIntent {
+    pub fn from_query(raw: Option<&str>) -> Self {
+        match raw {
+            Some("preview") => Self::Preview,
+            Some("freeze") => Self::Freeze,
+            _ => Self::Normal,
+        }
+    }
+}
+
 pub async fn handle_feed(
     state: &Arc<AppState>,
     actor: &str,
     cursor: Option<&str>,
     mode: Mode,
+    intent: FeedIntent,
 ) -> Result<FeedResponse, AppError> {
     let decoded = cursor.and_then(cursor::decode);
 
-    // offline demo wall, kept from M0
+    // offline demo wall, kept from M0. Its bricks are fixtures compiled into the
+    // wasm, so there is nothing to warm: a preview reports itself already
+    // settled, and the client freezes to the real page at once.
     if actor == "demo" {
-        return Ok(demo_page(decoded.map(|c| c.offset).unwrap_or(0), mode));
+        let offset = decoded.map(|c| c.offset).unwrap_or(0);
+        let mut page = demo_page(offset, mode);
+        if intent == FeedIntent::Preview {
+            page.warming = Some(false);
+            // a preview's cursor points at the CURRENT screen (not the next
+            // page), so the freeze that follows commits from here. Demo warms
+            // instantly, so the client freezes on the first poll either way.
+            page.cursor = Some(cursor::encode(&Cursor {
+                snapshot: "fixture".into(),
+                seed: 0,
+                offset,
+            }));
+        }
+        return Ok(page);
     }
 
     // Resolving the actor and reading the owner's opt-out are the same call
@@ -40,8 +82,31 @@ pub async fn handle_feed(
         None => (snapshot::fresh_seed(&did), 0),
     };
 
-    let snap = snapshot::get_or_build(state, &did, seed, mode).await?;
-    let (items, has_more) = snapshot::get_page(state, &snap, offset, PAGE_SIZE).await;
+    // A preview never commits and never waits: it lays the current best first
+    // screen from a clone of the pool and reports whether more is still on the
+    // way. The cursor it hands back carries the same seed, so the next poll (and
+    // the freeze) land on this very snapshot rather than rolling a new one.
+    if intent == FeedIntent::Preview {
+        let snap = snapshot::ensure_snapshot(state, &did, seed, mode).await;
+        let (items, warming) = snapshot::preview_page(&snap, PAGE_SIZE).await;
+        return Ok(FeedResponse {
+            items,
+            cursor: Some(cursor::encode(&Cursor {
+                snapshot: snap.id.clone(),
+                seed,
+                offset: 0,
+            })),
+            warming: Some(warming),
+        });
+    }
+
+    let snap = snapshot::get_or_build(state, &did, seed, mode).await;
+    // Freeze commits the first screen immediately: the preview loop already gave
+    // the reader the warming reflow, so re-paying the mix wait here is the exact
+    // stall reflow exists to remove. Normal (server mode, no preview loop) still
+    // waits, so its first page is a proper mix and not just the fast posts.
+    let wait_for_mix = intent == FeedIntent::Normal;
+    let (items, has_more) = snapshot::get_page(state, &snap, offset, PAGE_SIZE, wait_for_mix).await;
     let next = has_more.then(|| {
         cursor::encode(&Cursor {
             snapshot: snap.id.clone(),
@@ -52,6 +117,7 @@ pub async fn handle_feed(
     Ok(FeedResponse {
         items,
         cursor: next,
+        warming: None,
     })
 }
 
@@ -147,7 +213,11 @@ fn demo_page(offset: usize, mode: Mode) -> FeedResponse {
             offset: next_offset,
         })
     });
-    FeedResponse { items, cursor }
+    FeedResponse {
+        items,
+        cursor,
+        warming: None,
+    }
 }
 
 #[cfg(test)]
@@ -179,9 +249,15 @@ mod tests {
             ..Default::default()
         }));
 
-        let err = handle_feed(&state, "did:plc:owner", None, Mode::Wall)
-            .await
-            .expect_err("an opted-out owner must not lay a wall");
+        let err = handle_feed(
+            &state,
+            "did:plc:owner",
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect_err("an opted-out owner must not lay a wall");
         assert!(matches!(err, AppError::LoginRequired(_)));
         assert_eq!(err.status_and_code(), (403, "login_required"));
     }
@@ -247,9 +323,15 @@ mod tests {
             ..Default::default()
         }));
 
-        let page = handle_feed(&state, "did:plc:viewer", None, Mode::Glaze)
-            .await
-            .expect("a glaze wall must lay");
+        let page = handle_feed(
+            &state,
+            "did:plc:viewer",
+            None,
+            Mode::Glaze,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect("a glaze wall must lay");
         assert_eq!(page.items.len(), 1, "only the image post belongs on glaze");
         assert!(
             page.items[0].is_image_post(),
