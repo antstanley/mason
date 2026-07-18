@@ -25,6 +25,12 @@ interface ExternalEmbed {
   thumb: string | null;
 }
 
+/** Present when a `!warn` label covers a brick's media behind a reveal. Absent
+ *  (not null) when there is nothing to cover, since mortar skips serializing it. */
+export interface Blur {
+  label: string;
+}
+
 export interface PostBrick {
   kind: "post";
   id: string;
@@ -36,6 +42,7 @@ export interface PostBrick {
   repostCount: number;
   images: ImageEmbed[];
   external: ExternalEmbed | null;
+  blur?: Blur;
 }
 
 interface Publication {
@@ -75,6 +82,7 @@ export interface VideoBrick {
   durationMs: number | null;
   /** What the streamer says they are doing ("music", a game, ...). */
   activity: string | null;
+  blur?: Blur;
 }
 
 export type Brick = PostBrick | BlogBrick | VideoBrick;

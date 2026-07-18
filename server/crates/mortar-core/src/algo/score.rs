@@ -122,6 +122,7 @@ mod tests {
             repost_count: reposts,
             images: vec![],
             external: None,
+            blur: None,
         })
     }
 

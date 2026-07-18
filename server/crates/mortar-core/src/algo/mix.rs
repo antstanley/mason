@@ -198,6 +198,7 @@ mod tests {
             repost_count: 0,
             images: vec![],
             external: None,
+            blur: None,
         })
     }
 
@@ -235,6 +236,7 @@ mod tests {
             viewer_count: None,
             duration_ms: None,
             activity: None,
+            blur: None,
         })
     }
 

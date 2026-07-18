@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::http::{Bucket, Http, HttpError};
 use crate::model::{
-    AspectRatio, Author, Brick, ExternalEmbed, ImageEmbed, PostBrick, VideoBrick, VideoSource,
+    AspectRatio, Author, Blur, Brick, ExternalEmbed, ImageEmbed, PostBrick, VideoBrick, VideoSource,
 };
 
 /// One author's recent posts, videos among them.
@@ -57,14 +57,25 @@ impl From<&Follow> for Author {
 /// has to honour it: nothing upstream does it for us.
 const NO_UNAUTHENTICATED: &str = "!no-unauthenticated";
 
-/// The sensitive-media labels a logged-out Bluesky viewer never sees unblurred:
-/// the two adult-flagged values plus the two the official client blurs behind a
-/// click-through. mason lays bricks whole, with no blur or "show anyway", so a
-/// labelled brick is either shown in full or not at all: for a logged-out wall
-/// it must be not at all. Labeler labels (the default moderation service) and
-/// self-labels both land in the same `labels` array, so this one check covers
-/// both.
-const ADULT_LABELS: [&str; 4] = ["porn", "sexual", "nudity", "graphic-media"];
+/// Labels that keep a subject off a logged-out wall entirely, mirroring what a
+/// logged-out Bluesky viewer is shown: the reserved hard-hide, the logged-out
+/// opt-out, and the adult-flagged media (which needs a signed-in, adult
+/// account). `nudity` is deliberately absent: it carries no adult flag and
+/// Bluesky shows it to logged-out viewers, so we do too. Labeler labels (the
+/// default moderation service) and self-labels both land in the same `labels`
+/// array, so this one check covers both.
+const HIDDEN_LABELS: [&str; 5] = [
+    "!hide",
+    NO_UNAUTHENTICATED,
+    "porn",
+    "sexual",
+    "graphic-media",
+];
+
+/// Labels that keep the subject but cover its media behind a reveal, again as
+/// Bluesky does for a logged-out viewer. Anything in `HIDDEN_LABELS` is dropped
+/// before this tier is consulted, so a blurred brick can always be revealed.
+const WARN_LABELS: [&str; 1] = ["!warn"];
 
 /// One label as the AppView reports it. Only `val` matters to us; the rest of
 /// the object (src, uri, cts, …) is discarded.
@@ -73,20 +84,27 @@ pub struct Label {
     val: String,
 }
 
-/// Whether this set of labels carries the logged-out opt-out.
+/// Whether this set of labels carries the logged-out opt-out. Kept distinct
+/// from `hidden_from_logged_out` because only this one means "sign in to view":
+/// it is what seals a wall owner, where a hard-hide or adult label would not.
 fn wants_auth(labels: &[Label]) -> bool {
     labels.iter().any(|l| l.val == NO_UNAUTHENTICATED)
 }
 
-/// Whether a subject carrying these labels must be kept off a logged-out wall:
-/// either its owner opted out of logged-out visibility, or it is flagged adult
-/// or graphic media. Used for authors (in the cohort and live filters) and for
-/// individual posts, so an adult post from an otherwise-visible account is
-/// dropped too.
+/// Whether a subject carrying these labels must be kept off a logged-out wall
+/// entirely. Used for authors (in the cohort and live filters) and for
+/// individual posts, so a hard-hidden or adult post from an otherwise-visible
+/// account is dropped too.
 fn hidden_from_logged_out(labels: &[Label]) -> bool {
     labels
         .iter()
-        .any(|l| l.val == NO_UNAUTHENTICATED || ADULT_LABELS.contains(&l.val.as_str()))
+        .any(|l| HIDDEN_LABELS.contains(&l.val.as_str()))
+}
+
+/// Whether these labels ask for the media to be covered behind a reveal rather
+/// than dropped. Only the soft-warn tier; hard-hides never reach here.
+fn warned_for_logged_out(labels: &[Label]) -> bool {
+    labels.iter().any(|l| WARN_LABELS.contains(&l.val.as_str()))
 }
 
 pub async fn resolve_handle(http: &Http, base: &str, handle: &str) -> Result<String, HttpError> {
@@ -166,14 +184,26 @@ pub async fn get_author_feed(http: &Http, base: &str, did: &str) -> Result<Autho
         .feed
         .into_iter()
         .filter(|item| item.reason.is_none())
-        // drop anything a logged-out viewer must not see: an author who opted
-        // out of logged-out visibility (yields nothing, like a private feed),
-        // and any post flagged adult or graphic (whether the account is or not)
+        // drop anything a logged-out viewer must not see at all: an author who
+        // opted out or is hard-hidden or adult (yields nothing, like a private
+        // feed), and any single post the same is true of
         .filter(|item| {
             !hidden_from_logged_out(&item.post.author.labels)
                 && !hidden_from_logged_out(&item.post.labels)
         })
-        .filter_map(|item| post_to_brick(item.post))
+        .filter_map(|item| {
+            // a soft `!warn`, on the post or its account, covers the media
+            // behind a reveal instead of dropping the brick
+            let warned = warned_for_logged_out(&item.post.author.labels)
+                || warned_for_logged_out(&item.post.labels);
+            let mut brick = post_to_brick(item.post)?;
+            if warned {
+                brick.set_blur(Some(Blur {
+                    label: "!warn".into(),
+                }));
+            }
+            Some(brick)
+        })
         .collect();
     Ok(AuthorYield { bricks })
 }
@@ -323,6 +353,7 @@ fn post_to_brick(post: PostView) -> Option<Brick> {
             viewer_count: None,
             duration_ms: None,
             activity: None,
+            blur: None,
         })),
         embed => {
             let (images, external) = match embed {
@@ -362,6 +393,7 @@ fn post_to_brick(post: PostView) -> Option<Brick> {
                 repost_count: post.repost_count,
                 images,
                 external,
+                blur: None,
             }))
         }
     }
@@ -486,6 +518,91 @@ mod tests {
             .unwrap();
         assert_eq!(bricks.len(), 1, "only the unlabelled post survives");
         assert_eq!(bricks[0].id(), "at://did:plc:aa/app.bsky.feed.post/1");
+    }
+
+    /// nudity is not adult-flagged, and Bluesky shows it to logged-out viewers,
+    /// so mason keeps it too: shown, and not even blurred.
+    #[tokio::test]
+    async fn author_feed_shows_nudity() {
+        let server = MockServer::start().await;
+        let mut nude = post_json(
+            "at://did:plc:aa/app.bsky.feed.post/1",
+            serde_json::Value::Null,
+        );
+        nude["post"]["labels"] = serde_json::json!([{"val": "nudity"}]);
+
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "feed": [nude] })),
+            )
+            .mount(&server)
+            .await;
+
+        let AuthorYield { bricks, .. } = get_author_feed(&Http::new(), &server.uri(), "did:plc:aa")
+            .await
+            .unwrap();
+        assert_eq!(bricks.len(), 1, "nudity stays on a logged-out wall");
+        match &bricks[0] {
+            Brick::Post(p) => assert!(p.blur.is_none(), "and it is not blurred"),
+            other => panic!("expected a post brick, got {other:?}"),
+        }
+    }
+
+    /// a soft `!warn` keeps the post but covers its media behind a reveal.
+    #[tokio::test]
+    async fn author_feed_blurs_warned_posts() {
+        let server = MockServer::start().await;
+        let mut warned = post_json(
+            "at://did:plc:aa/app.bsky.feed.post/1",
+            serde_json::Value::Null,
+        );
+        warned["post"]["labels"] = serde_json::json!([{"val": "!warn"}]);
+
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "feed": [warned] })),
+            )
+            .mount(&server)
+            .await;
+
+        let AuthorYield { bricks, .. } = get_author_feed(&Http::new(), &server.uri(), "did:plc:aa")
+            .await
+            .unwrap();
+        assert_eq!(bricks.len(), 1, "a warned post is kept, not dropped");
+        match &bricks[0] {
+            Brick::Post(p) => assert_eq!(
+                p.blur.as_ref().map(|b| b.label.as_str()),
+                Some("!warn"),
+                "its media is covered behind a reveal"
+            ),
+            other => panic!("expected a post brick, got {other:?}"),
+        }
+    }
+
+    /// a moderator `!hide` drops the post outright, like an adult one.
+    #[tokio::test]
+    async fn author_feed_drops_hidden_posts() {
+        let server = MockServer::start().await;
+        let mut hidden = post_json(
+            "at://did:plc:aa/app.bsky.feed.post/1",
+            serde_json::Value::Null,
+        );
+        hidden["post"]["labels"] = serde_json::json!([{"val": "!hide"}]);
+
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "feed": [hidden] })),
+            )
+            .mount(&server)
+            .await;
+
+        let AuthorYield { bricks, .. } = get_author_feed(&Http::new(), &server.uri(), "did:plc:aa")
+            .await
+            .unwrap();
+        assert!(bricks.is_empty(), "a hard-hidden post is not laid");
     }
 
     #[tokio::test]

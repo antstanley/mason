@@ -817,6 +817,7 @@ mod tests {
             repost_count: 0,
             images: vec![],
             external: None,
+            blur: None,
         })
     }
 
@@ -1033,6 +1034,7 @@ mod tests {
             viewer_count: Some(2),
             duration_ms: None,
             activity: None,
+            blur: None,
         })
     }
 
@@ -1157,6 +1159,7 @@ mod tests {
             viewer_count: Some(4),
             duration_ms: None,
             activity: None,
+            blur: None,
         });
         i.admit(&ancient, now);
         assert_eq!(i.pool.len(), 1, "a live stream aged out of its own wall");
