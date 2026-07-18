@@ -171,6 +171,10 @@ pub struct Caches {
     /// not bricks: what is cached here is true for every viewer, and the
     /// per-viewer filter happens downstream.
     pub live: TtlCache<u8, Arc<Vec<LiveStream>>>,
+    /// wall-owner did → did they opt out of logged-out visibility (1h). One
+    /// getProfile per cold wall, no more; the owner's own profile is not
+    /// otherwise fetched by the fill.
+    pub profiles: TtlCache<String, bool>,
     /// snapshot id → live snapshot (30min)
     pub snapshots: TtlCache<String, Arc<Snapshot>>,
     /// viewer did → authors that yielded content recently (24h)
@@ -193,6 +197,7 @@ impl Caches {
             pds: TtlCache::new(24 * HOUR, 20_000),
             streams: TtlCache::new(STREAMS_NEGATIVE_TTL, 20_000),
             live: TtlCache::new(LIVE_TTL, 1),
+            profiles: TtlCache::new(HOUR, 10_000),
             snapshots: TtlCache::new(Duration::from_secs(1800), 500),
             activity: TtlCache::new(24 * HOUR, 1_000),
         }

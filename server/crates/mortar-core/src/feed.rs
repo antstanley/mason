@@ -27,6 +27,16 @@ pub async fn handle_feed(
     }
 
     let did = resolve_actor(state, actor).await?;
+
+    // A wall is the owner's social graph on display; if they asked to be seen
+    // only by signed-in visitors, a logged-out mason must not lay it. Their own
+    // posts never reach the fill, so this is the one place their opt-out is
+    // checked. Fail open on an upstream hiccup: the preference is best-effort,
+    // and treating a flaky getProfile as a wall of nothing helps no one.
+    if owner_wants_auth(state, &did).await {
+        return Err(AppError::LoginRequired(actor.to_string()));
+    }
+
     let (seed, offset) = match decoded {
         Some(c) => (c.seed, c.offset),
         None => (snapshot::fresh_seed(&did), 0),
@@ -68,6 +78,29 @@ async fn resolve_actor(state: &Arc<AppState>, actor: &str) -> Result<String, App
     }
 }
 
+/// Whether the wall owner opted out of logged-out visibility, cached for an
+/// hour. A miss costs one getProfile; an upstream error is treated as "not
+/// opted out" so a flaky AppView never seals a wall by accident.
+async fn owner_wants_auth(state: &Arc<AppState>, did: &str) -> bool {
+    if let Some(cached) = state.caches.profiles.get(&did.to_string()).await {
+        return cached;
+    }
+    let opted_out =
+        match bluesky::get_profile_optout(&state.http, &state.config.appview_base, did).await {
+            Ok(opted_out) => opted_out,
+            Err(e) => {
+                tracing::debug!("profile opt-out check for {did} failed: {e}");
+                false
+            }
+        };
+    state
+        .caches
+        .profiles
+        .insert(did.to_string(), opted_out)
+        .await;
+    opted_out
+}
+
 fn demo_page(offset: usize) -> FeedResponse {
     let pool = fixtures::pool();
     let items: Vec<_> = pool.iter().skip(offset).take(PAGE_SIZE).cloned().collect();
@@ -80,4 +113,41 @@ fn demo_page(offset: usize) -> FeedResponse {
         })
     });
     FeedResponse { items, cursor }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::state::AppState;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// A wall owner who opted out of logged-out visibility gets a login-required
+    /// error, and no snapshot is built. A `did:` actor skips handle resolution,
+    /// so the only upstream call this needs to mock is getProfile.
+    #[tokio::test]
+    async fn an_opted_out_owner_seals_their_wall() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "did": "did:plc:owner",
+                "handle": "owner.test",
+                "labels": [{"val": "!no-unauthenticated"}]
+            })))
+            .mount(&server)
+            .await;
+
+        let state = Arc::new(AppState::new(Config {
+            appview_base: server.uri(),
+            ..Default::default()
+        }));
+
+        let err = handle_feed(&state, "did:plc:owner", None)
+            .await
+            .expect_err("an opted-out owner must not lay a wall");
+        assert!(matches!(err, AppError::LoginRequired(_)));
+        assert_eq!(err.status_and_code(), (403, "login_required"));
+    }
 }

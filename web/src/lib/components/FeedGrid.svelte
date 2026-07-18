@@ -19,10 +19,18 @@
 
 	const currentActor = $derived(page.url.searchParams.get('actor') ?? '');
 
-	// the dead-end fix: the failed handle stays editable, right here
+	// the dead-end fix: a wall you cannot see stays a door to another one. Both
+	// the mistyped handle and the sealed wall drop the reader into the handle
+	// box; the typo keeps its text to fix, the sealed wall clears it (there is
+	// nothing to correct, only somewhere else to go).
 	$effect(() => {
-		if (feed.error !== 'handle-not-found') return;
-		retryValue = currentActor;
+		if (feed.error === 'handle-not-found') {
+			retryValue = currentActor;
+		} else if (feed.error === 'login-required') {
+			retryValue = '';
+		} else {
+			return;
+		}
 		// select() only works once Svelte has written the value to the DOM
 		void tick().then(() => {
 			retryInput?.focus();
@@ -113,17 +121,21 @@
 {#if feed.initialLoad}
 	<SkeletonGrid count={12} />
 {:else if feed.error && feed.items.length === 0}
+	{@const sealed = feed.error === 'login-required'}
+	{@const notFound = feed.error === 'handle-not-found'}
 	<div class="mx-auto max-w-md py-20 text-center">
-		<p class="text-5xl" aria-hidden="true">🧱💥</p>
+		<p class="text-5xl" aria-hidden="true">{sealed ? '🧱🔒' : '🧱💥'}</p>
 		<h1 class="font-display mt-4 text-2xl font-bold">
-			{feed.error === 'handle-not-found' ? 'no wall for that handle' : "the wall wouldn't load"}
+			{#if notFound}no wall for that handle{:else if sealed}this wall is sealed{:else}the wall wouldn't
+				load{/if}
 		</h1>
 		<p class="mt-2 opacity-75">
-			{feed.error === 'handle-not-found'
-				? 'handles look like name.bsky.social. check the spelling, or try someone else:'
-				: 'mason could not reach the network. check your connection and try again.'}
+			{#if notFound}handles look like name.bsky.social. check the spelling, or try someone else:{:else if sealed}this
+				waller asked to be seen by signed-in visitors only. mason reads walls logged out, so this
+				one stays bricked up. try another wall:{:else}mason could not reach the network. check your
+				connection and try again.{/if}
 		</p>
-		{#if feed.error === 'handle-not-found'}
+		{#if notFound || sealed}
 			<form onsubmit={retrySubmit} class="mt-6 flex gap-2">
 				<label class="sr-only" for="retry-handle">Your Bluesky handle</label>
 				<input

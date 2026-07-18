@@ -36,8 +36,15 @@ class FeedState {
       this.cursor = page.cursor;
       if (!page.cursor) this.done = true;
     } catch (e) {
-      this.error =
-        e instanceof FeedError && e.status === 404 ? "handle-not-found" : "feed-unavailable";
+      if (e instanceof FeedError && e.code === "login_required") {
+        // the owner asked to be seen only by signed-in visitors; mason is a
+        // logged-out reader, so this wall stays sealed
+        this.error = "login-required";
+      } else if (e instanceof FeedError && e.status === 404) {
+        this.error = "handle-not-found";
+      } else {
+        this.error = "feed-unavailable";
+      }
     } finally {
       this.loading = false;
       this.initialLoad = false;

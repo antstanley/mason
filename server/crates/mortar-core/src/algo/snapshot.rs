@@ -616,7 +616,14 @@ fn followed_live<'a>(
     network: &'a [streamplace::LiveStream],
     follows: &[bluesky::Follow],
 ) -> Vec<&'a streamplace::LiveStream> {
-    let followed: HashSet<&str> = follows.iter().map(|f| f.did.as_str()).collect();
+    // hidden follows are excluded here too: their live stream comes from
+    // Streamplace, a source the AppView's labels never reach, so the cohort
+    // filter alone would miss it
+    let followed: HashSet<&str> = follows
+        .iter()
+        .filter(|f| !f.hidden())
+        .map(|f| f.did.as_str())
+        .collect();
     network
         .iter()
         .filter(|s| followed.contains(s.did()))
@@ -703,8 +710,16 @@ async fn sample_cohort(
         .get(&viewer.to_string())
         .await
         .unwrap_or_default();
-    let by_did: std::collections::HashMap<&str, &bluesky::Follow> =
-        follows.iter().map(|f| (f.did.as_str(), f)).collect();
+    // Hidden follows never enter the cohort, so none of their content is
+    // fetched: not posts, and not the blogs and archived streams that the
+    // author-feed label filter cannot see. This is the single choke point that
+    // keeps a logged-out opt-out (and an adult-labelled account) off every
+    // source at once.
+    let by_did: std::collections::HashMap<&str, &bluesky::Follow> = follows
+        .iter()
+        .filter(|f| !f.hidden())
+        .map(|f| (f.did.as_str(), f))
+        .collect();
 
     let mut cohort: Vec<Author> = known_active
         .iter()
@@ -716,7 +731,7 @@ async fn sample_cohort(
     let chosen: HashSet<&str> = cohort.iter().map(|a| a.did.as_str()).collect();
     let mut rest: Vec<&bluesky::Follow> = follows
         .iter()
-        .filter(|f| !chosen.contains(f.did.as_str()))
+        .filter(|f| !f.hidden() && !chosen.contains(f.did.as_str()))
         .collect();
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     rest.shuffle(&mut rng);
@@ -915,18 +930,30 @@ mod tests {
     /// key and shared by every viewer on the machine. The filter is therefore
     /// the only thing standing between a viewer and a wall of strangers, and
     /// it must key off the follow graph, not off who asked first.
+    fn follow(did: &str) -> bluesky::Follow {
+        bluesky::Follow {
+            did: did.into(),
+            handle: format!("{did}.test"),
+            display_name: None,
+            avatar: None,
+            labels: vec![],
+        }
+    }
+
+    fn opted_out_follow(did: &str) -> bluesky::Follow {
+        let mut f = follow(did);
+        f.labels =
+            serde_json::from_value(serde_json::json!([{"val": "!no-unauthenticated"}])).unwrap();
+        f
+    }
+
     #[test]
     fn a_viewer_only_sees_the_streams_they_follow() {
         let network = vec![
             live_stream("did:plc:friend"),
             live_stream("did:plc:stranger"),
         ];
-        let follows = vec![bluesky::Follow {
-            did: "did:plc:friend".into(),
-            handle: "friend.test".into(),
-            display_name: None,
-            avatar: None,
-        }];
+        let follows = vec![follow("did:plc:friend")];
 
         let mine = followed_live(&network, &follows);
         assert_eq!(mine.len(), 1);
@@ -935,6 +962,54 @@ mod tests {
         // and someone who follows nobody live gets nothing, rather than
         // inheriting whatever the last viewer's snapshot happened to cache
         assert!(followed_live(&network, &[]).is_empty());
+    }
+
+    /// A followed account that opted out of logged-out visibility is kept off
+    /// the wall whole: not just their posts (dropped in the author-feed reader)
+    /// but their live stream too, which comes from a different source that
+    /// never sees the AppView label.
+    #[test]
+    fn an_opted_out_friend_is_not_shown_live() {
+        let network = vec![live_stream("did:plc:friend")];
+        let follows = vec![opted_out_follow("did:plc:friend")];
+        assert!(
+            followed_live(&network, &follows).is_empty(),
+            "an opted-out friend's stream must not surface to a logged-out wall"
+        );
+    }
+
+    /// The cohort is where posts, blogs and archived streams are all fanned out
+    /// from, so dropping an opted-out author here is what keeps their non-post
+    /// bricks off the wall as well.
+    #[tokio::test]
+    async fn the_cohort_excludes_opted_out_follows() {
+        let state = Arc::new(AppState::new(crate::config::Config::default()));
+        let follows = vec![follow("did:plc:open"), opted_out_follow("did:plc:sealed")];
+        let cohort = sample_cohort(&state, "did:plc:viewer", &follows, 1).await;
+        let dids: Vec<&str> = cohort.iter().map(|a| a.did.as_str()).collect();
+        assert_eq!(
+            dids,
+            vec!["did:plc:open"],
+            "the opted-out author must be sampled out"
+        );
+    }
+
+    /// An account labelled adult is kept off a logged-out wall whole, the same
+    /// way an opted-out one is: dropped from the cohort before any of its
+    /// content is fetched.
+    #[tokio::test]
+    async fn the_cohort_excludes_adult_accounts() {
+        let state = Arc::new(AppState::new(crate::config::Config::default()));
+        let mut adult = follow("did:plc:adult");
+        adult.labels = serde_json::from_value(serde_json::json!([{"val": "porn"}])).unwrap();
+        let follows = vec![follow("did:plc:open"), adult];
+        let cohort = sample_cohort(&state, "did:plc:viewer", &follows, 1).await;
+        let dids: Vec<&str> = cohort.iter().map(|a| a.did.as_str()).collect();
+        assert_eq!(
+            dids,
+            vec!["did:plc:open"],
+            "the adult account must be sampled out"
+        );
     }
 
     fn live_brick(uri: &str, did: &str) -> Brick {
