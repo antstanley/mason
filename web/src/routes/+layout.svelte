@@ -15,9 +15,31 @@
 	// Always type module: the wasm-bindgen glue contains `import.meta`,
 	// which a classic script rejects at parse time. Module SWs are
 	// everywhere in 2026 (Chrome 91+, Safari 15+, Firefox 147+).
+	//
+	// A deploy swaps the whole engine (new wasm hash), so a page must not keep
+	// running an old worker against new assets. `updateViaCache: 'none'` makes
+	// the browser always revalidate the worker script instead of trusting an
+	// HTTP-cached copy, and `update()` forces that check on load. When a NEW
+	// worker takes control — only after a deploy, never on a first install —
+	// reload once so the page and the engine are the same version.
 	$effect(() => {
 		if (!browser || !localMode || !('serviceWorker' in navigator)) return;
-		void navigator.serviceWorker.register('/service-worker.js', { type: 'module' });
+		const sw = navigator.serviceWorker;
+		const hadController = !!sw.controller;
+		let reloaded = false;
+		const onControllerChange = () => {
+			if (!hadController || reloaded) return;
+			reloaded = true;
+			location.reload();
+		};
+		sw.addEventListener('controllerchange', onControllerChange);
+		void sw
+			.register('/service-worker.js', { type: 'module', updateViaCache: 'none' })
+			.then((registration) => registration.update())
+			.catch(() => {
+				// registration is best-effort; a failed register just means no offline
+			});
+		return () => sw.removeEventListener('controllerchange', onControllerChange);
 	});
 </script>
 
