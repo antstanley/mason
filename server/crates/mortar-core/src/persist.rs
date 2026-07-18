@@ -93,6 +93,7 @@ mod tests {
                     handle: "bob.test".into(),
                     display_name: None,
                     avatar: None,
+                    labels: vec![],
                 }]),
             )
             .await;

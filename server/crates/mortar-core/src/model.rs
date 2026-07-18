@@ -18,6 +18,27 @@ impl Brick {
             Brick::Video(b) => &b.id,
         }
     }
+
+    /// Cover this brick's media behind a reveal. Only posts and native videos
+    /// carry a blur; blogs and archived streams come from sources the Bluesky
+    /// labels never reach, so there is nothing to set on them.
+    pub fn set_blur(&mut self, blur: Option<Blur>) {
+        match self {
+            Brick::Post(b) => b.blur = blur,
+            Brick::Video(b) => b.blur = blur,
+            Brick::Blog(_) => {}
+        }
+    }
+}
+
+/// Why a brick's media is covered on a logged-out wall. Only the soft-warn
+/// tier reaches here: anything hard-hidden (adult, `!hide`, an opted-out
+/// account) is dropped upstream, so a blurred brick can always be revealed.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Blur {
+    /// The label that triggered the cover, e.g. `!warn`.
+    pub label: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -67,6 +88,9 @@ pub struct PostBrick {
     #[serde(default)]
     pub images: Vec<ImageEmbed>,
     pub external: Option<ExternalEmbed>,
+    /// Set when a `!warn` label covers the media behind a reveal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blur: Option<Blur>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -127,6 +151,10 @@ pub struct VideoBrick {
     pub duration_ms: Option<u64>,
     /// What the streamer says they are doing ("music", a game, …).
     pub activity: Option<String>,
+    /// Set when a `!warn` label covers the poster behind a reveal. Only native
+    /// Bluesky videos are ever labelled; Streamplace bricks leave this None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blur: Option<Blur>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

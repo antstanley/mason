@@ -5,6 +5,7 @@
 	import BrickShell from '../BrickShell.svelte';
 	import AuthorChip from '../AuthorChip.svelte';
 	import VideoPlayer from '../VideoPlayer.svelte';
+	import Sensitive from '../Sensitive.svelte';
 
 	let { brick }: { brick: VideoBrick } = $props();
 
@@ -40,8 +41,9 @@
 </script>
 
 <BrickShell accent="video">
-	<div class="relative">
-		{#if playRequested}
+	<Sensitive blur={brick.blur}>
+		<div class="relative">
+			{#if playRequested}
 			<VideoPlayer
 				id={brick.id}
 				playlist={brick.playlist}
@@ -114,7 +116,8 @@
 				</span>
 			{/if}
 		{/if}
-	</div>
+		</div>
+	</Sensitive>
 	<div class="flex flex-col gap-3 p-4">
 		{#if brick.title}
 			<p class="font-display leading-tight font-bold">{brick.title}</p>

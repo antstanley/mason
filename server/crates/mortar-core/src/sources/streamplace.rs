@@ -164,6 +164,7 @@ impl LiveStream {
             viewer_count: self.viewers,
             duration_ms: None,
             activity: self.activity,
+            blur: None,
         })
     }
 }
@@ -261,6 +262,7 @@ pub async fn get_videos(
                 viewer_count: None,
                 duration_ms: record.duration_ms,
                 activity: record.activity.and_then(Activity::label),
+                blur: None,
             }))
         })
         .collect())

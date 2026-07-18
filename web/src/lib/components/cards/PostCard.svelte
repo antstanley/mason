@@ -3,6 +3,7 @@
 	import { clientUrl } from '$lib/state/client.svelte';
 	import BrickShell from '../BrickShell.svelte';
 	import AuthorChip from '../AuthorChip.svelte';
+	import Sensitive from '../Sensitive.svelte';
 
 	let { brick }: { brick: PostBrick } = $props();
 
@@ -11,13 +12,15 @@
 
 <BrickShell accent="post" href={clientUrl(brick.url)}>
 	{#if img}
-		<img
-			src={img.src}
-			alt={img.alt}
-			loading="lazy"
-			class="w-full bg-brick-post/15 object-cover"
-			style:aspect-ratio={img.aspectRatio ? `${img.aspectRatio.width} / ${img.aspectRatio.height}` : undefined}
-		/>
+		<Sensitive blur={brick.blur}>
+			<img
+				src={img.src}
+				alt={img.alt}
+				loading="lazy"
+				class="w-full bg-brick-post/15 object-cover"
+				style:aspect-ratio={img.aspectRatio ? `${img.aspectRatio.width} / ${img.aspectRatio.height}` : undefined}
+			/>
+		</Sensitive>
 	{/if}
 	<div class="flex flex-col gap-3 p-4">
 		{#if brick.text}

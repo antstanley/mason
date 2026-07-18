@@ -144,6 +144,7 @@ fn brick(i: usize) -> Brick {
                 viewer_count: live.then_some(37),
                 duration_ms: (streamplace && !live).then_some(4_920_000),
                 activity: streamplace.then(|| "bricklaying".into()),
+                blur: None,
             })
         }
         // everything else: posts, some with images
@@ -171,6 +172,7 @@ fn brick(i: usize) -> Brick {
                     vec![]
                 },
                 external: None,
+                blur: None,
             })
         }
     }

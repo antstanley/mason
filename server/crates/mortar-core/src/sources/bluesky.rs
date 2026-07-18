@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::http::{Bucket, Http, HttpError};
 use crate::model::{
-    AspectRatio, Author, Brick, ExternalEmbed, ImageEmbed, PostBrick, VideoBrick, VideoSource,
+    AspectRatio, Author, Blur, Brick, ExternalEmbed, ImageEmbed, PostBrick, VideoBrick, VideoSource,
 };
 
 /// One author's recent posts, videos among them.
@@ -22,6 +22,21 @@ pub struct Follow {
     pub handle: String,
     pub display_name: Option<String>,
     pub avatar: Option<String>,
+    /// Self-labels, carried on every profile view getFollows returns. This is
+    /// what lets an opted-out account be dropped from the cohort BEFORE any of
+    /// its content (posts, blogs, streams) is ever fetched.
+    #[serde(default)]
+    pub labels: Vec<Label>,
+}
+
+impl Follow {
+    /// Whether a logged-out mason must leave this followed account off the wall
+    /// entirely: they opted out of logged-out visibility, or their account is
+    /// flagged adult or graphic. Excluding them from the cohort skips every
+    /// source at once (posts, blogs, archived streams, live).
+    pub fn hidden(&self) -> bool {
+        hidden_from_logged_out(&self.labels)
+    }
 }
 
 impl From<&Follow> for Author {
@@ -35,6 +50,63 @@ impl From<&Follow> for Author {
     }
 }
 
+/// The reserved self-label an account sets to say "only signed-in people may
+/// see me". mason is a logged-out reader by design, so wherever this label
+/// rides along we treat it as a hard no. It is a request, not a guarantee (the
+/// public AppView still serves the content), which is exactly why the client
+/// has to honour it: nothing upstream does it for us.
+const NO_UNAUTHENTICATED: &str = "!no-unauthenticated";
+
+/// Labels that keep a subject off a logged-out wall entirely, mirroring what a
+/// logged-out Bluesky viewer is shown: the reserved hard-hide, the logged-out
+/// opt-out, and the adult-flagged media (which needs a signed-in, adult
+/// account). `nudity` is deliberately absent: it carries no adult flag and
+/// Bluesky shows it to logged-out viewers, so we do too. Labeler labels (the
+/// default moderation service) and self-labels both land in the same `labels`
+/// array, so this one check covers both.
+const HIDDEN_LABELS: [&str; 5] = [
+    "!hide",
+    NO_UNAUTHENTICATED,
+    "porn",
+    "sexual",
+    "graphic-media",
+];
+
+/// Labels that keep the subject but cover its media behind a reveal, again as
+/// Bluesky does for a logged-out viewer. Anything in `HIDDEN_LABELS` is dropped
+/// before this tier is consulted, so a blurred brick can always be revealed.
+const WARN_LABELS: [&str; 1] = ["!warn"];
+
+/// One label as the AppView reports it. Only `val` matters to us; the rest of
+/// the object (src, uri, cts, …) is discarded.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Label {
+    val: String,
+}
+
+/// Whether this set of labels carries the logged-out opt-out. Kept distinct
+/// from `hidden_from_logged_out` because only this one means "sign in to view":
+/// it is what seals a wall owner, where a hard-hide or adult label would not.
+fn wants_auth(labels: &[Label]) -> bool {
+    labels.iter().any(|l| l.val == NO_UNAUTHENTICATED)
+}
+
+/// Whether a subject carrying these labels must be kept off a logged-out wall
+/// entirely. Used for authors (in the cohort and live filters) and for
+/// individual posts, so a hard-hidden or adult post from an otherwise-visible
+/// account is dropped too.
+fn hidden_from_logged_out(labels: &[Label]) -> bool {
+    labels
+        .iter()
+        .any(|l| HIDDEN_LABELS.contains(&l.val.as_str()))
+}
+
+/// Whether these labels ask for the media to be covered behind a reveal rather
+/// than dropped. Only the soft-warn tier; hard-hides never reach here.
+fn warned_for_logged_out(labels: &[Label]) -> bool {
+    labels.iter().any(|l| WARN_LABELS.contains(&l.val.as_str()))
+}
+
 pub async fn resolve_handle(http: &Http, base: &str, handle: &str) -> Result<String, HttpError> {
     #[derive(Deserialize)]
     struct Resolved {
@@ -42,6 +114,23 @@ pub async fn resolve_handle(http: &Http, base: &str, handle: &str) -> Result<Str
     }
     let url = format!("{base}/xrpc/com.atproto.identity.resolveHandle?handle={handle}");
     Ok(http.get_json::<Resolved>(&url, Bucket::Appview).await?.did)
+}
+
+/// Whether an account has opted out of being shown to logged-out viewers.
+///
+/// The follow-graph and author-feed paths never fetch the wall owner's OWN
+/// profile (their posts are not on their wall), so their opt-out never rides
+/// along; this is the one call that surfaces it. The label lives in the
+/// `labels` array of `getProfile`.
+pub async fn get_profile_optout(http: &Http, base: &str, actor: &str) -> Result<bool, HttpError> {
+    #[derive(Deserialize)]
+    struct ProfileView {
+        #[serde(default)]
+        labels: Vec<Label>,
+    }
+    let url = format!("{base}/xrpc/app.bsky.actor.getProfile?actor={actor}");
+    let profile: ProfileView = http.get_json(&url, Bucket::Appview).await?;
+    Ok(wants_auth(&profile.labels))
 }
 
 /// Follow-graph pages (100 at a time, the AppView maximum), threaded through
@@ -95,7 +184,26 @@ pub async fn get_author_feed(http: &Http, base: &str, did: &str) -> Result<Autho
         .feed
         .into_iter()
         .filter(|item| item.reason.is_none())
-        .filter_map(|item| post_to_brick(item.post))
+        // drop anything a logged-out viewer must not see at all: an author who
+        // opted out or is hard-hidden or adult (yields nothing, like a private
+        // feed), and any single post the same is true of
+        .filter(|item| {
+            !hidden_from_logged_out(&item.post.author.labels)
+                && !hidden_from_logged_out(&item.post.labels)
+        })
+        .filter_map(|item| {
+            // a soft `!warn`, on the post or its account, covers the media
+            // behind a reveal instead of dropping the brick
+            let warned = warned_for_logged_out(&item.post.author.labels)
+                || warned_for_logged_out(&item.post.labels);
+            let mut brick = post_to_brick(item.post)?;
+            if warned {
+                brick.set_blur(Some(Blur {
+                    label: "!warn".into(),
+                }));
+            }
+            Some(brick)
+        })
         .collect();
     Ok(AuthorYield { bricks })
 }
@@ -122,6 +230,10 @@ struct PostView {
     like_count: u64,
     #[serde(default)]
     repost_count: u64,
+    /// Per-post labels: where adult/graphic self-labels and moderation-labeler
+    /// labels land, on posts from accounts that are otherwise visible.
+    #[serde(default)]
+    labels: Vec<Label>,
 }
 
 #[derive(Deserialize)]
@@ -131,6 +243,10 @@ struct AuthorView {
     handle: String,
     display_name: Option<String>,
     avatar: Option<String>,
+    /// Self-labels ride along on every post's author; this is where a followed
+    /// account's logged-out opt-out reaches us.
+    #[serde(default)]
+    labels: Vec<Label>,
 }
 
 #[derive(Deserialize)]
@@ -237,6 +353,7 @@ fn post_to_brick(post: PostView) -> Option<Brick> {
             viewer_count: None,
             duration_ms: None,
             activity: None,
+            blur: None,
         })),
         embed => {
             let (images, external) = match embed {
@@ -276,6 +393,7 @@ fn post_to_brick(post: PostView) -> Option<Brick> {
                 repost_count: post.repost_count,
                 images,
                 external,
+                blur: None,
             }))
         }
     }
@@ -341,6 +459,186 @@ mod tests {
             }
             other => panic!("expected video brick, got {other:?}"),
         }
+    }
+
+    /// A followed account that opted out of logged-out visibility yields no
+    /// bricks: the label rides on each post's author, and we drop it there.
+    #[tokio::test]
+    async fn author_feed_drops_a_no_unauthenticated_author() {
+        let server = MockServer::start().await;
+        let mut opted_out = post_json(
+            "at://did:plc:aa/app.bsky.feed.post/1",
+            serde_json::Value::Null,
+        );
+        opted_out["post"]["author"]["labels"] = serde_json::json!([{"val": "!no-unauthenticated"}]);
+
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "feed": [opted_out]
+            })))
+            .mount(&server)
+            .await;
+
+        let AuthorYield { bricks, .. } = get_author_feed(&Http::new(), &server.uri(), "did:plc:aa")
+            .await
+            .unwrap();
+        assert!(
+            bricks.is_empty(),
+            "a logged-out opt-out must keep the author off the wall"
+        );
+    }
+
+    /// Adult and graphic media is dropped for a logged-out wall, whether the
+    /// label sits on the post itself or comes from the moderation labeler. Here
+    /// the account is otherwise visible; only the flagged post goes.
+    #[tokio::test]
+    async fn author_feed_drops_adult_posts() {
+        let server = MockServer::start().await;
+        let clean = post_json(
+            "at://did:plc:aa/app.bsky.feed.post/1",
+            serde_json::Value::Null,
+        );
+        let mut adult = post_json(
+            "at://did:plc:aa/app.bsky.feed.post/2",
+            serde_json::Value::Null,
+        );
+        adult["post"]["labels"] = serde_json::json!([{"val": "porn"}]);
+
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "feed": [clean, adult]
+            })))
+            .mount(&server)
+            .await;
+
+        let AuthorYield { bricks, .. } = get_author_feed(&Http::new(), &server.uri(), "did:plc:aa")
+            .await
+            .unwrap();
+        assert_eq!(bricks.len(), 1, "only the unlabelled post survives");
+        assert_eq!(bricks[0].id(), "at://did:plc:aa/app.bsky.feed.post/1");
+    }
+
+    /// nudity is not adult-flagged, and Bluesky shows it to logged-out viewers,
+    /// so mason keeps it too: shown, and not even blurred.
+    #[tokio::test]
+    async fn author_feed_shows_nudity() {
+        let server = MockServer::start().await;
+        let mut nude = post_json(
+            "at://did:plc:aa/app.bsky.feed.post/1",
+            serde_json::Value::Null,
+        );
+        nude["post"]["labels"] = serde_json::json!([{"val": "nudity"}]);
+
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "feed": [nude] })),
+            )
+            .mount(&server)
+            .await;
+
+        let AuthorYield { bricks, .. } = get_author_feed(&Http::new(), &server.uri(), "did:plc:aa")
+            .await
+            .unwrap();
+        assert_eq!(bricks.len(), 1, "nudity stays on a logged-out wall");
+        match &bricks[0] {
+            Brick::Post(p) => assert!(p.blur.is_none(), "and it is not blurred"),
+            other => panic!("expected a post brick, got {other:?}"),
+        }
+    }
+
+    /// a soft `!warn` keeps the post but covers its media behind a reveal.
+    #[tokio::test]
+    async fn author_feed_blurs_warned_posts() {
+        let server = MockServer::start().await;
+        let mut warned = post_json(
+            "at://did:plc:aa/app.bsky.feed.post/1",
+            serde_json::Value::Null,
+        );
+        warned["post"]["labels"] = serde_json::json!([{"val": "!warn"}]);
+
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "feed": [warned] })),
+            )
+            .mount(&server)
+            .await;
+
+        let AuthorYield { bricks, .. } = get_author_feed(&Http::new(), &server.uri(), "did:plc:aa")
+            .await
+            .unwrap();
+        assert_eq!(bricks.len(), 1, "a warned post is kept, not dropped");
+        match &bricks[0] {
+            Brick::Post(p) => assert_eq!(
+                p.blur.as_ref().map(|b| b.label.as_str()),
+                Some("!warn"),
+                "its media is covered behind a reveal"
+            ),
+            other => panic!("expected a post brick, got {other:?}"),
+        }
+    }
+
+    /// a moderator `!hide` drops the post outright, like an adult one.
+    #[tokio::test]
+    async fn author_feed_drops_hidden_posts() {
+        let server = MockServer::start().await;
+        let mut hidden = post_json(
+            "at://did:plc:aa/app.bsky.feed.post/1",
+            serde_json::Value::Null,
+        );
+        hidden["post"]["labels"] = serde_json::json!([{"val": "!hide"}]);
+
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "feed": [hidden] })),
+            )
+            .mount(&server)
+            .await;
+
+        let AuthorYield { bricks, .. } = get_author_feed(&Http::new(), &server.uri(), "did:plc:aa")
+            .await
+            .unwrap();
+        assert!(bricks.is_empty(), "a hard-hidden post is not laid");
+    }
+
+    #[tokio::test]
+    async fn get_profile_optout_reads_the_self_label() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .and(query_param("actor", "opted.test"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "did": "did:plc:opt",
+                "handle": "opted.test",
+                "labels": [{"val": "!no-unauthenticated"}]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "did": "did:plc:open",
+                "handle": "open.test"
+            })))
+            .mount(&server)
+            .await;
+
+        assert!(
+            get_profile_optout(&Http::new(), &server.uri(), "opted.test")
+                .await
+                .unwrap(),
+            "the self-label means opted out"
+        );
+        assert!(
+            !get_profile_optout(&Http::new(), &server.uri(), "open.test")
+                .await
+                .unwrap(),
+            "no labels means visible to everyone"
+        );
     }
 
     #[tokio::test]

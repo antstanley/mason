@@ -6,6 +6,8 @@ pub enum AppError {
     BadRequest(&'static str),
     #[error("actor not found: {0}")]
     ActorNotFound(String),
+    #[error("login required: {0}")]
+    LoginRequired(String),
     #[error("upstream error: {0}")]
     Upstream(String),
 }
@@ -17,6 +19,9 @@ impl AppError {
         match self {
             AppError::BadRequest(_) => (400, "bad_request"),
             AppError::ActorNotFound(_) => (404, "actor_not_found"),
+            // the owner asked to be seen only by signed-in visitors; mason has
+            // no sign-in, so the wall stays sealed
+            AppError::LoginRequired(_) => (403, "login_required"),
             AppError::Upstream(_) => (502, "upstream"),
         }
     }
