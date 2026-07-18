@@ -116,21 +116,37 @@ pub async fn resolve_handle(http: &Http, base: &str, handle: &str) -> Result<Str
     Ok(http.get_json::<Resolved>(&url, Bucket::Appview).await?.did)
 }
 
-/// Whether an account has opted out of being shown to logged-out viewers.
+/// A profile view, reduced to what a cold wall load needs from it.
+pub struct Profile {
+    /// The account's DID. Carrying it here is what lets a handle load skip a
+    /// separate `resolveHandle` round trip: `getProfile` accepts a handle and
+    /// returns the DID, so the two calls that used to gate every cold wall
+    /// collapse into one.
+    pub did: String,
+    /// Whether the account opted out of being shown to logged-out viewers.
+    pub opted_out: bool,
+}
+
+/// Fetch a profile view for `actor`, which may be a handle or a DID.
 ///
-/// The follow-graph and author-feed paths never fetch the wall owner's OWN
-/// profile (their posts are not on their wall), so their opt-out never rides
-/// along; this is the one call that surfaces it. The label lives in the
-/// `labels` array of `getProfile`.
-pub async fn get_profile_optout(http: &Http, base: &str, actor: &str) -> Result<bool, HttpError> {
+/// One AppView call doing double duty. The response carries the DID, so a
+/// handle no longer needs a preceding `resolveHandle` hop; and the `labels`
+/// array carries the logged-out opt-out. The follow-graph and author-feed
+/// paths never fetch the wall owner's OWN profile (their posts are not on their
+/// wall), so this is the one call that surfaces their opt-out.
+pub async fn get_profile(http: &Http, base: &str, actor: &str) -> Result<Profile, HttpError> {
     #[derive(Deserialize)]
     struct ProfileView {
+        did: String,
         #[serde(default)]
         labels: Vec<Label>,
     }
     let url = format!("{base}/xrpc/app.bsky.actor.getProfile?actor={actor}");
     let profile: ProfileView = http.get_json(&url, Bucket::Appview).await?;
-    Ok(wants_auth(&profile.labels))
+    Ok(Profile {
+        did: profile.did,
+        opted_out: wants_auth(&profile.labels),
+    })
 }
 
 /// Follow-graph pages (100 at a time, the AppView maximum), threaded through
@@ -656,7 +672,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_profile_optout_reads_the_self_label() {
+    async fn get_profile_reads_the_did_and_self_label() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/xrpc/app.bsky.actor.getProfile"))
@@ -677,18 +693,18 @@ mod tests {
             .mount(&server)
             .await;
 
-        assert!(
-            get_profile_optout(&Http::new(), &server.uri(), "opted.test")
-                .await
-                .unwrap(),
-            "the self-label means opted out"
-        );
-        assert!(
-            !get_profile_optout(&Http::new(), &server.uri(), "open.test")
-                .await
-                .unwrap(),
-            "no labels means visible to everyone"
-        );
+        // one call resolves the handle to a DID and reads the opt-out at once
+        let opted = get_profile(&Http::new(), &server.uri(), "opted.test")
+            .await
+            .unwrap();
+        assert_eq!(opted.did, "did:plc:opt", "getProfile carries the DID");
+        assert!(opted.opted_out, "the self-label means opted out");
+
+        let open = get_profile(&Http::new(), &server.uri(), "open.test")
+            .await
+            .unwrap();
+        assert_eq!(open.did, "did:plc:open");
+        assert!(!open.opted_out, "no labels means visible to everyone");
     }
 
     #[tokio::test]

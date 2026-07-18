@@ -76,21 +76,35 @@ const FAN_OUT: usize = 16;
 /// rather than to one rate-limited AppView, and the slowest of them must not
 /// hold up the rest.
 const REPO_FAN_OUT: usize = 32;
-/// Pages of the follow graph (100 each) the first wall will wait for. Three is
-/// three round trips, and 300 follows to sample a 100-author cohort from.
-const FOLLOW_PAGES_EAGER: usize = 3;
+/// Pages of the follow graph (100 each) the first wall will wait for. One page
+/// is one round trip and 100 follows, already more than the 100-author cohort
+/// samples, so the first wall waits for exactly that and no more; each further
+/// page is a sequential round trip that fetches nothing while it blocks. The
+/// rest of the graph is chased in the background (`FOLLOW_PAGES_MAX`) and the
+/// NEXT wall samples the whole of it.
+const FOLLOW_PAGES_EAGER: usize = 1;
 /// The cap on the whole graph, chased in the background. The cohort sampler
 /// has never needed more than this.
 const FOLLOW_PAGES_MAX: usize = 20;
 /// The fans that supply the rare kinds: repo reads, and the live list.
 const SLOW_FANS: usize = 2;
-/// How long the FIRST page will wait for those two before laying anyway. A
-/// wall of nothing but posts is not mason; a wall that never arrives is worse.
+/// How long the FIRST page will wait for those two before laying anyway,
+/// measured from when the SNAPSHOT was created, not from when the page request
+/// arrives. The two waits used to stack: `get_or_build` blocked up to
+/// `FIRST_PAINT_DEADLINE` for a dozen authors, and only then did `get_page`
+/// start this clock, so a cold wall could stare at skeletons for the sum of the
+/// two. Anchoring to creation folds the first-paint wait inside this budget: a
+/// wall of nothing but posts is not mason, but neither is one that never
+/// arrives, and this bounds the whole opening wait to `MIX_DEADLINE`.
 const MIX_DEADLINE: Duration = Duration::from_secs(6);
 
 pub struct Snapshot {
     pub id: String,
     pub seed: u64,
+    /// When this snapshot was created, so the first page's mix wait can be
+    /// bounded from the moment the fill began rather than restarted when the
+    /// page request lands.
+    created: Instant,
     inner: Mutex<Inner>,
     progress: Notify,
 }
@@ -107,6 +121,7 @@ impl Snapshot {
         Self {
             id,
             seed,
+            created: Instant::now(),
             inner: Mutex::new(Inner {
                 pool: Vec::new(),
                 wall: Vec::new(),
@@ -525,7 +540,9 @@ pub async fn get_page(
     drop_ended_streams(state, snapshot).await;
     let started = Instant::now();
     let deadline = started + Duration::from_secs(8);
-    let mix_deadline = started + MIX_DEADLINE;
+    // anchored to snapshot creation, so the first-paint wait already spent in
+    // get_or_build counts against this budget rather than stacking on top of it
+    let mix_deadline = snapshot.created + MIX_DEADLINE;
     loop {
         let awaiting_mix;
         {

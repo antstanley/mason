@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { warmFeed } from '$lib/api';
 	import { cleanHandle, lastHandle } from '$lib/state/handle.svelte';
 	import LandingWall from './LandingWall.svelte';
 
@@ -8,6 +9,15 @@
 
 	// the landing has one job; the first keystroke should land in it
 	$effect(() => input?.focus());
+
+	// warm the engine while the reader is still at the form. A remembered handle
+	// (the form is prefilled with it, and most readers just click through) warms
+	// that wall's caches so submitting meets a wall already being laid; with no
+	// handle to go on, the demo wall at least compiles the wasm off the critical
+	// path. Runs once, untracked, best-effort.
+	$effect(() => {
+		void warmFeed(cleanHandle(lastHandle.value) || 'demo');
+	});
 
 	function submit(event: SubmitEvent) {
 		event.preventDefault();

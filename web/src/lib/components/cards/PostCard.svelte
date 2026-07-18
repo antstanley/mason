@@ -5,7 +5,9 @@
 	import AuthorChip from '../AuthorChip.svelte';
 	import Sensitive from '../Sensitive.svelte';
 
-	let { brick }: { brick: PostBrick } = $props();
+	// priority: an above-the-fold brick loads its image eagerly and at high
+	// fetch priority; the rest of the wall stays lazy
+	let { brick, priority = false }: { brick: PostBrick; priority?: boolean } = $props();
 
 	const img = $derived(brick.images[0] ?? null);
 </script>
@@ -16,7 +18,8 @@
 			<img
 				src={img.src}
 				alt={img.alt}
-				loading="lazy"
+				loading={priority ? 'eager' : 'lazy'}
+				fetchpriority={priority ? 'high' : undefined}
 				class="w-full bg-brick-post/15 object-cover"
 				style:aspect-ratio={img.aspectRatio ? `${img.aspectRatio.width} / ${img.aspectRatio.height}` : undefined}
 			/>

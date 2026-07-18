@@ -114,17 +114,17 @@
 	});
 </script>
 
-{#snippet brick(item: Brick)}
+{#snippet brick(item: Brick, priority: boolean)}
 	{#if item.kind === 'post'}
 		{#if isGlaze}
-			<GlazeCard brick={item} />
+			<GlazeCard brick={item} {priority} />
 		{:else}
-			<PostCard brick={item} />
+			<PostCard brick={item} {priority} />
 		{/if}
 	{:else if item.kind === 'blog'}
-		<BlogCard brick={item} />
+		<BlogCard brick={item} {priority} />
 	{:else}
-		<VideoCard brick={item} />
+		<VideoCard brick={item} {priority} />
 	{/if}
 {/snippet}
 
