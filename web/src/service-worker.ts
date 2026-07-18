@@ -21,7 +21,11 @@ declare const self: ServiceWorkerGlobalScope;
 // all: its bricks are fixtures compiled into the wasm.
 
 const SHELL = `mason-shell-${version}`;
-const PRECACHE = ["/", ...build, ...files];
+// `build` does NOT include the wasm engine (it rides in as a Vite `?url` asset,
+// not a SvelteKit build output), so precache it explicitly. That is what lets a
+// worker survive a deploy: the next deploy deletes this hashed wasm from S3, but
+// this worker keeps serving the copy it cached here until it is itself replaced.
+const PRECACHE = ["/", ...build, ...files, wasmUrl];
 
 // --- IndexedDB: one store, one key -----------------------------------------
 
@@ -70,12 +74,26 @@ async function idbPut(key: string, value: string): Promise<void> {
 let ready: Promise<unknown> | null = null;
 const ensureInit = () =>
   (ready ??= (async () => {
-    await init({ module_or_path: wasmUrl });
     try {
-      const saved = await idbGet(IDB_KEY);
-      if (typeof saved === "string") await import_caches(saved);
-    } catch {
-      // no persisted caches (or unreadable); start cold
+      // Load the engine from THIS worker's own precache, not the network. Every
+      // deploy deletes the previous build's hashed assets, so a worker that
+      // installed before a deploy would 404 fetching its old wasm URL and then
+      // brick every /api/feed for its whole life (the rejected init below is
+      // memoised). Its precache still holds the wasm it shipped with, so read
+      // that; the network is only the cold-start fallback for a fresh install.
+      const hit = await caches.open(SHELL).then((cache) => cache.match(wasmUrl));
+      await init({ module_or_path: hit ? await hit.arrayBuffer() : wasmUrl });
+      try {
+        const saved = await idbGet(IDB_KEY);
+        if (typeof saved === "string") await import_caches(saved);
+      } catch {
+        // no persisted caches (or unreadable); start cold
+      }
+    } catch (e) {
+      // never memoise a failed init: let the next request retry rather than
+      // leaving the session bricked behind a permanently-rejected promise
+      ready = null;
+      throw e;
     }
   })());
 
