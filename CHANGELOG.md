@@ -1,5 +1,16 @@
 # mason
 
+## 0.6.0
+
+### Minor Changes
+
+- [#17](https://github.com/antstanley/mason/pull/17) [`b2776d5`](https://github.com/antstanley/mason/commit/b2776d59a25b22fc2f6cde20175c958a00172eb9) Thanks [@antstanley](https://github.com/antstanley)! - glaze: an image wall. a new menu toggle (off by default) flips the wall to
+  nothing but Bluesky posts that brought an image, fetched from the AppView and
+  ranked by the same grout the full wall uses, with moderation and `!warn` blur
+  intact. bento and masonry both lay it. glaze bricks lead with the picture and a
+  clear strip carrying the poster; hover one and the post's text scrolls up over
+  the image (a slim footer on touch, where there is no hover).
+
 ## 0.5.0
 
 ### Minor Changes
