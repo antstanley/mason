@@ -1,20 +1,140 @@
 <script lang="ts">
-	// Which atmosphere client should a brick open in? A native <select>: it is
-	// one setting, it belongs in the chrome, and reinventing it as a custom
-	// dropdown would buy nothing but bugs.
+	// Which atmosphere client should a brick open in? Icons live inside the
+	// options, which a native <select> can't render, so this is a custom listbox:
+	// a pill trigger and a popover of rows, with roving arrow-key focus, Escape,
+	// and click-away, so it stays as keyboard-honest as the select it replaces.
+	import { tick } from 'svelte';
 	import { CLIENTS, client, type ClientId } from '$lib/state/client.svelte';
+	import ClientIcon from './ClientIcon.svelte';
+
+	let open = $state(false);
+	let root = $state<HTMLElement | null>(null);
+	let trigger = $state<HTMLButtonElement | null>(null);
+	let listbox = $state<HTMLElement | null>(null);
+
+	const current = $derived(CLIENTS.find((c) => c.id === client.id) ?? CLIENTS[0]);
+
+	function rows(): HTMLElement[] {
+		return listbox ? Array.from(listbox.querySelectorAll<HTMLElement>('[role="option"]')) : [];
+	}
+
+	function openMenu() {
+		open = true;
+		void tick().then(() => {
+			const opts = rows();
+			const idx = CLIENTS.findIndex((c) => c.id === client.id);
+			opts[Math.max(0, idx)]?.focus();
+		});
+	}
+
+	function closeMenu(returnFocus = true) {
+		open = false;
+		if (returnFocus) trigger?.focus();
+	}
+
+	function choose(id: ClientId) {
+		client.set(id);
+		closeMenu();
+	}
+
+	function onTriggerKey(event: KeyboardEvent) {
+		if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			openMenu();
+		}
+	}
+
+	function onListKey(event: KeyboardEvent) {
+		const opts = rows();
+		const i = opts.indexOf(document.activeElement as HTMLElement);
+		if (event.key === 'ArrowDown') {
+			event.preventDefault();
+			opts[(i + 1) % opts.length]?.focus();
+		} else if (event.key === 'ArrowUp') {
+			event.preventDefault();
+			opts[(i - 1 + opts.length) % opts.length]?.focus();
+		} else if (event.key === 'Home') {
+			event.preventDefault();
+			opts[0]?.focus();
+		} else if (event.key === 'End') {
+			event.preventDefault();
+			opts[opts.length - 1]?.focus();
+		} else if (event.key === 'Escape' || event.key === 'Tab') {
+			closeMenu(event.key === 'Escape');
+		}
+	}
+
+	$effect(() => {
+		if (!open) return;
+		const onDown = (event: PointerEvent) => {
+			if (root && !root.contains(event.target as Node)) closeMenu(false);
+		};
+		document.addEventListener('pointerdown', onDown);
+		return () => document.removeEventListener('pointerdown', onDown);
+	});
 </script>
 
-<label class="flex items-center gap-2">
-	<span class="sr-only">Open posts in</span>
-	<span class="text-sm opacity-75" aria-hidden="true">open in</span>
-	<select
-		value={client.id}
-		onchange={(event) => client.set(event.currentTarget.value as ClientId)}
-		class="min-h-11 cursor-pointer rounded-full border-2 border-ink/15 bg-chalk px-3 text-sm font-semibold transition-colors hover:border-pop-pink dark:border-chalk/20 dark:bg-kiln"
+<div bind:this={root} class="relative">
+	<button
+		bind:this={trigger}
+		type="button"
+		onclick={() => (open ? closeMenu(false) : openMenu())}
+		onkeydown={onTriggerKey}
+		aria-haspopup="listbox"
+		aria-expanded={open}
+		aria-label="Open posts in {current.label}"
+		class="flex min-h-11 items-center gap-1.5 rounded-full px-3 text-sm font-semibold transition-colors hover:bg-ink/5 dark:hover:bg-chalk/10"
 	>
-		{#each CLIENTS as option (option.id)}
-			<option value={option.id}>{option.label}</option>
-		{/each}
-	</select>
-</label>
+		<ClientIcon id={current.id} />
+		<!-- stack every label in one cell so the trigger is as wide as the
+		     longest name; the current one shows, the rest just hold the width
+		     and stop the header shifting as clients change -->
+		<span class="grid text-left">
+			{#each CLIENTS as option (option.id)}
+				<span class="col-start-1 row-start-1 {option.id === current.id ? '' : 'invisible'}">
+					{option.label}
+				</span>
+			{/each}
+		</span>
+		<span
+			aria-hidden="true"
+			class="text-xs opacity-60 transition-transform duration-200 {open ? 'rotate-180' : ''}"
+		>
+			▾
+		</span>
+	</button>
+
+	{#if open}
+		<ul
+			bind:this={listbox}
+			role="listbox"
+			aria-label="Open posts in"
+			onkeydown={onListKey}
+			class="absolute right-0 bottom-full z-20 mb-2 min-w-full overflow-hidden rounded-2xl border-2 border-ink/10 bg-chalk p-1 shadow-brick-lift md:top-full md:bottom-auto md:mt-2 md:mb-0 dark:border-chalk/15 dark:bg-kiln"
+		>
+			{#each CLIENTS as option (option.id)}
+				<li>
+					<button
+						type="button"
+						role="option"
+						aria-selected={option.id === client.id}
+						tabindex="-1"
+						onclick={() => choose(option.id)}
+						class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold whitespace-nowrap transition-colors hover:bg-ink/5 aria-selected:bg-ink/[0.06] dark:hover:bg-chalk/10 dark:aria-selected:bg-chalk/10"
+					>
+						<ClientIcon id={option.id} />
+						<span class="flex-1">{option.label}</span>
+						<span
+							aria-hidden="true"
+							class="text-brick-post-ink dark:text-brick-post {option.id === client.id
+								? ''
+								: 'invisible'}"
+						>
+							✓
+						</span>
+					</button>
+				</li>
+			{/each}
+		</ul>
+	{/if}
+</div>
