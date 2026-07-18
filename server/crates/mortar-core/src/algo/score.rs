@@ -46,6 +46,15 @@ pub fn is_live(brick: &Brick) -> bool {
 /// Bricks with an unparseable date are treated as stale: better to drop one
 /// than to let it sit at the top of a wall forever with an infinite age.
 pub fn is_fresh(brick: &Brick, now: DateTime<Utc>) -> bool {
+    within_age(brick, now, max_age_hours(brick))
+}
+
+/// Whether a brick falls within a caller-supplied age window, in hours. The
+/// glaze wall uses this to reach further back than the per-kind default: an
+/// image wall built from `posts_with_media` spans weeks, and the 72h post
+/// window would throw most of it away. Live streams are always fresh (their
+/// timestamp is not a claim about the present); an unparseable date is stale.
+pub fn within_age(brick: &Brick, now: DateTime<Utc>, max_age_hours: f64) -> bool {
     // "live" is a fact about the present, not a claim about a timestamp. A
     // streamer who has been broadcasting on the same record since March is
     // still broadcasting.
@@ -53,7 +62,7 @@ pub fn is_fresh(brick: &Brick, now: DateTime<Utc>) -> bool {
         return true;
     }
     match created_at(brick) {
-        Some(t) => (now - t).num_seconds().max(0) as f64 / 3600.0 <= max_age_hours(brick),
+        Some(t) => (now - t).num_seconds().max(0) as f64 / 3600.0 <= max_age_hours,
         None => false,
     }
 }
@@ -184,6 +193,23 @@ mod tests {
             &post(&(now() - TimeDelta::hours(73)).to_rfc3339(), 0, 0),
             now()
         ));
+    }
+
+    #[test]
+    fn a_wider_window_keeps_what_the_default_would_drop() {
+        // two weeks old: past the 72h post window, inside a 30-day glaze window
+        let two_weeks = post(&(now() - TimeDelta::hours(24 * 14)).to_rfc3339(), 0, 0);
+        assert!(
+            !is_fresh(&two_weeks, now()),
+            "the default post window drops it"
+        );
+        assert!(
+            within_age(&two_weeks, now(), 24.0 * 30.0),
+            "a 30-day window keeps it"
+        );
+        // but a wider window is still a window: 40 days out is gone either way
+        let forty_days = post(&(now() - TimeDelta::hours(24 * 40)).to_rfc3339(), 0, 0);
+        assert!(!within_age(&forty_days, now(), 24.0 * 30.0));
     }
 
     #[test]

@@ -16,7 +16,8 @@
 	<div class="relative flex">
 		<span
 			aria-hidden="true"
-			class="pointer-events-none absolute inset-y-0 left-0 w-1/2 rounded-full bg-ink shadow-brick transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none dark:bg-chalk"
+			class="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-ink shadow-brick transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none dark:bg-chalk"
+			style:width="{100 / LAYOUTS.length}%"
 			style:transform="translateX({selected * 100}%)"
 		></span>
 		{#each LAYOUTS as option (option.id)}

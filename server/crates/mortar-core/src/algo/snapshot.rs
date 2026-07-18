@@ -26,6 +26,7 @@ use crate::cache::{
     StdDocs,
 };
 use crate::error::AppError;
+use crate::mode::Mode;
 use crate::model::{Author, Brick};
 use crate::platform::{self, Instant, SystemTime};
 use crate::sources::bluesky::AuthorYield;
@@ -52,6 +53,17 @@ const FIRST_PAINT_AUTHORS: usize = 12;
 /// flooding this guards against is a chatty account drowning the pool in
 /// posts, and that is still exactly what it stops.
 const MAX_BRICKS_PER_AUTHOR: usize = 4;
+/// The glaze wall is one kind from one source, so a chatty account cannot crowd
+/// out the rarer kinds (there are none) — only other image posters. It reads
+/// `posts_with_media` deep, so it can afford to let a prolific image account
+/// bring more of itself than the mixed wall does; the diversity window still
+/// spaces them out.
+const GLAZE_MAX_BRICKS_PER_AUTHOR: usize = 8;
+/// How far back the glaze wall reaches. The full wall holds posts to a 72h
+/// window ("what the people you follow are making, present tense"); an image
+/// wall is a gallery, not a timeline, so it keeps a month of a follow's images
+/// rather than three days of them.
+const GLAZE_MAX_AGE_HOURS: f64 = 24.0 * 30.0;
 /// …or this much time has passed, whichever comes first.
 const FIRST_PAINT_DEADLINE: Duration = Duration::from_secs(3);
 /// Per-slot caps on bricks held per snapshot, by mix kind (see `mix::KINDS`).
@@ -84,7 +96,14 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    fn new(id: String, seed: u64) -> Self {
+    fn new(id: String, seed: u64, mode: Mode) -> Self {
+        // glaze reads a single source (Bluesky posts): there are no rare-kind
+        // fans to wait for, so its first page never defers laying for a better
+        // mix. The full wall waits for the two slow fans (repos and live).
+        let (slow_fans, max_age_hours, max_per_author) = match mode {
+            Mode::Wall => (SLOW_FANS, None, MAX_BRICKS_PER_AUTHOR),
+            Mode::Glaze => (0, Some(GLAZE_MAX_AGE_HOURS), GLAZE_MAX_BRICKS_PER_AUTHOR),
+        };
         Self {
             id,
             seed,
@@ -95,7 +114,9 @@ impl Snapshot {
                 kind_counts: [0; mix::KINDS],
                 author_counts: HashMap::new(),
                 warming: true,
-                slow_fans: SLOW_FANS,
+                slow_fans,
+                max_age_hours,
+                max_per_author,
             }),
             progress: Notify::new(),
         }
@@ -118,13 +139,22 @@ struct Inner {
     /// instant it *could* be laid is a wall of nothing but posts. The first
     /// page waits, briefly, for these.
     slow_fans: usize,
+    /// Admission window in hours. `None` uses the per-kind default
+    /// (`score::is_fresh`); the glaze wall sets it to reach further back.
+    max_age_hours: Option<f64>,
+    /// How many bricks of one kind a single author may hold in the pool.
+    max_per_author: usize,
 }
 
 impl Inner {
     /// Insert into the pool unless it is a duplicate, stale, over its kind's
     /// cap, or its author already holds their share.
     fn admit(&mut self, brick: &Brick, now: chrono::DateTime<Utc>) {
-        if !score::is_fresh(brick, now) {
+        let fresh = match self.max_age_hours {
+            Some(max) => score::within_age(brick, now, max),
+            None => score::is_fresh(brick, now),
+        };
+        if !fresh {
             return;
         }
         let slot = mix::kind_index(brick);
@@ -133,7 +163,7 @@ impl Inner {
         }
         let author = score::author_key(brick).to_string();
         let held = self.author_counts.entry((author, slot)).or_insert(0);
-        if *held >= MAX_BRICKS_PER_AUTHOR {
+        if *held >= self.max_per_author {
             return;
         }
         if self.seen.insert(brick.id().to_string()) {
@@ -154,8 +184,14 @@ impl Inner {
     }
 }
 
-pub fn snapshot_id(did: &str, seed: u64) -> String {
-    format!("{:016x}", xxh3_64_with_seed(did.as_bytes(), seed))
+pub fn snapshot_id(did: &str, seed: u64, mode: Mode) -> String {
+    // the mode tag namespaces the id so a glaze wall and a full wall for the
+    // same actor and seed can never collide in the snapshot cache.
+    format!(
+        "{}-{:016x}",
+        mode.tag(),
+        xxh3_64_with_seed(did.as_bytes(), seed)
+    )
 }
 
 pub fn fresh_seed(did: &str) -> u64 {
@@ -173,12 +209,15 @@ pub async fn get_or_build(
     state: &Arc<AppState>,
     did: &str,
     seed: u64,
+    mode: Mode,
 ) -> Result<Arc<Snapshot>, AppError> {
-    let id = snapshot_id(did, seed);
+    let id = snapshot_id(did, seed, mode);
     let (snapshot, inserted) = state
         .caches
         .snapshots
-        .get_or_insert_with(id.clone(), || Arc::new(Snapshot::new(id.clone(), seed)))
+        .get_or_insert_with(id.clone(), || {
+            Arc::new(Snapshot::new(id.clone(), seed, mode))
+        })
         .await;
 
     if inserted {
@@ -186,7 +225,7 @@ pub async fn get_or_build(
         let fill_snapshot = Arc::clone(&snapshot);
         let viewer = did.to_string();
         platform::spawn(async move {
-            fill(fill_state, fill_snapshot, viewer, seed).await;
+            fill(fill_state, fill_snapshot, viewer, seed, mode).await;
         });
     }
 
@@ -213,7 +252,13 @@ pub async fn get_or_build(
 /// concurrently → warming off. Any follow-graph failure leaves an empty (but
 /// terminated) snapshot rather than an error; actor existence was already
 /// checked by resolve.
-async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, seed: u64) {
+async fn fill(
+    state: Arc<AppState>,
+    snapshot: Arc<Snapshot>,
+    viewer: String,
+    seed: u64,
+    mode: Mode,
+) {
     let started = Instant::now();
 
     let follows = match get_follows_cached(&state, &viewer).await {
@@ -227,7 +272,10 @@ async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, see
             return;
         }
     };
-    let cohort = sample_cohort(&state, &viewer, &follows, seed).await;
+    // per-viewer activity is namespaced by mode, so browsing the image wall
+    // never reshapes the full wall's known-active cohort, and vice versa.
+    let activity_key = activity_key(&viewer, mode);
+    let cohort = sample_cohort(&state, &activity_key, &follows, seed).await;
     tracing::debug!(
         "snapshot {}: {} follows, cohort of {}",
         snapshot.id,
@@ -235,116 +283,107 @@ async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, see
         cohort.len()
     );
 
-    // Who is live is one call for the whole network, and it does not depend on
-    // the cohort: a friend streaming right now belongs on the wall whether or
-    // not this snapshot's random sample happened to pick them. It runs
-    // alongside the fan-out so it lands in time for the first paint.
-    let live_fill = async {
-        let bricks = live_bricks(&state, &follows).await;
-        if !bricks.is_empty() {
-            tracing::debug!("{} of the follow graph is live", bricks.len());
-            let now = Utc::now();
-            let mut inner = snapshot.inner.lock().await;
-            for brick in bricks.iter() {
-                inner.admit(brick, now);
-            }
+    let (answered, yielding_authors) = match mode {
+        // The image wall reads one source and admits one kind. It leans on the
+        // shared author-feed cache (moderation and `!warn` blur are applied
+        // there, so glaze inherits them), keeps only image posts, and skips the
+        // repo reads and the live list entirely.
+        Mode::Glaze => {
+            fan_out_authors(&state, &snapshot, &cohort, true, Brick::is_image_post).await
         }
-        finish_slow_fan(&snapshot).await;
-    };
 
-    // Posts and repo reads are fanned out SEPARATELY, and this is the whole
-    // reason a cold wall paints at all.
-    //
-    // They used to share one task per author, which meant an author's posts
-    // were not admitted until plc.directory and two PDS listRecords had also
-    // answered for them. Posts are 68% of the wall and come from one fast,
-    // rate-limited endpoint; blogs and archived streams are a handful of
-    // bricks and come from a hundred different PDSes at a hundred different
-    // speeds. Coupling them held the fast source hostage to the slow one: a
-    // 100-author fill took 17s, so a viewer with a large follow graph got an
-    // EMPTY first page and had to wait for a second request to see anything.
-    // Split, the posts land at AppView speed and the rest catches up behind
-    // them.
-    let posts_fill = async {
-        let mut feeds = stream::iter(cohort.iter().cloned().map(|author| {
-            let state = Arc::clone(&state);
-            async move {
-                let yield_ = author_feed_cached(&state, &author.did).await;
-                (author, yield_)
-            }
-        }))
-        .buffer_unordered(FAN_OUT);
-
-        let mut answered = 0usize;
-        let mut yielding: Vec<String> = Vec::new();
-        while let Some((author, yield_)) = feeds.next().await {
-            answered += 1;
-            if !yield_.bricks.is_empty() {
-                yielding.push(author.did);
-            }
-            {
-                let now = Utc::now();
-                let mut inner = snapshot.inner.lock().await;
-                for brick in &yield_.bricks {
-                    inner.admit(brick, now);
-                }
-            }
-            snapshot.progress.notify_waiters();
-        }
-        (answered, yielding)
-    };
-
-    let repos_fill = async {
-        let mut repos = stream::iter(cohort.iter().cloned().map(|author| {
-            let state = Arc::clone(&state);
-            async move {
-                // blogs and archived streams both read the author's repo, so
-                // they share one identity lookup rather than racing for two
-                let Some(pds) = pds_cached(&state, &author.did).await else {
-                    return (author, Arc::new(StdDocs::default()), Arc::new(Vec::new()));
-                };
-                let (docs, streams) = tokio::join!(
-                    std_docs_cached(&state, &pds, &author),
-                    streams_cached(&state, &pds, &author),
-                );
-                (author, docs, streams)
-            }
-        }))
-        .buffer_unordered(REPO_FAN_OUT);
-
-        let mut yielding: Vec<String> = Vec::new();
-        while let Some((author, docs, streams)) = repos.next().await {
-            if !docs.bricks.is_empty() || !streams.is_empty() {
-                yielding.push(author.did);
-            }
-            {
-                let mut inner = snapshot.inner.lock().await;
-                let inner = &mut *inner;
-                // bskyPostRef suppression: the blog card wins over its
-                // cross-posted skeet, whether the post came first or later.
-                // Now that posts race ahead, "later" is the common case: the
-                // skeet is usually already pooled, and gets withdrawn here.
-                for uri in &docs.suppressed_posts {
-                    if inner.seen.insert(uri.clone()) {
-                        // post not pooled yet; the insert blocks it later
-                    } else {
-                        inner.pool.retain(|b| b.id() != uri);
+        // The full wall: posts from the AppView, blogs and archived streams from
+        // a hundred PDSes, and the live list, all fanned out at once.
+        Mode::Wall => {
+            // Who is live is one call for the whole network, and it does not
+            // depend on the cohort: a friend streaming right now belongs on the
+            // wall whether or not this snapshot's random sample happened to pick
+            // them. It runs alongside the fan-out so it lands in time for the
+            // first paint.
+            let live_fill = async {
+                let bricks = live_bricks(&state, &follows).await;
+                if !bricks.is_empty() {
+                    tracing::debug!("{} of the follow graph is live", bricks.len());
+                    let now = Utc::now();
+                    let mut inner = snapshot.inner.lock().await;
+                    for brick in bricks.iter() {
+                        inner.admit(brick, now);
                     }
                 }
-                let now = Utc::now();
-                for brick in docs.bricks.iter().chain(streams.iter()) {
-                    inner.admit(brick, now);
-                }
-            }
-            snapshot.progress.notify_waiters();
-        }
-        finish_slow_fan(&snapshot).await;
-        yielding
-    };
+                finish_slow_fan(&snapshot).await;
+            };
 
-    let ((answered, mut yielding_authors), repo_authors, ()) =
-        futures::join!(posts_fill, repos_fill, live_fill);
-    yielding_authors.extend(repo_authors);
+            // Posts and repo reads are fanned out SEPARATELY, and this is the
+            // whole reason a cold wall paints at all.
+            //
+            // They used to share one task per author, which meant an author's
+            // posts were not admitted until plc.directory and two PDS
+            // listRecords had also answered for them. Posts are 68% of the wall
+            // and come from one fast, rate-limited endpoint; blogs and archived
+            // streams are a handful of bricks and come from a hundred different
+            // PDSes at a hundred different speeds. Coupling them held the fast
+            // source hostage to the slow one: a 100-author fill took 17s, so a
+            // viewer with a large follow graph got an EMPTY first page and had
+            // to wait for a second request to see anything. Split, the posts
+            // land at AppView speed and the rest catches up behind them.
+            let posts_fill = fan_out_authors(&state, &snapshot, &cohort, false, |_| true);
+
+            let repos_fill = async {
+                let mut repos = stream::iter(cohort.iter().cloned().map(|author| {
+                    let state = Arc::clone(&state);
+                    async move {
+                        // blogs and archived streams both read the author's repo,
+                        // so they share one identity lookup rather than racing
+                        // for two
+                        let Some(pds) = pds_cached(&state, &author.did).await else {
+                            return (author, Arc::new(StdDocs::default()), Arc::new(Vec::new()));
+                        };
+                        let (docs, streams) = tokio::join!(
+                            std_docs_cached(&state, &pds, &author),
+                            streams_cached(&state, &pds, &author),
+                        );
+                        (author, docs, streams)
+                    }
+                }))
+                .buffer_unordered(REPO_FAN_OUT);
+
+                let mut yielding: Vec<String> = Vec::new();
+                while let Some((author, docs, streams)) = repos.next().await {
+                    if !docs.bricks.is_empty() || !streams.is_empty() {
+                        yielding.push(author.did);
+                    }
+                    {
+                        let mut inner = snapshot.inner.lock().await;
+                        let inner = &mut *inner;
+                        // bskyPostRef suppression: the blog card wins over its
+                        // cross-posted skeet, whether the post came first or
+                        // later. Now that posts race ahead, "later" is the
+                        // common case: the skeet is usually already pooled, and
+                        // gets withdrawn here.
+                        for uri in &docs.suppressed_posts {
+                            if inner.seen.insert(uri.clone()) {
+                                // post not pooled yet; the insert blocks it later
+                            } else {
+                                inner.pool.retain(|b| b.id() != uri);
+                            }
+                        }
+                        let now = Utc::now();
+                        for brick in docs.bricks.iter().chain(streams.iter()) {
+                            inner.admit(brick, now);
+                        }
+                    }
+                    snapshot.progress.notify_waiters();
+                }
+                finish_slow_fan(&snapshot).await;
+                yielding
+            };
+
+            let ((answered, mut yielding), repo_authors, ()) =
+                futures::join!(posts_fill, repos_fill, live_fill);
+            yielding.extend(repo_authors);
+            (answered, yielding)
+        }
+    };
 
     {
         let mut inner = snapshot.inner.lock().await;
@@ -357,8 +396,66 @@ async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>, viewer: String, see
         started.elapsed()
     );
 
-    // remember who yielded, for the next snapshot's cohort
-    record_activity(&state, &viewer, yielding_authors).await;
+    // remember who yielded, for the next snapshot's cohort (mode-namespaced)
+    record_activity(&state, &activity_key, yielding_authors).await;
+}
+
+/// Namespace a viewer's activity by mode. The full wall keeps the bare did (so
+/// entries persisted before glaze existed still match), while glaze prefixes it,
+/// keeping the two walls' known-active cohorts from bleeding into each other.
+fn activity_key(viewer: &str, mode: Mode) -> String {
+    match mode {
+        Mode::Wall => viewer.to_string(),
+        Mode::Glaze => format!("{}:{viewer}", mode.tag()),
+    }
+}
+
+/// Fan out author feeds across the cohort, admitting the bricks that pass
+/// `keep`. The full wall keeps everything; glaze keeps only image posts. Returns
+/// (authors answered, authors that yielded at least one kept brick) so the
+/// caller can warm-start the next cohort with them.
+async fn fan_out_authors(
+    state: &Arc<AppState>,
+    snapshot: &Arc<Snapshot>,
+    cohort: &[Author],
+    deep_media: bool,
+    keep: impl Fn(&Brick) -> bool,
+) -> (usize, Vec<String>) {
+    let mut feeds = stream::iter(cohort.iter().cloned().map(|author| {
+        let state = Arc::clone(state);
+        async move {
+            // glaze reads the author's media deep (posts_with_media); the full
+            // wall skims their last thirty posts. Separate caches, so neither
+            // read clobbers the other's.
+            let yield_ = if deep_media {
+                image_feed_cached(&state, &author.did).await
+            } else {
+                author_feed_cached(&state, &author.did).await
+            };
+            (author, yield_)
+        }
+    }))
+    .buffer_unordered(FAN_OUT);
+
+    let mut answered = 0usize;
+    let mut yielding: Vec<String> = Vec::new();
+    while let Some((author, yield_)) = feeds.next().await {
+        answered += 1;
+        let mut kept_any = false;
+        {
+            let now = Utc::now();
+            let mut inner = snapshot.inner.lock().await;
+            for brick in yield_.bricks.iter().filter(|b| keep(b)) {
+                kept_any = true;
+                inner.admit(brick, now);
+            }
+        }
+        if kept_any {
+            yielding.push(author.did);
+        }
+        snapshot.progress.notify_waiters();
+    }
+    (answered, yielding)
 }
 
 /// One of the two rare-kind fans has finished; a page waiting for a mixed pool
@@ -589,6 +686,30 @@ async fn author_feed_cached(state: &Arc<AppState>, author_did: &str) -> Arc<Auth
     yield_
 }
 
+/// One author's recent MEDIA posts, read deep for the glaze wall. Same shape as
+/// `author_feed_cached` but a separate endpoint (`posts_with_media`) and a
+/// separate cache, so the image wall's deeper read never displaces the full
+/// wall's shallow one for the same author.
+async fn image_feed_cached(state: &Arc<AppState>, author_did: &str) -> Arc<AuthorYield> {
+    if let Some(cached) = state.caches.image_feed.get(&author_did.to_string()).await {
+        return cached;
+    }
+    let yield_ =
+        match bluesky::get_image_feed(&state.http, &state.config.appview_base, author_did).await {
+            Ok(yield_) => Arc::new(yield_),
+            Err(e) => {
+                tracing::debug!("image feed {author_did} failed: {e}");
+                Arc::new(AuthorYield { bricks: Vec::new() })
+            }
+        };
+    state
+        .caches
+        .image_feed
+        .insert(author_did.to_string(), Arc::clone(&yield_))
+        .await;
+    yield_
+}
+
 /// Who is live on Streamplace, network-wide. Viewer-independent by
 /// construction, which is what makes the single cache key honest: this
 /// function must never see the follow graph, or one viewer's friends would be
@@ -700,14 +821,14 @@ async fn streams_cached(state: &Arc<AppState>, pds: &str, author: &Author) -> Ar
 /// whole follow graph.
 async fn sample_cohort(
     state: &Arc<AppState>,
-    viewer: &str,
+    activity_key: &str,
     follows: &[bluesky::Follow],
     seed: u64,
 ) -> Vec<Author> {
     let known_active = state
         .caches
         .activity
-        .get(&viewer.to_string())
+        .get(&activity_key.to_string())
         .await
         .unwrap_or_default();
     // Hidden follows never enter the cohort, so none of their content is
@@ -771,7 +892,7 @@ async fn std_docs_cached(state: &Arc<AppState>, pds: &str, author: &Author) -> A
     docs
 }
 
-async fn record_activity(state: &Arc<AppState>, viewer: &str, mut yielding: Vec<String>) {
+async fn record_activity(state: &Arc<AppState>, activity_key: &str, mut yielding: Vec<String>) {
     if yielding.is_empty() {
         return;
     }
@@ -779,7 +900,7 @@ async fn record_activity(state: &Arc<AppState>, viewer: &str, mut yielding: Vec<
     // a duplicate here would waste one of the next cohort's known-active slots
     let mut once = HashSet::new();
     yielding.retain(|did| once.insert(did.clone()));
-    if let Some(previous) = state.caches.activity.get(&viewer.to_string()).await {
+    if let Some(previous) = state.caches.activity.get(&activity_key.to_string()).await {
         let fresh: HashSet<String> = yielding.iter().cloned().collect();
         yielding.extend(
             previous
@@ -792,7 +913,7 @@ async fn record_activity(state: &Arc<AppState>, viewer: &str, mut yielding: Vec<
     state
         .caches
         .activity
-        .insert(viewer.to_string(), Arc::new(yielding))
+        .insert(activity_key.to_string(), Arc::new(yielding))
         .await;
 }
 
@@ -857,6 +978,8 @@ mod tests {
             author_counts: HashMap::new(),
             warming: true,
             slow_fans: SLOW_FANS,
+            max_age_hours: None,
+            max_per_author: MAX_BRICKS_PER_AUTHOR,
         }
     }
 
@@ -925,6 +1048,58 @@ mod tests {
         i.admit(&post(2, 1, 71), now); // just inside the 72h window
         i.admit(&post(3, 2, 73), now); // just outside it
         assert_eq!(i.pool.len(), 2);
+    }
+
+    /// A glaze snapshot has no slow fans to wait for (it reads one source), so
+    /// its first page never defers laying; a full-wall snapshot waits for the
+    /// two rare-kind fans.
+    #[tokio::test]
+    async fn glaze_waits_for_no_slow_fans() {
+        let wall = Snapshot::new("w".into(), 1, Mode::Wall);
+        let glaze = Snapshot::new("g".into(), 1, Mode::Glaze);
+        assert_eq!(wall.inner.lock().await.slow_fans, SLOW_FANS);
+        assert_eq!(glaze.inner.lock().await.slow_fans, 0);
+    }
+
+    /// The glaze wall reaches further back and lets one author bring more of
+    /// itself: a two-week-old image is past the full wall's 72h window but stays
+    /// on glaze, and a prolific poster contributes up to the glaze cap, not the
+    /// full wall's four.
+    #[tokio::test]
+    async fn glaze_reaches_further_back_and_lets_authors_bring_more() {
+        let glaze = Snapshot::new("g".into(), 1, Mode::Glaze);
+        let mut inner = glaze.inner.lock().await;
+        let now = Utc::now();
+
+        inner.admit(&post(1, 0, 24 * 14), now); // 14 days old
+        assert_eq!(
+            inner.pool.len(),
+            1,
+            "an image well past the full wall's 72h window stays on glaze"
+        );
+
+        for n in 2..20 {
+            inner.admit(&post(n, 0, 1), now);
+        }
+        assert_eq!(
+            inner.pool.len(),
+            GLAZE_MAX_BRICKS_PER_AUTHOR,
+            "one author fills up to the glaze cap, not the full wall's four"
+        );
+    }
+
+    /// The mode is folded into the snapshot id, so a glaze wall and a full wall
+    /// for the same actor and seed never collide in the snapshot cache.
+    #[test]
+    fn snapshot_id_separates_the_two_walls() {
+        let wall = snapshot_id("did:plc:aa", 7, Mode::Wall);
+        let glaze = snapshot_id("did:plc:aa", 7, Mode::Glaze);
+        assert_ne!(wall, glaze);
+        assert_eq!(
+            wall,
+            snapshot_id("did:plc:aa", 7, Mode::Wall),
+            "stable per mode"
+        );
     }
 
     /// The live list is one call for the WHOLE network, cached under a single
@@ -1047,7 +1222,7 @@ mod tests {
     #[tokio::test]
     async fn a_later_page_never_waits_for_the_mix() {
         let state = Arc::new(AppState::new(crate::config::Config::default()));
-        let snapshot = Snapshot::new("s".into(), 1);
+        let snapshot = Snapshot::new("s".into(), 1, Mode::Wall);
         {
             let mut inner = snapshot.inner.lock().await;
             let now = Utc::now();
@@ -1095,7 +1270,7 @@ mod tests {
             streamplace_base: server.uri(),
             ..Default::default()
         }));
-        let snapshot = Snapshot::new("s".into(), 1);
+        let snapshot = Snapshot::new("s".into(), 1, Mode::Wall);
         let now = Utc::now();
         {
             let mut inner = snapshot.inner.lock().await;

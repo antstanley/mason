@@ -175,8 +175,31 @@ pub async fn get_follows(
 /// One author's recent posts as bricks. Replies are excluded upstream; reposts
 /// (reason != null) are dropped here so nothing is double-counted.
 pub async fn get_author_feed(http: &Http, base: &str, did: &str) -> Result<AuthorYield, HttpError> {
+    author_feed(http, base, did, "posts_no_replies", 30).await
+}
+
+/// The glaze wall's deeper read: a whole page of an author's MEDIA posts rather
+/// than the last thirty things they said. `posts_with_media` narrows to posts
+/// carrying an image or video (replies among them, which the full wall omits),
+/// so a single request reaches much further back and returns far more images
+/// than skimming 30 mostly-text posts ever would. Moderation and `!warn` blur
+/// are applied exactly as for the full feed; the caller keeps the image ones.
+pub async fn get_image_feed(http: &Http, base: &str, did: &str) -> Result<AuthorYield, HttpError> {
+    author_feed(http, base, did, "posts_with_media", 100).await
+}
+
+/// Shared author-feed read: fetch one page under `filter`, drop reposts and
+/// anything a logged-out viewer must not see, blur the soft-warn tier, and map
+/// the rest to bricks.
+async fn author_feed(
+    http: &Http,
+    base: &str,
+    did: &str,
+    filter: &str,
+    limit: u32,
+) -> Result<AuthorYield, HttpError> {
     let url = format!(
-        "{base}/xrpc/app.bsky.feed.getAuthorFeed?actor={did}&limit=30&filter=posts_no_replies"
+        "{base}/xrpc/app.bsky.feed.getAuthorFeed?actor={did}&limit={limit}&filter={filter}"
     );
     let page: AuthorFeed = http.get_json(&url, Bucket::Appview).await?;
 
@@ -459,6 +482,33 @@ mod tests {
             }
             other => panic!("expected video brick, got {other:?}"),
         }
+    }
+
+    /// The glaze wall reads deeper and narrower: `posts_with_media`, a hundred
+    /// at a time, so it reaches back past the last thirty skeets and returns
+    /// the images the full-wall skim would miss.
+    #[tokio::test]
+    async fn image_feed_reads_media_deep() {
+        let server = MockServer::start().await;
+        let image_embed = serde_json::json!({
+            "$type": "app.bsky.embed.images#view",
+            "images": [{"thumb": "https://cdn.test/a.jpg", "alt": "", "aspectRatio": {"width": 4, "height": 3}}]
+        });
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .and(query_param("filter", "posts_with_media"))
+            .and(query_param("limit", "100"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "feed": [post_json("at://did:plc:aa/app.bsky.feed.post/1", image_embed)]
+            })))
+            .mount(&server)
+            .await;
+
+        let AuthorYield { bricks, .. } = get_image_feed(&Http::new(), &server.uri(), "did:plc:aa")
+            .await
+            .expect("the media filter must be the one queried");
+        assert_eq!(bricks.len(), 1);
+        assert!(bricks[0].is_image_post(), "and it is an image post");
     }
 
     /// A followed account that opted out of logged-out visibility yields no

@@ -157,6 +157,10 @@ pub struct Caches {
     pub follows: TtlCache<String, Arc<Vec<Follow>>>,
     /// author did → their recent bricks (5min)
     pub author_feed: TtlCache<String, Arc<AuthorYield>>,
+    /// author did → their recent MEDIA bricks, read deeper (posts_with_media,
+    /// 100) for the glaze wall (5min). Kept apart from `author_feed` so the two
+    /// walls' different reads of the same author never clobber each other.
+    pub image_feed: TtlCache<String, Arc<AuthorYield>>,
     /// author did → standard.site docs; publishers 15min, negatives 24h
     /// (callers pick the TTL via insert_with_ttl)
     pub std_docs: TtlCache<String, Arc<StdDocs>>,
@@ -193,6 +197,7 @@ impl Caches {
             did: TtlCache::new(24 * HOUR, 10_000),
             follows: TtlCache::new(HOUR, 1_000),
             author_feed: TtlCache::new(Duration::from_secs(300), 20_000),
+            image_feed: TtlCache::new(Duration::from_secs(300), 20_000),
             std_docs: TtlCache::new(STD_DOCS_NEGATIVE_TTL, 20_000),
             pds: TtlCache::new(24 * HOUR, 20_000),
             streams: TtlCache::new(STREAMS_NEGATIVE_TTL, 20_000),

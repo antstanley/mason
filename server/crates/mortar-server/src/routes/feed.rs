@@ -6,6 +6,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mortar_core::error::AppError;
 use mortar_core::feed::handle_feed;
+use mortar_core::mode::Mode;
 use mortar_core::model::FeedResponse;
 use mortar_core::state::AppState;
 use serde::Deserialize;
@@ -14,6 +15,8 @@ use serde::Deserialize;
 pub struct FeedParams {
     pub actor: Option<String>,
     pub cursor: Option<String>,
+    /// The wall variant: "glaze" for the image wall, absent for the full wall.
+    pub mode: Option<String>,
 }
 
 pub struct ErrorResponse(AppError);
@@ -33,7 +36,8 @@ pub async fn feed(
     let actor = params
         .actor
         .ok_or(ErrorResponse(AppError::BadRequest("actor")))?;
-    handle_feed(&state, &actor, params.cursor.as_deref())
+    let mode = Mode::from_query(params.mode.as_deref());
+    handle_feed(&state, &actor, params.cursor.as_deref(), mode)
         .await
         .map(Json)
         .map_err(ErrorResponse)
