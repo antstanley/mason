@@ -85,11 +85,12 @@
 		aria-label="Open posts in {current.label}"
 		class="flex min-h-11 items-center gap-1.5 rounded-full px-3 text-sm font-semibold transition-colors hover:bg-ink/5 dark:hover:bg-chalk/10"
 	>
-		<ClientIcon id={current.id} />
-		<!-- stack every label in one cell so the trigger is as wide as the
-		     longest name; the current one shows, the rest just hold the width
-		     and stop the header shifting as clients change -->
-		<span class="grid text-left">
+		<ClientIcon id={current.id} size="size-6 sm:size-[1.3em]" />
+		<!-- mobile is tight, so the trigger is icon-only there; the label and
+		     chevron return at sm. Stacking every label in one cell keeps the
+		     trigger as wide as the longest name so the header does not shift as
+		     clients change. -->
+		<span class="hidden text-left sm:grid">
 			{#each CLIENTS as option (option.id)}
 				<span class="col-start-1 row-start-1 {option.id === current.id ? '' : 'invisible'}">
 					{option.label}
@@ -98,7 +99,9 @@
 		</span>
 		<span
 			aria-hidden="true"
-			class="text-xs opacity-60 transition-transform duration-200 {open ? 'rotate-180' : ''}"
+			class="hidden text-xs opacity-60 transition-transform duration-200 sm:inline {open
+				? 'rotate-180'
+				: ''}"
 		>
 			▾
 		</span>
@@ -122,7 +125,7 @@
 						onclick={() => choose(option.id)}
 						class="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm font-semibold whitespace-nowrap transition-colors hover:bg-ink/5 aria-selected:bg-ink/[0.06] dark:hover:bg-chalk/10 dark:aria-selected:bg-chalk/10"
 					>
-						<ClientIcon id={option.id} />
+						<ClientIcon id={option.id} dense />
 						<span class="flex-1">{option.label}</span>
 						<span
 							aria-hidden="true"
