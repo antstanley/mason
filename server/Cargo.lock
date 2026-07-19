@@ -984,7 +984,7 @@ dependencies = [
 
 [[package]]
 name = "mortar-core"
-version = "0.6.4"
+version = "0.7.0"
 dependencies = [
  "base64",
  "chrono",
@@ -1011,7 +1011,7 @@ dependencies = [
 
 [[package]]
 name = "mortar-server"
-version = "0.6.4"
+version = "0.7.0"
 dependencies = [
  "axum",
  "mortar-core",
@@ -1025,7 +1025,7 @@ dependencies = [
 
 [[package]]
 name = "mortar-wasm"
-version = "0.6.4"
+version = "0.7.0"
 dependencies = [
  "console_error_panic_hook",
  "mortar-core",
