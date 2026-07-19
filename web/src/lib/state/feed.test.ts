@@ -145,8 +145,14 @@ describe("warming", () => {
 
     mockFetchFeed.mockResolvedValueOnce(page(["a", "b"], "c2")); // the freeze
     const frozen = feed.freeze(); // the reader scrolled
-    expect(feed.warming).toBe(false); // reflow stops synchronously
+    // the poll loop is superseded at once (generation bump), but warming only
+    // drops when the freeze settles, in the same tick as the committed order,
+    // so the wall re-places exactly the update carrying the final arrangement
+    expect(feed.loading).toBe(true);
+    expect(feed.warming).toBe(true);
+    void feed.freeze(); // a second engagement mid-fetch: no-op via the loading guard
     await frozen;
+    expect(feed.warming).toBe(false);
     expect(ids(feed)).toEqual(["a", "b"]);
     expect(feed.cursor).toBe("c2");
     // the freeze committed the warming snapshot the preview was building
