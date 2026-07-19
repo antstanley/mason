@@ -34,13 +34,31 @@ jobs:
       - name: Install (root tooling only)
         run: pnpm install --frozen-lockfile
 
+      # The changesets action takes a static title, so work out the version the
+      # pending changesets add up to and put it in the PR name. When no
+      # changesets are pending the action opens no PR and the fallback title is
+      # never used.
+      - name: Name the release PR
+        id: pr-title
+        run: |
+          version=""
+          if pnpm exec changeset status --output=.changeset-status.json 2>/dev/null; then
+            version=$(node -p "(()=>{try{return require('./.changeset-status.json').releases[0]?.newVersion||''}catch(e){return ''}})()")
+            rm -f .changeset-status.json
+          fi
+          if [ -n "$version" ]; then
+            echo "title=release: mason v$version" >> "$GITHUB_OUTPUT"
+          else
+            echo "title=release: mason" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.5.3
         id: changesets
         with:
           version: pnpm run version
           publish: pnpm run release
           commit: "chore: version mason"
-          title: "chore: version mason"
+          title: ${{ steps.pr-title.outputs.title }}
           # `scripts/release.mjs` already tags the version and cuts the release
           # from the changelog. Left on, this action cuts a SECOND one for the
           # same tag and GitHub rejects it ("tag_name was used by an immutable
