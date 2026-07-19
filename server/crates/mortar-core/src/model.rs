@@ -170,4 +170,9 @@ pub struct FeedResponse {
     pub items: Vec<Brick>,
     /// None when the wall has no more bricks
     pub cursor: Option<String>,
+    /// Only set on a preview response: whether the wall is still warming (more
+    /// bricks are arriving). The client polls previews and reflows the first
+    /// screen while this is true, then freezes it. Absent on committed pages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warming: Option<bool>,
 }

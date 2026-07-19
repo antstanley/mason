@@ -217,15 +217,16 @@ pub fn fresh_seed(did: &str) -> u64 {
     xxh3_64_with_seed(did.as_bytes(), millis)
 }
 
-/// Fetch-or-create under one cache lock: exactly one caller wins the insert
-/// and spawns the background fill; everyone gets the same Arc. Then all
-/// callers wait for the first-paint threshold (a no-op once warm).
-pub async fn get_or_build(
+/// Fetch-or-create under one cache lock: exactly one caller wins the insert and
+/// spawns the background fill; everyone gets the same Arc. No waiting — the
+/// caller decides whether to block for first paint. The preview loop wants this
+/// bare: it returns the current pool the instant it is asked, however thin.
+pub async fn ensure_snapshot(
     state: &Arc<AppState>,
     did: &str,
     seed: u64,
     mode: Mode,
-) -> Result<Arc<Snapshot>, AppError> {
+) -> Arc<Snapshot> {
     let id = snapshot_id(did, seed, mode);
     let (snapshot, inserted) = state
         .caches
@@ -244,6 +245,20 @@ pub async fn get_or_build(
         });
     }
 
+    snapshot
+}
+
+/// `ensure_snapshot`, then block until the first-paint threshold (enough
+/// distinct authors pooled, or the deadline). A no-op once warm. The committing
+/// paths use this so a page is never laid from an empty pool.
+pub async fn get_or_build(
+    state: &Arc<AppState>,
+    did: &str,
+    seed: u64,
+    mode: Mode,
+) -> Arc<Snapshot> {
+    let snapshot = ensure_snapshot(state, did, seed, mode).await;
+
     // first-paint threshold: enough bricks pooled, or deadline
     let deadline = Instant::now() + FIRST_PAINT_DEADLINE;
     loop {
@@ -260,7 +275,25 @@ pub async fn get_or_build(
         let _ = platform::timeout(remaining, snapshot.progress.notified()).await;
     }
 
-    Ok(snapshot)
+    snapshot
+}
+
+/// The current best first screen, laid from a CLONE of the pool so nothing is
+/// committed. Polled while a wall warms, it reflows as the pool grows: the same
+/// pool and seed always yield the same arrangement (the mixer is pure), so the
+/// screen only moves when new bricks actually arrive. Returns the bricks and
+/// whether the wall is still warming.
+///
+/// Only meaningful before the wall is frozen, which is the only time it is
+/// called: at that point nothing has been laid, so laying `size` from the pool
+/// clone is the whole first screen. The real pool is never touched, so a
+/// preview can never race the commit that follows it.
+pub async fn preview_page(snapshot: &Snapshot, size: usize) -> (Vec<Brick>, bool) {
+    let inner = snapshot.inner.lock().await;
+    let mut pool = inner.pool.clone();
+    let mut wall = Vec::new();
+    mix::lay(&mut pool, &mut wall, size, snapshot.seed, Utc::now());
+    (wall, inner.warming)
 }
 
 /// The background fill: follows → cohort fan-out, with the live list running
@@ -536,6 +569,7 @@ pub async fn get_page(
     snapshot: &Snapshot,
     offset: usize,
     size: usize,
+    wait_for_mix: bool,
 ) -> (Vec<Brick>, bool) {
     drop_ended_streams(state, snapshot).await;
     let started = Instant::now();
@@ -562,7 +596,11 @@ pub async fn get_page(
             // the service worker was reaped mid-scroll is warming all over
             // again, and making that reader wait six seconds for a better
             // blog-to-post ratio is a bad trade every time.
-            awaiting_mix = offset == 0
+            // …unless the caller is a freeze, which never waits: the client's
+            // preview loop already served the warming reflow, so re-paying the
+            // mix wait here is the exact stall reflow exists to remove.
+            awaiting_mix = wait_for_mix
+                && offset == 0
                 && inner.warming
                 && inner.slow_fans > 0
                 && Instant::now() < mix_deadline;
@@ -1253,11 +1291,101 @@ mod tests {
         }
 
         let began = Instant::now();
-        let (items, _) = get_page(&state, &snapshot, 24, 24).await;
+        let (items, _) = get_page(&state, &snapshot, 24, 24, true).await;
         assert_eq!(items.len(), 24);
         assert!(
             began.elapsed() < Duration::from_secs(1),
             "a scrolling reader waited {:?} for a better blog-to-post ratio",
+            began.elapsed()
+        );
+    }
+
+    /// A preview lays the first screen from a CLONE of the pool: the same pool
+    /// gives the same screen (the mixer is pure), and the real pool is never
+    /// spent, so the freeze that follows still has every brick to lay.
+    #[tokio::test]
+    async fn a_preview_lays_without_spending_the_pool() {
+        let snapshot = Snapshot::new("s".into(), 1, Mode::Wall);
+        {
+            let mut inner = snapshot.inner.lock().await;
+            let now = Utc::now();
+            for n in 0..60 {
+                inner.admit(&post(n, n % 15, 1), now);
+            }
+        }
+        let pooled = snapshot.inner.lock().await.pool.len();
+
+        let (first, warming) = preview_page(&snapshot, 24).await;
+        assert_eq!(first.len(), 24);
+        assert!(warming, "a warming snapshot reports itself warming");
+
+        let (again, _) = preview_page(&snapshot, 24).await;
+        let ids = |w: &[Brick]| w.iter().map(|b| b.id().to_string()).collect::<Vec<_>>();
+        assert_eq!(ids(&first), ids(&again), "same pool, same preview");
+        assert_eq!(
+            snapshot.inner.lock().await.pool.len(),
+            pooled,
+            "the preview must not spend the real pool"
+        );
+    }
+
+    /// The whole point of the reflow: a brick arriving mid-warm changes the
+    /// first screen. A blog joining a wall of nothing but posts is pulled onto
+    /// the screen by the mixer's need factor, so the arrangement moves.
+    #[tokio::test]
+    async fn a_preview_reflows_when_a_brick_arrives() {
+        let snapshot = Snapshot::new("s".into(), 3, Mode::Wall);
+        {
+            let mut inner = snapshot.inner.lock().await;
+            let now = Utc::now();
+            for n in 0..24 {
+                inner.admit(&post(n, n % 12, 1), now);
+            }
+        }
+        let (before, _) = preview_page(&snapshot, 24).await;
+        {
+            let mut inner = snapshot.inner.lock().await;
+            inner.admit(&blog(500, 20), Utc::now());
+        }
+        let (after, _) = preview_page(&snapshot, 24).await;
+
+        let ids = |w: &[Brick]| w.iter().map(|b| b.id().to_string()).collect::<Vec<_>>();
+        assert_ne!(
+            ids(&before),
+            ids(&after),
+            "a new brick should reflow the screen"
+        );
+        assert!(
+            after.iter().any(|b| b.id() == "blog-500"),
+            "the blog the wall was starved of should join the first screen"
+        );
+    }
+
+    /// A freeze commits the first page at once even while the snapshot is warming
+    /// with slow fans still out: the preview loop already served the reader the
+    /// warming reflow, so `wait_for_mix = false` must not defer laying.
+    #[tokio::test]
+    async fn a_freeze_commits_the_first_page_without_waiting() {
+        let state = Arc::new(AppState::new(crate::config::Config::default()));
+        let snapshot = Snapshot::new("s".into(), 1, Mode::Wall);
+        {
+            let mut inner = snapshot.inner.lock().await;
+            let now = Utc::now();
+            for n in 0..60 {
+                inner.admit(&post(n, n % 15, 1), now);
+            }
+            assert!(
+                inner.warming && inner.slow_fans > 0,
+                "the snapshot must still be warming for this test to mean anything"
+            );
+        }
+
+        let began = Instant::now();
+        let (items, _) = get_page(&state, &snapshot, 0, 24, false).await;
+        assert_eq!(items.len(), 24);
+        assert!(
+            began.elapsed() < Duration::from_secs(1),
+            "a freeze waited {:?} for the mix instead of committing at once",
             began.elapsed()
         );
     }

@@ -90,4 +90,7 @@ export type Brick = PostBrick | BlogBrick | VideoBrick;
 export interface FeedResponse {
   items: Brick[];
   cursor: string | null;
+  /** Only present on a preview response: whether the wall is still warming, so
+   *  the client keeps polling and reflowing the first screen until it settles. */
+  warming?: boolean;
 }

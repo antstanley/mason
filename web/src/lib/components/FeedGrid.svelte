@@ -78,7 +78,9 @@
 	 *  event ever arrives, and the wall stops for good with a cursor still in
 	 *  its hand. So we pull, rather than wait to be told. */
 	async function pump() {
-		if (pumping) return;
+		// while the first screen is still reflowing, the warm loop owns the wall;
+		// pagination waits for the freeze
+		if (pumping || feed.warming) return;
 		pumping = true;
 		try {
 			let stalls = 0;
@@ -101,8 +103,13 @@
 		}
 	}
 
+	// Only page a frozen wall. Reading feed.warming means this re-runs when the
+	// wall freezes: the fresh observer fires its initial callback right away, so
+	// a short first screen (sentinel already in view) starts paging without
+	// needing a later intersection change to nudge it. While warming, the reflow
+	// owns the wall and pagination stays out of its way.
 	$effect(() => {
-		if (!sentinel) return;
+		if (!sentinel || feed.warming) return;
 		const observer = new IntersectionObserver(
 			(entries) => {
 				if (entries[0].isIntersecting) void pump();
@@ -111,6 +118,24 @@
 		);
 		observer.observe(sentinel);
 		return () => observer.disconnect();
+	});
+
+	// While the first screen is still reflowing, the first sign the reader wants
+	// to engage — a scroll, a wheel, a drag — freezes it: the wall must stop
+	// moving the instant they reach for it. It also freezes on its own when the
+	// wall settles or the warm ceiling hits (both handled in feed state).
+	const freezeOnEngage = () => void feed.freeze();
+	$effect(() => {
+		if (!feed.warming) return;
+		const opts = { passive: true, once: true } as const;
+		window.addEventListener('wheel', freezeOnEngage, opts);
+		window.addEventListener('touchmove', freezeOnEngage, opts);
+		window.addEventListener('scroll', freezeOnEngage, opts);
+		return () => {
+			window.removeEventListener('wheel', freezeOnEngage);
+			window.removeEventListener('touchmove', freezeOnEngage);
+			window.removeEventListener('scroll', freezeOnEngage);
+		};
 	});
 </script>
 
@@ -185,7 +210,7 @@
 	</div>
 {:else}
 	{#if layout.id === 'masonry'}
-		<Masonry items={feed.items} {brick} />
+		<Masonry items={feed.items} {brick} warming={feed.warming} />
 	{:else if layout.id === 'glaze'}
 		<Bento items={feed.items} {brick} filler />
 	{:else}
@@ -202,10 +227,12 @@
 				more bricks did not arrive. tap to retry
 			</button>
 		</div>
-	{:else if feed.loading || pumping}
-		<!-- pumping, not just loading: between attempts the pump is briefly idle
-		     while the snapshot warms, and letting the skeletons blink out would
-		     read as a wall that had given up rather than one still being laid -->
+	{:else if feed.warming || feed.loading || pumping}
+		<!-- warming: the first screen is still reflowing, so a skeleton tail says
+		     more is on the way. pumping, not just loading: between attempts the
+		     pump is briefly idle while the snapshot warms, and letting the
+		     skeletons blink out would read as a wall that had given up rather than
+		     one still being laid -->
 		<div class="pt-5">
 			<SkeletonGrid count={4} />
 		</div>

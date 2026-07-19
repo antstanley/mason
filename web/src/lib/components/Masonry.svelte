@@ -5,10 +5,14 @@
 
 	let {
 		items,
-		brick
+		brick,
+		warming = false
 	}: {
 		items: Brick[];
 		brick: Snippet<[Brick, boolean]>;
+		// while the wall warms the arrangement reflows under us, so each update is
+		// re-placed from scratch rather than appended
+		warming?: boolean;
 	} = $props();
 
 	type Placed = { item: Brick; fresh: boolean; index: number };
@@ -87,17 +91,29 @@
 		return () => observer.disconnect();
 	});
 
+	// warming is a distinct mode: the arrangement can reorder between updates, so
+	// there is no stable append. `wasWarming` catches the freeze — the update
+	// that ends warming carries the committed order, and must be re-placed once
+	// rather than mistaken for an append that added nothing.
+	let wasWarming = false;
+
 	$effect(() => {
-		// track items growth (endless scroll appends) and shrink (reset);
-		// untrack the placement work; it reads and writes column state
-		const len = items.length;
+		// track items identity + length (endless-scroll appends and resets) and
+		// the warming flag; untrack the placement work, which reads/writes columns
+		const list = items;
+		const isWarming = warming;
+		const len = list.length;
 		untrack(() => {
-			if (len < placedCount) {
+			if (isWarming || wasWarming) {
+				// warming, or the freeze that just ended it: re-place from scratch
+				rebuild(colCount || 1);
+			} else if (len < placedCount) {
 				entered.clear();
 				rebuild(colCount || 1);
 			} else if (len > placedCount) {
 				void placePending();
 			}
+			wasWarming = isWarming;
 		});
 	});
 </script>

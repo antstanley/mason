@@ -26,10 +26,17 @@ async function swControlsPage(): Promise<void> {
   ]);
 }
 
+/** A feed request's role in the warm-then-commit first screen. "preview" lays a
+ *  non-committed first screen the client reflows while the wall warms; "freeze"
+ *  commits it and begins paging; omitted is a normal committed page (every page
+ *  after the first). */
+export type FeedIntent = "preview" | "freeze";
+
 export async function fetchFeed(
   actor: string,
   cursor?: string | null,
   mode?: string,
+  intent?: FeedIntent,
 ): Promise<FeedResponse> {
   if (localMode && browser && "serviceWorker" in navigator) {
     await swControlsPage();
@@ -37,6 +44,7 @@ export async function fetchFeed(
   const params = new URLSearchParams({ actor });
   if (cursor) params.set("cursor", cursor);
   if (mode) params.set("mode", mode);
+  if (intent) params.set("intent", intent);
   const res = await fetch(`${BASE}/api/feed?${params}`);
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null;

@@ -160,11 +160,14 @@ async function serveFeed(request: Request): Promise<Response> {
   const actor = url.searchParams.get("actor");
   const cursor = url.searchParams.get("cursor") ?? undefined;
   const mode = url.searchParams.get("mode") ?? undefined;
+  // "preview" / "freeze" drive the warm-then-commit first screen; absent is a
+  // normal committed page (every page after the first).
+  const intent = url.searchParams.get("intent") ?? undefined;
   if (!actor) {
     return json({ error: "bad_request", message: "missing required parameter: actor" }, 400);
   }
   try {
-    const body = await feed_page(actor, cursor, mode);
+    const body = await feed_page(actor, cursor, mode, intent);
     return new Response(body, {
       status: 200,
       headers: { "content-type": "application/json" },
