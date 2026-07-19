@@ -66,8 +66,14 @@ chrome. Voice is lowercase, brick-punning, and brief.
 
 ## Accessibility & Inclusion
 
-WCAG 2.2 AA: ≥4.5:1 body contrast (≥3:1 large text), full keyboard
-navigability including the endless scroll, visible focus states, and
-`prefers-reduced-motion` alternatives for every animation (brick drop-in,
-hover tilt). Videos never autoplay; an accessibility stance as much as a
-design one.
+WCAG 2.2 AA is the conformance target: ≥4.5:1 body contrast (≥3:1 large
+text), full keyboard navigability including the endless scroll, visible
+focus states, and `prefers-reduced-motion` alternatives for every animation
+(brick drop-in, hover tilt). Videos never autoplay; an accessibility stance
+as much as a design one.
+
+One known exception: video captions (1.2.2, and 1.2.4 for live streams).
+Neither Bluesky video nor Streamplace ships caption data yet, so bricks
+play without a caption track. The player renders tracks the moment mortar
+carries them; until upstream does, the wall cannot claim 1.2.2 or 1.2.4
+for video.

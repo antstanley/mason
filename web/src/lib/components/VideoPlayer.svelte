@@ -7,6 +7,7 @@
 	// out of view, and reports buffering so slow connections never see a
 	// silent black box.
 	import type Hls from 'hls.js';
+	import type { CaptionTrack } from '$lib/types';
 	import { player } from '$lib/state/player.svelte';
 
 	let {
@@ -14,7 +15,8 @@
 		playlist,
 		poster,
 		aspectRatio,
-		live = false
+		live = false,
+		captions = []
 	}: {
 		id: string;
 		playlist: string;
@@ -22,6 +24,8 @@
 		aspectRatio: string;
 		/** a live stream can end between the wall being laid and the click */
 		live?: boolean;
+		/** caption tracks, rendered when upstream carries them (none do yet) */
+		captions?: CaptionTrack[];
 	} = $props();
 
 	let video = $state<HTMLVideoElement | null>(null);
@@ -104,15 +108,26 @@
 	</div>
 {:else}
 	<div class="relative">
+		<!-- captions render whenever mortar supplies tracks; the suppression
+		     below covers only the empty case, where upstream (Bluesky video,
+		     Streamplace) does not yet carry caption data to put in a track.
+		     crossorigin is set only alongside tracks: VTTs will live on a
+		     PDS/CDN origin, and browsers refuse cross-origin track files on
+		     a non-CORS media element -->
 		<!-- svelte-ignore a11y_media_has_caption -->
 		<video
 			bind:this={video}
 			controls
 			playsinline
 			{poster}
+			crossorigin={captions.length > 0 ? 'anonymous' : undefined}
 			class="w-full bg-kiln"
 			style:aspect-ratio={aspectRatio}
-		></video>
+		>
+			{#each captions as track (track.src + track.lang)}
+				<track kind="captions" src={track.src} srclang={track.lang} label={track.label} />
+			{/each}
+		</video>
 		{#if buffering}
 			<div
 				class="pointer-events-none absolute inset-0 grid place-items-center bg-kiln/40"

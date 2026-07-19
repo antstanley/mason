@@ -79,6 +79,17 @@ export interface BlogBrick {
   publishedAt: string;
 }
 
+/** A caption/subtitle track (WebVTT). No upstream source carries these yet;
+ *  the field exists so wiring captions in later is a small change. */
+export interface CaptionTrack {
+  /** URL of the WebVTT file */
+  src: string;
+  /** BCP 47 language tag ("en", "pt-BR", ...) */
+  lang: string;
+  /** Human-readable name shown in the player's track menu */
+  label: string;
+}
+
 export interface VideoBrick {
   kind: "video";
   id: string;
@@ -97,6 +108,9 @@ export interface VideoBrick {
   durationMs: number | null;
   /** What the streamer says they are doing ("music", a game, ...). */
   activity: string | null;
+  /** Caption tracks, when upstream carries them. Absent (not empty) today,
+   *  since mortar skips serializing an empty list. */
+  captions?: CaptionTrack[];
   blur?: Blur;
 }
 

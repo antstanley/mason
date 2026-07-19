@@ -132,6 +132,22 @@ pub enum VideoSource {
     Streamplace,
 }
 
+/// A caption/subtitle track for a video, WebVTT over HTTP. No upstream source
+/// carries these yet (the app.bsky.embed.video record can carry caption VTT
+/// blobs, but the AppView's #view omits them; Streamplace has none), so today
+/// every brick ships with an empty list; the field exists so wiring captions
+/// in later is a source-level change, not a model change.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptionTrack {
+    /// URL of the WebVTT file
+    pub src: String,
+    /// BCP 47 language tag ("en", "pt-BR", …)
+    pub lang: String,
+    /// Human-readable name shown in the player's track menu
+    pub label: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct VideoBrick {
@@ -158,6 +174,10 @@ pub struct VideoBrick {
     pub duration_ms: Option<u64>,
     /// What the streamer says they are doing ("music", a game, …).
     pub activity: Option<String>,
+    /// Caption tracks, when upstream carries them. Empty today; see
+    /// [`CaptionTrack`]. Skipped on the wire so existing bricks are unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub captions: Vec<CaptionTrack>,
     /// Set when a `!warn` label covers the poster behind a reveal. Only native
     /// Bluesky videos are ever labelled; Streamplace bricks leave this None.
     #[serde(default, skip_serializing_if = "Option::is_none")]
