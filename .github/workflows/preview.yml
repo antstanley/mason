@@ -20,7 +20,9 @@ env:
 
 jobs:
   deploy:
-    if: github.event.action != 'closed'
+    # skip on fork PRs: they lack the OIDC id-token and preview secrets, so the
+    # deploy can only fail. fork PRs are covered by the secretless ci.yml.
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     environment: preview # holds AWS_ACCOUNT_ID + PREVIEW_DOMAIN secrets
     steps:
