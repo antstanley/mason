@@ -4,6 +4,7 @@
 	import BrickShell from '../BrickShell.svelte';
 	import AuthorChip from '../AuthorChip.svelte';
 	import Sensitive from '../Sensitive.svelte';
+	import Icon from '../Icon.svelte';
 
 	// priority: an above-the-fold brick loads its image eagerly and at high
 	// fetch priority; the rest of the wall stays lazy
@@ -42,10 +43,16 @@
 			{#if brick.likeCount > 0 || brick.repostCount > 0}
 				<div class="flex shrink-0 gap-2 text-xs font-semibold opacity-75">
 					{#if brick.likeCount > 0}
-						<span aria-label="{brick.likeCount} likes"><span aria-hidden="true">♥</span> {brick.likeCount}</span>
+						<span class="inline-flex items-center gap-1" aria-label="{brick.likeCount} likes">
+							<Icon name="heart" class="size-3" />
+							{brick.likeCount}
+						</span>
 					{/if}
 					{#if brick.repostCount > 0}
-						<span aria-label="{brick.repostCount} reposts"><span aria-hidden="true">↻</span> {brick.repostCount}</span>
+						<span class="inline-flex items-center gap-1" aria-label="{brick.repostCount} reposts">
+							<Icon name="repeat-2" class="size-3" />
+							{brick.repostCount}
+						</span>
 					{/if}
 				</div>
 			{/if}

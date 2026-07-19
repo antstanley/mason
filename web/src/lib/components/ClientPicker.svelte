@@ -6,6 +6,7 @@
 	import { tick } from 'svelte';
 	import { CLIENTS, client, type ClientId } from '$lib/state/client.svelte';
 	import ClientIcon from './ClientIcon.svelte';
+	import Icon from './Icon.svelte';
 
 	let open = $state(false);
 	let root = $state<HTMLElement | null>(null);
@@ -102,11 +103,11 @@
 		</span>
 		<span
 			aria-hidden="true"
-			class="hidden text-xs opacity-60 transition-transform duration-200 sm:inline {open
+			class="hidden opacity-60 transition-transform duration-200 sm:inline-block {open
 				? 'rotate-180'
 				: ''}"
 		>
-			▾
+			<Icon name="chevron-down" class="size-3.5" />
 		</span>
 	</button>
 
@@ -132,11 +133,11 @@
 						<span class="flex-1">{option.label}</span>
 						<span
 							aria-hidden="true"
-							class="text-brick-post-ink dark:text-brick-post {option.id === client.id
+							class="shrink-0 text-brick-post-ink dark:text-brick-post {option.id === client.id
 								? ''
 								: 'invisible'}"
 						>
-							✓
+							<Icon name="check" class="size-4" />
 						</span>
 					</button>
 				</li>

@@ -6,6 +6,7 @@
 	import AuthorChip from '../AuthorChip.svelte';
 	import VideoPlayer from '../VideoPlayer.svelte';
 	import Sensitive from '../Sensitive.svelte';
+	import Icon from '../Icon.svelte';
 
 	// priority: an above-the-fold brick loads its poster eagerly and at high
 	// fetch priority; the rest of the wall stays lazy
@@ -63,9 +64,9 @@
 				type="button"
 				onclick={() => (playRequested = false)}
 				aria-label="Close video"
-				class="absolute top-2 right-2 grid size-11 cursor-pointer place-items-center rounded-full bg-kiln/75 text-lg font-bold text-chalk transition-colors hover:bg-kiln"
+				class="absolute top-2 right-2 grid size-11 cursor-pointer place-items-center rounded-full bg-kiln/75 text-chalk transition-colors hover:bg-kiln"
 			>
-				✕
+				<Icon name="x" class="size-5" />
 			</button>
 		{:else}
 			{#if brick.poster}
@@ -94,12 +95,12 @@
 					: `Play video: ${brick.title || sourceName + ' video'}`}
 			>
 				<span
-					class="grid size-16 place-items-center rounded-full pl-1 text-2xl text-white shadow-brick-lift transition-transform motion-safe:group-hover:scale-110 {brick.live
+					class="grid size-16 place-items-center rounded-full pl-1 text-white shadow-brick-lift transition-transform motion-safe:group-hover:scale-110 {brick.live
 						? 'bg-live'
 						: 'bg-brick-video'}"
 					aria-hidden="true"
 				>
-					▶
+					<Icon name="play" class="size-7" />
 				</span>
 			</button>
 			{#if brick.live}
@@ -147,9 +148,10 @@
 				href={clientUrl(brick.url)}
 				target="_blank"
 				rel="noopener noreferrer"
-				class="inline-flex min-h-11 shrink-0 items-center text-sm font-semibold text-brick-video-ink hover:underline dark:text-brick-video-bright"
+				class="inline-flex min-h-11 shrink-0 items-center gap-1 text-sm font-semibold text-brick-video-ink hover:underline dark:text-brick-video-bright"
 			>
-				{brick.live ? 'watch live' : 'watch'} on {sourceName} ↗
+				{brick.live ? 'watch live' : 'watch'} on {sourceName}
+				<Icon name="arrow-up-right" class="size-3.5" />
 			</a>
 		</div>
 	</div>

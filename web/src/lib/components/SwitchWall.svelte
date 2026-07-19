@@ -7,6 +7,7 @@
 	import { goto } from '$app/navigation';
 	import { cleanHandle, lastHandle } from '$lib/state/handle.svelte';
 	import { profile } from '$lib/state/profile.svelte';
+	import Icon from './Icon.svelte';
 
 	let { actor }: { actor: string } = $props();
 
@@ -95,7 +96,7 @@
 			</span>
 		{/if}
 		<span class="hidden max-w-[10rem] truncate sm:inline">@{actor}</span>
-		<span aria-hidden="true" class="hidden opacity-80 sm:inline">⇄</span>
+		<Icon name="arrow-left-right" class="hidden size-4 shrink-0 opacity-80 sm:block" />
 	</button>
 
 	{#if open}

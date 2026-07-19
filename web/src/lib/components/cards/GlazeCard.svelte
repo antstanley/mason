@@ -19,6 +19,7 @@
 	import BrickShell from '../BrickShell.svelte';
 	import AuthorChip from '../AuthorChip.svelte';
 	import Sensitive from '../Sensitive.svelte';
+	import Icon from '../Icon.svelte';
 
 	// priority: an above-the-fold brick loads its FIRST image eagerly and at
 	// high fetch priority (the rest of its strip, and the rest of the wall, stay
@@ -172,20 +173,7 @@
 					aria-label="Previous image"
 					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/70 text-chalk backdrop-blur-sm transition-colors hover:bg-ink/80 [@media(hover:none)]:size-11"
 				>
-					<!-- lucide chevron-left; glyph chevrons render unevenly across
-					     platforms, so directional icons are inline svg -->
-					<svg
-						viewBox="0 0 24 24"
-						class="size-5"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						aria-hidden="true"
-					>
-						<path d="m15 18-6-6 6-6" />
-					</svg>
+					<Icon name="chevron-left" class="size-5" />
 				</button>
 				<button
 					type="button"
@@ -193,19 +181,7 @@
 					aria-label="Next image"
 					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/70 text-chalk backdrop-blur-sm transition-colors hover:bg-ink/80 [@media(hover:none)]:size-11"
 				>
-					<!-- lucide chevron-right -->
-					<svg
-						viewBox="0 0 24 24"
-						class="size-5"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						aria-hidden="true"
-					>
-						<path d="m9 18 6-6-6-6" />
-					</svg>
+					<Icon name="chevron-right" class="size-5" />
 				</button>
 			</div>
 			<div
@@ -278,25 +254,7 @@
 					aria-expanded={revealed}
 					class="pointer-events-auto m-3 hidden size-11 shrink-0 place-items-center rounded-lg bg-ink/55 text-chalk backdrop-blur-sm [@media(hover:none)]:grid"
 				>
-					<!-- lucide chevrons-up / chevrons-down -->
-					<svg
-						viewBox="0 0 24 24"
-						class="size-6"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						aria-hidden="true"
-					>
-						{#if revealed}
-							<path d="m7 6 5 5 5-5" />
-							<path d="m7 13 5 5 5-5" />
-						{:else}
-							<path d="m17 11-5-5-5 5" />
-							<path d="m17 18-5-5-5 5" />
-						{/if}
-					</svg>
+					<Icon name={revealed ? 'chevrons-down' : 'chevrons-up'} class="size-6" />
 				</button>
 			</div>
 			{#if brick.text || alts.length}
@@ -347,9 +305,9 @@
 						type="button"
 						onclick={closeAlt}
 						aria-label="Hide image description"
-						class="shrink-0 cursor-pointer rounded-full bg-ink/10 px-2 py-1 text-sm font-bold text-ink/80 transition-colors hover:bg-ink/20 dark:bg-chalk/15 dark:text-chalk/80 dark:hover:bg-chalk/25"
+						class="shrink-0 cursor-pointer rounded-full bg-ink/10 p-2 text-ink/80 transition-colors hover:bg-ink/20 dark:bg-chalk/15 dark:text-chalk/80 dark:hover:bg-chalk/25"
 					>
-						✕
+						<Icon name="x" class="size-4" />
 					</button>
 				</div>
 				{#if brick.text}
