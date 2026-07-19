@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # keep the SHA-pinned actions in .github/workflows current; dependabot moves
+  # each pin to the latest sha its version comment names, weekly
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

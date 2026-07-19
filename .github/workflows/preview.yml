@@ -31,7 +31,7 @@ jobs:
       - name: Rust toolchain (wasm32)
         # channel and targets come from rust-toolchain.toml so this pin cannot
         # drift from the workspace rust-version
-        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master 2026-07
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: "1.97.0"
           targets: wasm32-unknown-unknown
