@@ -11,7 +11,7 @@
 		items: Brick[];
 		brick: Snippet<[Brick, boolean]>;
 		// glaze wall: lay the whole grid on a muted field so every gap the dense
-		// packing leaves — the holes between bricks and the seams around them —
+		// packing leaves (the holes between bricks and the seams around them)
 		// reads as a solid muted filler block, grout between the pictures.
 		filler?: boolean;
 	} = $props();

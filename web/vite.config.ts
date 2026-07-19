@@ -27,7 +27,7 @@ export default defineConfig({
 	},
 	define: {
 		// Build-mode switch with a hard default: unset → '' → local mode
-		// (wasm service worker). A real env var — no .env file to forget in
+		// (wasm service worker). A real env var: no .env file to forget in
 		// deploy zips; `just dev-server` sets it for server mode.
 		'import.meta.env.PUBLIC_MASON_SERVER_URL': JSON.stringify(
 			process.env.PUBLIC_MASON_SERVER_URL ?? ''

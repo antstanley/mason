@@ -147,7 +147,7 @@
 	});
 
 	// While the first screen is still reflowing, the first sign the reader wants
-	// to engage — a scroll, a wheel, a drag — freezes it: the wall must stop
+	// to engage (a scroll, a wheel, a drag) freezes it: the wall must stop
 	// moving the instant they reach for it. It also freezes on its own when the
 	// wall settles or the warm ceiling hits (both handled in feed state).
 	const freezeOnEngage = () => void feed.freeze();

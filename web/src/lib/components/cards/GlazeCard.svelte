@@ -1,7 +1,7 @@
 <script lang="ts">
 	// The glaze brick: the picture is the brick. One image fills the card at its
 	// natural aspect; two or three lay out in a grid (grout showing between
-	// them); four or more become an in-card filmstrip — a full-frame strip you
+	// them); four or more become an in-card filmstrip: a full-frame strip you
 	// swipe, or page with the arrows, committing to the next image only once
 	// you've dragged in more than 60% of it. At rest the card is just the picture;
 	// on hover an opaque author pill fades in bottom-left and the post's caption

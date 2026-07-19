@@ -20,7 +20,7 @@
 	// running an old worker against new assets. `updateViaCache: 'none'` makes
 	// the browser always revalidate the worker script instead of trusting an
 	// HTTP-cached copy, and `update()` forces that check on load. When a NEW
-	// worker takes control — only after a deploy, never on a first install —
+	// worker takes control (only after a deploy, never on a first install),
 	// reload once so the page and the engine are the same version.
 	$effect(() => {
 		if (!browser || !localMode || !('serviceWorker' in navigator)) return;

@@ -17,8 +17,8 @@ pub const PAGE_SIZE: usize = 24;
 
 /// What a feed request is for.
 ///
-/// The wasm front polls `Preview` while a wall warms — each poll lays a fresh,
-/// non-committed first screen from the growing pool, which the client reflows —
+/// The wasm front polls `Preview` while a wall warms (each poll lays a fresh,
+/// non-committed first screen from the growing pool, which the client reflows),
 /// then asks `Freeze` exactly once to commit that screen and begin paging. The
 /// native server (and any client without the preview loop) asks `Normal`, which
 /// waits for a good mix before committing the first page so it does not open on

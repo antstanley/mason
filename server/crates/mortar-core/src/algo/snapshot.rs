@@ -54,7 +54,7 @@ const FIRST_PAINT_AUTHORS: usize = 12;
 /// posts, and that is still exactly what it stops.
 const MAX_BRICKS_PER_AUTHOR: usize = 4;
 /// The glaze wall is one kind from one source, so a chatty account cannot crowd
-/// out the rarer kinds (there are none) — only other image posters. It reads
+/// out the rarer kinds (there are none), only other image posters. It reads
 /// `posts_with_media` deep, so it can afford to let a prolific image account
 /// bring more of itself than the mixed wall does; the diversity window still
 /// spaces them out.
@@ -218,7 +218,7 @@ pub fn fresh_seed(did: &str) -> u64 {
 }
 
 /// Fetch-or-create under one cache lock: exactly one caller wins the insert and
-/// spawns the background fill; everyone gets the same Arc. No waiting — the
+/// spawns the background fill; everyone gets the same Arc. No waiting: the
 /// caller decides whether to block for first paint. The preview loop wants this
 /// bare: it returns the current pool the instant it is asked, however thin.
 pub async fn ensure_snapshot(
