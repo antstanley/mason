@@ -68,5 +68,6 @@ when jj resists.
 mason ships as one thing, one version. Root `package.json` is the source of
 truth, owned by changesets; `pnpm version` propagates it to `web/package.json`,
 the Rust workspace, and `Cargo.lock`. Add a changeset (`pnpm changeset`) with any
-user-visible change. A release is a ship: merging the "chore: version mason" PR
-bumps, changelogs, tags, cuts the GitHub release, and deploys to production.
+user-visible change. A release is a ship: merging the release PR (named
+"release: mason v<next version>") bumps, changelogs, tags, cuts the GitHub
+release, and deploys to production.
