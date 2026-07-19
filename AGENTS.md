@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for AI agents working in **mason** — an atproto discovery app. One wall,
+Guidance for AI agents working in **mason**, an atproto discovery app. One wall,
 every brick. Read `README.md` for the full architecture and `PRODUCT.md` for
 product intent; this file is the operational cheat sheet.
 
@@ -30,7 +30,7 @@ just test         # cargo nextest + tsc typecheck
 just lint         # oxlint + knip + clippy
 just fmt          # oxfmt + cargo fmt
 just guard-autoplay   # enforces the no-autoplay rule
-just clean        # cargo clean — target dir grows to ~3GB
+just clean        # cargo clean; target dir grows to ~3GB
 ```
 
 Any Rust change to the engine needs a `just wasm` (or `just dev`/`just build`,
@@ -42,13 +42,17 @@ fixture wall.
 - **Naming is the brand.** brick (a content card), mortar (the feed engine),
   grout (the ranking score), kiln (tones). Keep the metaphor; voice is
   lowercase, brick-punning, brief.
-- **No em dashes.** Anywhere — UI copy, code comments, commits.
+- **Card is the web name for a brick.** The Rust engine models content as
+  `Brick`; the Svelte renderers in `web/src/lib/components/cards/` are
+  `*Card.svelte`. The two vocabularies are deliberate, not drift: a brick is
+  the model, a card is the rendered brick.
+- **No em dashes.** Anywhere: UI copy, code comments, commits.
 - **Videos never autoplay.** `just guard-autoplay` greps `web/src` for the word
   and fails if present; it is an accessibility stance, not a preference.
 - **TypeScript 7.** `svelte-check` crashes on TS 7 (programmatic API stabilizes
   in TS 7.1, ~Oct 2026); typecheck is plain `tsc --noEmit`. Do not swap
   `check` back to `svelte-check` yet.
-- **Formatting is oxfmt, linting is oxlint, dead-code is knip** — not prettier /
+- **Formatting is oxfmt, linting is oxlint, dead-code is knip**, not prettier /
   eslint. Run `just fmt` and `just lint` before finishing.
 - `mortar-core` must stay `wasm32`-compatible: everything in-memory, hand-rolled
   TTL caches, no database, no threads. The `sources/` boundary is the v2 seam.

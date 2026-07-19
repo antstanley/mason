@@ -32,6 +32,9 @@
 	$effect(() => {
 		if (!video) return;
 		const el = video;
+		// the hls.js import is async; if this run is torn down (the card unmounts)
+		// while it is in flight, this flag tells the continuation to build nothing.
+		let cancelled = false;
 		player.claim(id);
 
 		const onPlaying = () => (buffering = false);
@@ -44,6 +47,9 @@
 				el.src = playlist;
 			} else {
 				const { default: HlsCtor } = await import('hls.js');
+				// torn down while importing: construct nothing on the detached
+				// element. No await follows, so this one check also guards play().
+				if (cancelled) return;
 				if (!HlsCtor.isSupported()) {
 					failed = true;
 					return;
@@ -69,6 +75,7 @@
 		io.observe(el);
 
 		return () => {
+			cancelled = true;
 			io.disconnect();
 			el.removeEventListener('playing', onPlaying);
 			el.removeEventListener('waiting', onWaiting);

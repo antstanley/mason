@@ -10,9 +10,10 @@
 	let { brick, priority = false }: { brick: PostBrick; priority?: boolean } = $props();
 
 	const img = $derived(brick.images[0] ?? null);
+	const label = $derived(`post by ${brick.author.displayName ?? brick.author.handle}`);
 </script>
 
-<BrickShell accent="post" href={clientUrl(brick.url)}>
+<BrickShell accent="post" href={clientUrl(brick.url)} {label}>
 	{#if img}
 		<Sensitive blur={brick.blur}>
 			<img

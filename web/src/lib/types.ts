@@ -1,4 +1,4 @@
-// Mirrors mortar's serde output (server/src/model.rs)
+// Mirrors mortar's serde output (server/crates/mortar-core/src/model.rs)
 
 export interface Author {
   did: string;

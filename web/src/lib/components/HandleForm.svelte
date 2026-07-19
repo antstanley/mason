@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { warmFeed } from '$lib/api';
 	import { cleanHandle, lastHandle } from '$lib/state/handle.svelte';
@@ -14,9 +15,10 @@
 	// (the form is prefilled with it, and most readers just click through) warms
 	// that wall's caches so submitting meets a wall already being laid; with no
 	// handle to go on, the demo wall at least compiles the wasm off the critical
-	// path. Runs once, untracked, best-effort.
+	// path. untrack keeps this a one-shot: without it, remember(handle) on submit
+	// would re-run this and fire a duplicate warm as goto navigates away.
 	$effect(() => {
-		void warmFeed(cleanHandle(lastHandle.value) || 'demo');
+		void warmFeed(untrack(() => cleanHandle(lastHandle.value)) || 'demo');
 	});
 
 	function submit(event: SubmitEvent) {

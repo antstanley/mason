@@ -11,7 +11,7 @@
 		items: Brick[];
 		brick: Snippet<[Brick, boolean]>;
 		// glaze wall: lay the whole grid on a muted field so every gap the dense
-		// packing leaves — the holes between bricks and the seams around them —
+		// packing leaves (the holes between bricks and the seams around them)
 		// reads as a solid muted filler block, grout between the pictures.
 		filler?: boolean;
 	} = $props();
@@ -85,6 +85,10 @@
 	}
 </script>
 
+<!-- grid-auto-flow: row dense (below) backfills the holes wide bricks leave, so a
+     later brick can be painted before an earlier one; the visual order is not the
+     DOM order. DOM order stays the feed order on purpose, so tab and screen-reader
+     order keep following the feed rather than the packed layout. -->
 <div
 	bind:this={container}
 	class="grid items-start gap-3 {filler

@@ -37,6 +37,14 @@
 		if (returnFocus) trigger?.focus();
 	}
 
+	// Tab out of the dialog and it closes, so focus never walks into the dimmed
+	// wall behind (mirrors the Escape and click-away dismissals). Only a move that
+	// lands outside the whole switcher counts; hops between the fields do not.
+	function onFocusOut(event: FocusEvent) {
+		const next = event.relatedTarget as Node | null;
+		if (next && root && !root.contains(next)) closePanel(false);
+	}
+
 	function submit(event: SubmitEvent) {
 		event.preventDefault();
 		const handle = cleanHandle(value);
@@ -73,7 +81,7 @@
 		onclick={() => (open ? closePanel(false) : openPanel())}
 		aria-haspopup="dialog"
 		aria-expanded={open}
-		aria-label="Switch wall — currently viewing @{actor}"
+		aria-label="Switch wall, currently viewing @{actor}"
 		title="Switch wall"
 		class="inline-flex min-h-9 min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded-full bg-[oklch(0.51_0.16_350)] p-0.5 font-semibold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95 sm:gap-2 sm:pr-4"
 	>
@@ -104,7 +112,9 @@
 		></button>
 		<div
 			role="dialog"
+			aria-modal="true"
 			aria-label="Switch wall"
+			onfocusout={onFocusOut}
 			class="absolute right-0 bottom-full z-40 mb-2 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-ink/10 bg-chalk p-5 text-left shadow-brick-lift md:top-full md:bottom-auto md:mt-2 md:mb-0 dark:border-chalk/15 dark:bg-kiln"
 		>
 			<form onsubmit={submit} class="flex flex-col gap-4">

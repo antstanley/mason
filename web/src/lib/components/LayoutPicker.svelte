@@ -2,7 +2,7 @@
 	// The layout toggle is a slider: one thumb slides across the options and the
 	// labels crossfade as it passes under them. The segments are sized to their
 	// own content (labels differ in length), so the thumb measures the selected
-	// label and matches its position and width — it hugs each option instead of
+	// label and matches its position and width, so it hugs each option instead of
 	// leaving dead space around the short ones. Native radios underneath keep it
 	// keyboard- and screen-reader-honest (arrow keys move the selection), and the
 	// thumb holds still under prefers-reduced-motion.

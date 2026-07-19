@@ -92,7 +92,7 @@
 	});
 
 	// warming is a distinct mode: the arrangement can reorder between updates, so
-	// there is no stable append. `wasWarming` catches the freeze — the update
+	// there is no stable append. `wasWarming` catches the freeze: the update
 	// that ends warming carries the committed order, and must be re-placed once
 	// rather than mistaken for an append that added nothing.
 	let wasWarming = false;

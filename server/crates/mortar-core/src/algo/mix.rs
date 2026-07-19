@@ -85,6 +85,17 @@ pub fn lay_next(
     let need = need(&counts, wall.len());
     let position = wall.len();
 
+    // grout parses created_at off a date string, so scoring inside the max_by
+    // comparators would parse each brick's date many times per lay_next (and
+    // preview re-lays the whole ~600-brick pool every 350ms). now and seed are
+    // fixed across this call, so each brick's score is a constant: compute it
+    // once here, indexed by pool position, and the comparators just read it.
+    // Identical value as before, so ranking and determinism are unchanged.
+    let scores: Vec<f64> = pool
+        .iter()
+        .map(|b| score::grout(b, now) * jitter(seed, b.id()))
+        .collect();
+
     // best candidate per kind, honoring the author window; None if the kind
     // has no eligible candidate
     let leader = |kind: usize, respect_window: bool| -> Option<usize> {
@@ -92,10 +103,7 @@ pub fn lay_next(
             .enumerate()
             .filter(|(_, b)| kind_index(b) == kind)
             .filter(|(_, b)| !respect_window || !recent_authors.contains(&score::author_key(b)))
-            .max_by(|(_, a), (_, b)| {
-                let s = |x: &Brick| score::grout(x, now) * jitter(seed, x.id());
-                s(a).total_cmp(&s(b))
-            })
+            .max_by(|(ia, _), (ib, _)| scores[*ia].total_cmp(&scores[*ib]))
             .map(|(i, _)| i)
     };
 
@@ -136,10 +144,11 @@ pub fn lay_next(
         }
         pool.iter()
             .enumerate()
-            .min_by(|(_, a), (_, b)| {
+            .min_by(|(ia, a), (ib, b)| {
                 let laid = |x: &Brick| *wall_counts.get(score::author_key(x)).unwrap_or(&0);
-                let s = |x: &Brick| score::grout(x, now) * jitter(seed, x.id());
-                laid(a).cmp(&laid(b)).then_with(|| s(b).total_cmp(&s(a)))
+                laid(a)
+                    .cmp(&laid(b))
+                    .then_with(|| scores[*ib].total_cmp(&scores[*ia]))
             })
             .map(|(i, _)| i)
     })?;

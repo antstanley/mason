@@ -39,12 +39,17 @@ calls a native mortar over CORS; the path for future authenticated features.
 Either way, mortar builds a per-user **snapshot**: resolve handle → fetch
 follows → sample a cohort of 100 authors (60 known-active + 40 seeded
 exploration) → fan out under a global rate limiter with a first-paint
-threshold (respond at 40 authors or 3 s) → keep filling in the background.
+threshold (respond once bricks from 12 distinct authors have arrived, or 3 s)
+→ keep filling in the background. A ~6 s mix deadline bounds the whole opening
+wait, so a cold wall never waits longer than that for its first screen.
 
 Bricks are laid by the **grout score**: within-kind recency decay
-(posts 24 h · blogs 7 d · trailers 30 d) × log engagement, then a
-weighted-round-robin mixer picks the next *kind* by need (70/15/10/5 target)
-and the best brick *within* that kind; kinds are never compared by raw
+(half-lives: posts 12 h, blogs 3 d, archived streams 14 d; a Bluesky video
+ages like a post) inside a hard age window (posts 72 h, blogs 14 d, archived
+streams 90 d) × log engagement, then a weighted-round-robin mixer picks the
+next *kind* by need (68/15/9/5/3 target across posts, blogs, Bluesky video,
+archived streams, and live) and the best brick *within* that kind; kinds are
+never compared by raw
 score. Author-diversity window of 8, deterministic seeded jitter, opaque
 `{snapshot, seed, offset}` cursor: endless scroll is stable and duplicate-free,
 and every refresh is a fresh wall.

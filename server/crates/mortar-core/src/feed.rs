@@ -17,8 +17,8 @@ pub const PAGE_SIZE: usize = 24;
 
 /// What a feed request is for.
 ///
-/// The wasm front polls `Preview` while a wall warms — each poll lays a fresh,
-/// non-committed first screen from the growing pool, which the client reflows —
+/// The wasm front polls `Preview` while a wall warms (each poll lays a fresh,
+/// non-committed first screen from the growing pool, which the client reflows),
 /// then asks `Freeze` exactly once to commit that screen and begin paging. The
 /// native server (and any client without the preview loop) asks `Normal`, which
 /// waits for a good mix before committing the first page so it does not open on
@@ -111,7 +111,8 @@ pub async fn handle_feed(
         cursor::encode(&Cursor {
             snapshot: snap.id.clone(),
             seed,
-            offset: offset + items.len(),
+            // saturating: the offset came off an attacker-writable cursor
+            offset: offset.saturating_add(items.len()),
         })
     });
     Ok(FeedResponse {
@@ -205,7 +206,7 @@ fn demo_page(offset: usize, mode: Mode) -> FeedResponse {
         Mode::Glaze => pool.into_iter().filter(Brick::is_image_post).collect(),
     };
     let items: Vec<_> = pool.iter().skip(offset).take(PAGE_SIZE).cloned().collect();
-    let next_offset = offset + items.len();
+    let next_offset = offset.saturating_add(items.len());
     let cursor = (next_offset < pool.len()).then(|| {
         cursor::encode(&Cursor {
             snapshot: "fixture".into(),

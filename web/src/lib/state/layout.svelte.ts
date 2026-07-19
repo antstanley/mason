@@ -2,7 +2,7 @@ import { browser } from "$app/environment";
 
 /** How the wall lays its bricks. Bento gives feature bricks a wider footprint
  *  on a dense grid; masonry packs even-width bricks into the shortest column;
- *  glaze is the image wall — a dense bento of nothing but pictures at their own
+ *  glaze is the image wall: a dense bento of nothing but pictures at their own
  *  perspective, the gaps grouted with muted filler. One reader preference,
  *  remembered like the client picker. Picking glaze also switches the feed to
  *  the images-only algorithm (see FeedGrid / +page). */

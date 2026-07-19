@@ -54,7 +54,7 @@ const FIRST_PAINT_AUTHORS: usize = 12;
 /// posts, and that is still exactly what it stops.
 const MAX_BRICKS_PER_AUTHOR: usize = 4;
 /// The glaze wall is one kind from one source, so a chatty account cannot crowd
-/// out the rarer kinds (there are none) — only other image posters. It reads
+/// out the rarer kinds (there are none), only other image posters. It reads
 /// `posts_with_media` deep, so it can afford to let a prolific image account
 /// bring more of itself than the mixed wall does; the diversity window still
 /// spaces them out.
@@ -218,7 +218,7 @@ pub fn fresh_seed(did: &str) -> u64 {
 }
 
 /// Fetch-or-create under one cache lock: exactly one caller wins the insert and
-/// spawns the background fill; everyone gets the same Arc. No waiting — the
+/// spawns the background fill; everyone gets the same Arc. No waiting: the
 /// caller decides whether to block for first paint. The preview loop wants this
 /// bare: it returns the current pool the instant it is asked, however thin.
 pub async fn ensure_snapshot(
@@ -262,6 +262,12 @@ pub async fn get_or_build(
     // first-paint threshold: enough bricks pooled, or deadline
     let deadline = Instant::now() + FIRST_PAINT_DEADLINE;
     loop {
+        // registered BEFORE the state check: Notify only wakes futures that
+        // exist (and are enabled) when it fires, so a notify slipping in
+        // between the lock release and the await would otherwise be lost and
+        // stall first paint until the deadline
+        let mut notified = std::pin::pin!(snapshot.progress.notified());
+        notified.as_mut().enable();
         {
             let inner = snapshot.inner.lock().await;
             if !inner.warming || inner.distinct_authors() >= FIRST_PAINT_AUTHORS {
@@ -272,7 +278,7 @@ pub async fn get_or_build(
         if remaining.is_zero() {
             break;
         }
-        let _ = platform::timeout(remaining, snapshot.progress.notified()).await;
+        let _ = platform::timeout(remaining, notified).await;
     }
 
     snapshot
@@ -574,15 +580,25 @@ pub async fn get_page(
     drop_ended_streams(state, snapshot).await;
     let started = Instant::now();
     let deadline = started + Duration::from_secs(8);
+    // the offset rides in on the cursor, and a cursor is attacker-writable:
+    // an offset near usize::MAX would overflow the addition below. Treat it
+    // as the end of the feed rather than panic (debug) or wrap (release).
+    let Some(wanted) = offset.checked_add(size) else {
+        return (Vec::new(), false);
+    };
     // anchored to snapshot creation, so the first-paint wait already spent in
     // get_or_build counts against this budget rather than stacking on top of it
     let mix_deadline = snapshot.created + MIX_DEADLINE;
     loop {
         let awaiting_mix;
+        // registered before the state check, same as get_or_build: a brick
+        // admitted between the lock release and the await must still wake
+        // this page, or it serves short after a full deadline of nothing
+        let mut notified = std::pin::pin!(snapshot.progress.notified());
+        notified.as_mut().enable();
         {
             let mut guard = snapshot.inner.lock().await;
             let inner = &mut *guard;
-            let wanted = offset + size;
 
             // Bricks are laid once and never move, so laying is the moment the
             // pool's composition becomes the wall's composition. Posts arrive
@@ -637,17 +653,29 @@ pub async fn get_page(
             if awaiting_mix {
                 continue; // waited long enough for the rare kinds; lay anyway
             }
-            // serve a short page rather than hang; scroll retries
-            let guard = snapshot.inner.lock().await;
-            let end = (offset + size).min(guard.wall.len());
-            let items = guard
+            // serve a short page rather than hang; scroll retries. One last
+            // lay first: bricks that arrived during the wait belong on it
+            let mut guard = snapshot.inner.lock().await;
+            let inner = &mut *guard;
+            if inner.wall.len() < wanted && !inner.pool.is_empty() {
+                let missing = wanted - inner.wall.len();
+                mix::lay(
+                    &mut inner.pool,
+                    &mut inner.wall,
+                    missing,
+                    snapshot.seed,
+                    Utc::now(),
+                );
+            }
+            let end = wanted.min(inner.wall.len());
+            let items = inner
                 .wall
                 .get(offset.min(end)..end)
                 .map(<[Brick]>::to_vec)
                 .unwrap_or_default();
-            return (items, guard.warming || !guard.pool.is_empty());
+            return (items, inner.warming || !inner.pool.is_empty());
         }
-        let _ = platform::timeout(remaining, snapshot.progress.notified()).await;
+        let _ = platform::timeout(remaining, notified).await;
     }
 }
 
@@ -809,18 +837,25 @@ fn followed_live<'a>(
 /// The live streams this particular viewer follows, as bricks.
 async fn live_bricks(state: &Arc<AppState>, follows: &[bluesky::Follow]) -> Vec<Brick> {
     let network = live_cached(state).await;
-    let mut bricks = Vec::new();
-    for stream in followed_live(&network, follows) {
-        // only now, for the handful that survive the filter, is it worth
-        // finding out where their repo (and so their poster) lives
-        let pds = pds_cached(state, stream.did()).await;
-        bricks.push(
-            stream
-                .clone()
-                .into_brick(&state.config.streamplace_base, pds.as_deref()),
-        );
-    }
-    bricks
+    // only now, for the handful that survive the filter, is it worth finding
+    // out where each repo (and so its poster) lives. Resolve them concurrently
+    // rather than one plc round trip at a time; `buffered` bounds the fan-out
+    // and preserves input order, so the pool sees the same bricks in the same
+    // order the serial version produced.
+    let followed: Vec<streamplace::LiveStream> = followed_live(&network, follows)
+        .into_iter()
+        .cloned()
+        .collect();
+    stream::iter(followed.into_iter().map(|live| {
+        let state = Arc::clone(state);
+        async move {
+            let pds = pds_cached(&state, live.did()).await;
+            live.into_brick(&state.config.streamplace_base, pds.as_deref())
+        }
+    }))
+    .buffered(REPO_FAN_OUT)
+    .collect()
+    .await
 }
 
 /// Where an author's repo lives. Cached for a day: identity moves rarely, and
@@ -852,8 +887,12 @@ async fn streams_cached(state: &Arc<AppState>, pds: &str, author: &Author) -> Ar
         {
             Ok(bricks) => Arc::new(bricks),
             Err(e) => {
+                // a transient PDS failure is not "this author never streams";
+                // caching it would silence them for a day. Skip the insert so
+                // the next snapshot simply asks again. A genuine empty repo
+                // comes back Ok(empty) and takes the negative TTL below.
                 tracing::debug!("streamplace videos for {} failed: {e}", author.did);
-                Arc::new(Vec::new())
+                return Arc::new(Vec::new());
             }
         };
     // the same shape as blogs: the few who stream get rechecked within the
@@ -929,8 +968,11 @@ async fn std_docs_cached(state: &Arc<AppState>, pds: &str, author: &Author) -> A
             suppressed_posts: result.suppressed_posts,
         }),
         Err(e) => {
+            // same as streams: a transient failure must not be remembered for
+            // a day as "this author publishes nothing". Skip the insert; only
+            // a successful empty listing earns the negative TTL.
             tracing::debug!("standard.site fetch for {} failed: {e}", author.did);
-            Arc::new(StdDocs::default())
+            return Arc::new(StdDocs::default());
         }
     };
     // publishers get rechecked soon; the silent majority is cached for a day

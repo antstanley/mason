@@ -1,7 +1,7 @@
 <script lang="ts">
 	// The glaze brick: the picture is the brick. One image fills the card at its
 	// natural aspect; two or three lay out in a grid (grout showing between
-	// them); four or more become an in-card filmstrip — a full-frame strip you
+	// them); four or more become an in-card filmstrip: a full-frame strip you
 	// swipe, or page with the arrows, committing to the next image only once
 	// you've dragged in more than 60% of it. At rest the card is just the picture;
 	// on hover an opaque author pill fades in bottom-left and the post's caption
@@ -13,6 +13,7 @@
 	// the post while a drag scrolls the strip, and the arrows / ALT button / panel
 	// never trip the navigation. Touch has no hover, so there the pill and caption
 	// stay shown. Under prefers-reduced-motion nothing slides.
+	import { tick } from 'svelte';
 	import type { PostBrick } from '$lib/types';
 	import { clientUrl } from '$lib/state/client.svelte';
 	import BrickShell from '../BrickShell.svelte';
@@ -28,12 +29,40 @@
 	const count = $derived(images.length);
 	const kind = $derived(count >= 4 ? 'carousel' : count >= 2 ? 'grid' : 'single');
 	const first = $derived(images[0] ?? null);
+	const label = $derived(`post by ${brick.author.displayName ?? brick.author.handle}`);
 	// descriptions to surface, tagged with their 1-based image number
 	const alts = $derived(
 		images.map((im, i) => ({ n: i + 1, text: (im.alt ?? '').trim() })).filter((a) => a.text)
 	);
 
 	let showAlt = $state(false);
+	// the ALT overlay behaves like a small dialog: opening it moves focus onto the
+	// close control, Escape or the ✕ closes it and hands focus back to the trigger,
+	// and the covered carousel is inert while it is up.
+	const altPanelId = $props.id();
+	let altTrigger = $state<HTMLButtonElement | null>(null);
+	let altClose = $state<HTMLButtonElement | null>(null);
+
+	function openAlt() {
+		showAlt = true;
+		void tick().then(() => altClose?.focus());
+	}
+	function closeAlt() {
+		// focus the trigger synchronously, before Svelte unmounts the panel and
+		// focus-within drops (which would hide the trigger and swallow the focus)
+		showAlt = false;
+		altTrigger?.focus();
+	}
+
+	$effect(() => {
+		if (!showAlt) return;
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') closeAlt();
+		};
+		document.addEventListener('keydown', onKey);
+		return () => document.removeEventListener('keydown', onKey);
+	});
+
 	// touch has no hover, so a corner button taps the pill + caption into view
 	// there; on a device that can hover this stays false and hover drives it
 	let revealed = $state(false);
@@ -99,9 +128,12 @@
 	}
 </script>
 
-<BrickShell accent="post">
+<BrickShell accent="post" {label}>
 	<div class="relative">
-		{#if kind === 'carousel'}
+		<!-- the picture and its paging controls: inert while the ALT panel covers
+		     the card, so focus and pointer stay on the panel, not the buried strip -->
+		<div inert={showAlt}>
+			{#if kind === 'carousel'}
 			<Sensitive blur={brick.blur}>
 				<div
 					bind:this={strip}
@@ -132,13 +164,13 @@
 			<!-- controls: siblings of the strip, so they page it instead of opening
 			     the post. A native swipe pages it too. -->
 			<div
-				class="pointer-events-none absolute inset-x-2 top-1/2 flex -translate-y-1/2 justify-between opacity-0 transition-opacity group-hover:opacity-100 motion-reduce:transition-none [@media(hover:none)]:opacity-100"
+				class="pointer-events-none absolute inset-x-2 top-1/2 flex -translate-y-1/2 justify-between opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 motion-reduce:transition-none [@media(hover:none)]:opacity-100"
 			>
 				<button
 					type="button"
 					onclick={() => slide(-1)}
 					aria-label="Previous image"
-					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/55 text-lg font-bold text-chalk backdrop-blur-sm transition-colors hover:bg-ink/70"
+					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/70 text-lg font-bold text-chalk backdrop-blur-sm transition-colors hover:bg-ink/80"
 				>
 					<span aria-hidden="true">‹</span>
 				</button>
@@ -146,16 +178,18 @@
 					type="button"
 					onclick={() => slide(1)}
 					aria-label="Next image"
-					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/55 text-lg font-bold text-chalk backdrop-blur-sm transition-colors hover:bg-ink/70"
+					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/70 text-lg font-bold text-chalk backdrop-blur-sm transition-colors hover:bg-ink/80"
 				>
 					<span aria-hidden="true">›</span>
 				</button>
 			</div>
 			<div
-				class="pointer-events-none absolute top-2 right-2 rounded-full bg-ink/55 px-2 py-0.5 text-xs font-semibold text-chalk backdrop-blur-sm"
+				aria-hidden="true"
+				class="pointer-events-none absolute top-2 right-2 rounded-full bg-ink/70 px-2 py-0.5 text-xs font-semibold text-chalk backdrop-blur-sm"
 			>
 				{index + 1}/{count}
 			</div>
+			<p class="sr-only" aria-live="polite">image {index + 1} of {count}</p>
 		{:else}
 			<a
 				href={clientUrl(brick.url)}
@@ -192,6 +226,8 @@
 			</a>
 		{/if}
 
+		</div>
+
 		<!-- author pill on top, frosted caption underneath. At rest both are hidden
 		     for a clean image (especially the grid). On hover the pill fades in and
 		     stays put while the caption slides up underneath it. On touch, where
@@ -202,7 +238,7 @@
 			     because the row is, until the caption lifts them both) -->
 			<div class="flex w-full items-center justify-between gap-2">
 				<div
-					class="m-3 min-w-0 rounded-full bg-chalk py-1.5 pr-4 pl-1.5 opacity-0 shadow-brick transition-opacity duration-300 dark:bg-kiln [@media(hover:hover)]:group-hover:opacity-100 motion-reduce:transition-none {revealed
+					class="m-3 min-w-0 rounded-full bg-chalk py-1.5 pr-4 pl-1.5 opacity-0 shadow-brick transition-opacity duration-300 group-focus-within:opacity-100 dark:bg-kiln [@media(hover:hover)]:group-hover:opacity-100 motion-reduce:transition-none {revealed
 						? '[@media(hover:none)]:opacity-100'
 						: ''}"
 				>
@@ -215,7 +251,7 @@
 					onclick={() => (revealed = !revealed)}
 					aria-label={revealed ? 'Hide post details' : 'Show post details'}
 					aria-expanded={revealed}
-					class="pointer-events-auto m-3 hidden size-9 shrink-0 place-items-center rounded-lg bg-ink/15 text-chalk backdrop-blur-sm [@media(hover:none)]:grid"
+					class="pointer-events-auto m-3 hidden size-9 shrink-0 place-items-center rounded-lg bg-ink/55 text-chalk backdrop-blur-sm [@media(hover:none)]:grid"
 				>
 					<!-- lucide chevrons-up / chevrons-down -->
 					<svg
@@ -240,21 +276,25 @@
 			</div>
 			{#if brick.text || alts.length}
 				<div
-					class="max-h-0 w-full overflow-hidden opacity-0 transition-all duration-300 ease-out [@media(hover:hover)]:group-hover:max-h-40 [@media(hover:hover)]:group-hover:opacity-100 motion-reduce:transition-none {revealed
-						? '[@media(hover:none)]:max-h-40 [@media(hover:none)]:opacity-100'
+					class="invisible max-h-0 w-full overflow-hidden opacity-0 transition-all duration-300 ease-out group-focus-within:visible group-focus-within:max-h-40 group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:visible [@media(hover:hover)]:group-hover:max-h-40 [@media(hover:hover)]:group-hover:opacity-100 motion-reduce:transition-none {revealed
+						? '[@media(hover:none)]:visible [@media(hover:none)]:max-h-40 [@media(hover:none)]:opacity-100'
 						: ''}"
 				>
 					<div
-						class="flex w-full items-start gap-2 border-t border-chalk/25 bg-chalk/55 p-3 backdrop-blur-md dark:border-kiln/30 dark:bg-kiln/50"
+						class="flex w-full items-start gap-2 border-t border-chalk/25 bg-chalk/85 p-3 backdrop-blur-md dark:border-kiln/30 dark:bg-kiln/85"
 					>
 						<p class="line-clamp-2 flex-1 text-[0.9rem] leading-snug [@media(hover:hover)]:line-clamp-4">
 							{brick.text}
 						</p>
 						{#if alts.length}
 							<button
+								bind:this={altTrigger}
 								type="button"
-								onclick={() => (showAlt = true)}
+								onclick={openAlt}
 								aria-label="Show image description"
+								aria-expanded={showAlt}
+								aria-controls={altPanelId}
+								tabindex={showAlt ? -1 : undefined}
 								class="pointer-events-auto mt-0.5 shrink-0 cursor-pointer rounded-md bg-ink/10 px-1.5 py-0.5 text-[0.65rem] font-bold tracking-wide text-ink/80 transition-colors hover:bg-ink/20 dark:bg-chalk/15 dark:text-chalk/80 dark:hover:bg-chalk/25"
 							>
 								ALT
@@ -269,13 +309,18 @@
 		     image description(s) under it, numbered when there is more than one -->
 		{#if showAlt && alts.length}
 			<div
+				id={altPanelId}
+				role="dialog"
+				aria-modal="true"
+				aria-label="image description"
 				class="pointer-events-auto absolute inset-0 flex flex-col gap-3 overflow-auto bg-chalk/85 p-4 backdrop-blur-md dark:bg-kiln/85"
 			>
 				<div class="flex items-start justify-between gap-2">
 					<AuthorChip author={brick.author} avatarClass="size-8" />
 					<button
+						bind:this={altClose}
 						type="button"
-						onclick={() => (showAlt = false)}
+						onclick={closeAlt}
 						aria-label="Hide image description"
 						class="shrink-0 cursor-pointer rounded-full bg-ink/10 px-2 py-1 text-sm font-bold text-ink/80 transition-colors hover:bg-ink/20 dark:bg-chalk/15 dark:text-chalk/80 dark:hover:bg-chalk/25"
 					>

@@ -16,7 +16,7 @@
   - the first page's wait-for-a-better-mix deadline is now anchored to when the
     snapshot was created, so the first-paint wait counts against it rather than
     stacking on top of it: the opening wait is bounded, not doubled.
-  - the landing page warms the engine while you are still at the form — a
+  - the landing page warms the engine while you are still at the form: a
     remembered handle warms that wall's caches, and with no handle the demo wall
     at least compiles the wasm off the critical path.
   - the roughly-first-screen bricks load their images eagerly and at high fetch
@@ -24,7 +24,7 @@
 
 - [#23](https://github.com/antstanley/mason/pull/23) [`287f40c`](https://github.com/antstanley/mason/commit/287f40c63af83f3f0aade963d4a7552d3cf8e931) Thanks [@antstanley](https://github.com/antstanley)! - feat: glaze cards get a reveal control on touch. Where there is no hover to lift
   the author pill and caption, a small transparent double-chevron button now taps
-  them up (and back down) — it rides on the author pill's line, sitting at the
+  them up (and back down); it rides on the author pill's line, sitting at the
   bottom-right at rest and rising with the pill when the caption lifts. On hover
   devices nothing changes; the pill and caption still reveal on hover.
 
@@ -48,7 +48,7 @@
 
 - [#26](https://github.com/antstanley/mason/pull/26) [`f1b3255`](https://github.com/antstanley/mason/commit/f1b3255f4e22a09ae9dda372f7ddbd6c0f82036b) Thanks [@antstanley](https://github.com/antstanley)! - perf: the browser engine is 103 KB smaller. The wasm build talked to the network
   through reqwest, which on wasm is only a thin wrapper over the browser's own
-  fetch — but it dragged the `url` crate's IDNA/ICU Unicode tables in with it, none
+  fetch, but it dragged the `url` crate's IDNA/ICU Unicode tables in with it, none
   of which mason needs (every request URL is a plain ASCII atproto endpoint). The
   browser build now uses gloo-net instead, a direct fetch wrapper with no such
   tail. reqwest stays on the native server unchanged. The shared rate limiter and
@@ -64,7 +64,7 @@
 - [#19](https://github.com/antstanley/mason/pull/19) [`591ce4c`](https://github.com/antstanley/mason/commit/591ce4cb1c2c7964ec1f3722660c970bc592641b) Thanks [@antstanley](https://github.com/antstanley)! - fix: the wasm service worker survives a deploy. Each deploy deletes the previous
   build's hashed assets, so a worker that installed before a deploy would 404
   fetching its old wasm engine and then brick every `/api/feed` for the life of
-  that session (the rejected init was memoised) — a 500 that only hit visitors who
+  that session (the rejected init was memoised): a 500 that only hit visitors who
   had loaded the app before. The worker now precaches its own wasm and loads the
   engine from that cache, so it keeps serving until it is itself replaced; a failed
   init is never memoised. The client also revalidates the worker script on load

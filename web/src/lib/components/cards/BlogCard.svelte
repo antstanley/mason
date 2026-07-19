@@ -6,9 +6,11 @@
 	// priority: an above-the-fold brick loads its cover eagerly and at high
 	// fetch priority; the rest of the wall stays lazy
 	let { brick, priority = false }: { brick: BlogBrick; priority?: boolean } = $props();
+
+	const label = $derived(`blog post: ${brick.title}`);
 </script>
 
-<BrickShell accent="blog" href={brick.url}>
+<BrickShell accent="blog" href={brick.url} {label}>
 	{#if brick.coverImage}
 		<img
 			src={brick.coverImage}
@@ -24,7 +26,7 @@
 		>
 			{brick.publication.name}
 		</span>
-		<h2 class="font-display text-lg leading-tight font-bold">{brick.title}</h2>
+		<p class="font-display text-lg leading-tight font-bold">{brick.title}</p>
 		{#if brick.description}
 			<p class="line-clamp-3 text-sm leading-snug opacity-75">{brick.description}</p>
 		{/if}

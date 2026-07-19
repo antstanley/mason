@@ -69,6 +69,7 @@ impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
             return (entry.value.clone(), false);
         }
         let value = make();
+        self.trim(&mut entries);
         entries.insert(
             key,
             Entry {
@@ -77,6 +78,39 @@ impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
             },
         );
         (value, true)
+    }
+
+    /// Keep the map bounded before an insert: drop expired entries, then, if
+    /// still at or over capacity, evict soonest-to-expire entries until under
+    /// it. Shared by every insert path so the cache stays bounded however it
+    /// was filled (snapshots arrive only through get_or_insert_with, and each
+    /// pins an Arc of up to a few hundred bricks, so an untrimmed path grows
+    /// without bound in a long-lived server).
+    fn trim(&self, entries: &mut HashMap<K, Entry<V>>) {
+        if entries.len() < self.max_capacity {
+            return;
+        }
+        let now = Instant::now();
+        entries.retain(|_, e| e.expires_at > now);
+        if entries.len() < self.max_capacity {
+            return;
+        }
+        // Still over the ceiling with everything live: evict the soonest-to-
+        // expire entries in one batch. Removing a single min per insert costs
+        // an O(n) scan on every insert once a 20k cache is full; dropping a
+        // slice (~10%) amortizes that over the inserts that follow.
+        let batch = (self.max_capacity / 10).max(1);
+        let target = self.max_capacity.saturating_sub(batch);
+        let drop_count = entries.len() - target;
+        let mut by_expiry: Vec<(Instant, K)> = entries
+            .iter()
+            .map(|(k, e)| (e.expires_at, k.clone()))
+            .collect();
+        // soonest-to-expire first
+        by_expiry.sort_by_key(|(expires_at, _)| *expires_at);
+        for (_, key) in by_expiry.into_iter().take(drop_count) {
+            entries.remove(&key);
+        }
     }
 
     /// Live entries as (key, unwrapped value, absolute unix-ms expiry) -
@@ -112,21 +146,7 @@ impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
 
     pub async fn insert_with_ttl(&self, key: K, value: V, ttl: Duration) {
         let mut entries = self.entries.lock().await;
-        if entries.len() >= self.max_capacity {
-            let now = Instant::now();
-            entries.retain(|_, e| e.expires_at > now);
-            // still over: drop soonest-to-expire entries
-            while entries.len() >= self.max_capacity {
-                let Some(key) = entries
-                    .iter()
-                    .min_by_key(|(_, e)| e.expires_at)
-                    .map(|(k, _)| k.clone())
-                else {
-                    break;
-                };
-                entries.remove(&key);
-            }
-        }
+        self.trim(&mut entries);
         entries.insert(
             key,
             Entry {
