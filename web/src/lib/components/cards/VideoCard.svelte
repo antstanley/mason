@@ -7,7 +7,9 @@
 	import VideoPlayer from '../VideoPlayer.svelte';
 	import Sensitive from '../Sensitive.svelte';
 
-	let { brick }: { brick: VideoBrick } = $props();
+	// priority: an above-the-fold brick loads its poster eagerly and at high
+	// fetch priority; the rest of the wall stays lazy
+	let { brick, priority = false }: { brick: VideoBrick; priority?: boolean } = $props();
 
 	// The <video> element does not exist until the user clicks; the Wall
 	// never plays anything on its own. That holds for live streams too: a
@@ -64,7 +66,8 @@
 				<img
 					src={brick.poster}
 					alt=""
-					loading="lazy"
+					loading={priority ? 'eager' : 'lazy'}
+					fetchpriority={priority ? 'high' : undefined}
 					class="w-full bg-brick-video/15 object-cover"
 					style:aspect-ratio={ratio}
 				/>

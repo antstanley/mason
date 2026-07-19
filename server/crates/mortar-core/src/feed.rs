@@ -28,16 +28,12 @@ pub async fn handle_feed(
         return Ok(demo_page(decoded.map(|c| c.offset).unwrap_or(0), mode));
     }
 
-    let did = resolve_actor(state, actor).await?;
-
-    // A wall is the owner's social graph on display; if they asked to be seen
-    // only by signed-in visitors, a logged-out mason must not lay it. Their own
-    // posts never reach the fill, so this is the one place their opt-out is
-    // checked. Fail open on an upstream hiccup: the preference is best-effort,
-    // and treating a flaky getProfile as a wall of nothing helps no one.
-    if owner_wants_auth(state, &did).await {
-        return Err(AppError::LoginRequired(actor.to_string()));
-    }
+    // Resolving the actor and reading the owner's opt-out are the same call
+    // now: getProfile carries both the DID and the label. A wall is the owner's
+    // social graph on display; if they asked to be seen only by signed-in
+    // visitors, a logged-out mason must not lay it. Their own posts never reach
+    // the fill, so this is the one place their opt-out is checked.
+    let did = resolve_and_gate(state, actor).await?;
 
     let (seed, offset) = match decoded {
         Some(c) => (c.seed, c.offset),
@@ -59,48 +55,78 @@ pub async fn handle_feed(
     })
 }
 
-async fn resolve_actor(state: &Arc<AppState>, actor: &str) -> Result<String, AppError> {
-    if actor.starts_with("did:") {
-        return Ok(actor.to_string());
+/// Resolve `actor` to a DID and, in the same breath, honour the owner's
+/// logged-out opt-out. Returns the DID, or `LoginRequired` for a sealed wall.
+///
+/// One `getProfile` does what used to take a `resolveHandle` then a separate
+/// `getProfile`: its response carries both the DID and the opt-out label, so a
+/// cold handle load pays one AppView round trip on this path instead of two.
+///
+/// The fail direction depends on what is already known. When the DID is not yet
+/// in hand (a cold handle), this call is load-bearing for resolution, so a
+/// network error fails the wall closed (`Upstream`) exactly as handle
+/// resolution always did. When the DID is already known (a `did:` actor or a
+/// cached handle) and only the opt-out is outstanding, the preference is
+/// best-effort: a flaky getProfile is treated as "not opted out" so it can
+/// never seal a wall by accident.
+async fn resolve_and_gate(state: &Arc<AppState>, actor: &str) -> Result<String, AppError> {
+    let known_did = if actor.starts_with("did:") {
+        Some(actor.to_string())
+    } else {
+        state.caches.did.get(&actor.to_string()).await
+    };
+
+    // DID already in hand: the only open question is the opt-out, and it fails
+    // open. A cached negative answer needs no network at all.
+    if let Some(did) = known_did {
+        if let Some(opted_out) = state.caches.profiles.get(&did).await {
+            return gate(actor, did, opted_out);
+        }
+        return match bluesky::get_profile(&state.http, &state.config.appview_base, &did).await {
+            Ok(profile) => {
+                state
+                    .caches
+                    .profiles
+                    .insert(did.clone(), profile.opted_out)
+                    .await;
+                gate(actor, did, profile.opted_out)
+            }
+            Err(e) => {
+                // best-effort: never let a flaky getProfile seal a known wall
+                tracing::debug!("profile opt-out check for {did} failed: {e}");
+                Ok(did)
+            }
+        };
     }
-    if let Some(did) = state.caches.did.get(&actor.to_string()).await {
-        return Ok(did);
-    }
-    match bluesky::resolve_handle(&state.http, &state.config.appview_base, actor).await {
-        Ok(did) => {
+
+    // Cold handle: one getProfile resolves the DID and reads the opt-out. This
+    // call is load-bearing, so its failure fails the wall closed.
+    match bluesky::get_profile(&state.http, &state.config.appview_base, actor).await {
+        Ok(profile) => {
             state
                 .caches
                 .did
-                .insert(actor.to_string(), did.clone())
+                .insert(actor.to_string(), profile.did.clone())
                 .await;
-            Ok(did)
+            state
+                .caches
+                .profiles
+                .insert(profile.did.clone(), profile.opted_out)
+                .await;
+            gate(actor, profile.did, profile.opted_out)
         }
         Err(HttpError::Status(400 | 404)) => Err(AppError::ActorNotFound(actor.to_string())),
         Err(e) => Err(AppError::Upstream(e.to_string())),
     }
 }
 
-/// Whether the wall owner opted out of logged-out visibility, cached for an
-/// hour. A miss costs one getProfile; an upstream error is treated as "not
-/// opted out" so a flaky AppView never seals a wall by accident.
-async fn owner_wants_auth(state: &Arc<AppState>, did: &str) -> bool {
-    if let Some(cached) = state.caches.profiles.get(&did.to_string()).await {
-        return cached;
+/// A sealed wall becomes an error; an open one hands back its DID.
+fn gate(actor: &str, did: String, opted_out: bool) -> Result<String, AppError> {
+    if opted_out {
+        Err(AppError::LoginRequired(actor.to_string()))
+    } else {
+        Ok(did)
     }
-    let opted_out =
-        match bluesky::get_profile_optout(&state.http, &state.config.appview_base, did).await {
-            Ok(opted_out) => opted_out,
-            Err(e) => {
-                tracing::debug!("profile opt-out check for {did} failed: {e}");
-                false
-            }
-        };
-    state
-        .caches
-        .profiles
-        .insert(did.to_string(), opted_out)
-        .await;
-    opted_out
 }
 
 fn demo_page(offset: usize, mode: Mode) -> FeedResponse {

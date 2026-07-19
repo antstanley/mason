@@ -8,10 +8,14 @@
 		brick
 	}: {
 		items: Brick[];
-		brick: Snippet<[Brick]>;
+		brick: Snippet<[Brick, boolean]>;
 	} = $props();
 
-	type Placed = { item: Brick; fresh: boolean };
+	type Placed = { item: Brick; fresh: boolean; index: number };
+
+	// the roughly-first-screen bricks load eagerly and at high priority; the
+	// rest stay lazy so the wall's tail costs nothing until it is scrolled to
+	const EAGER_BRICKS = 6;
 
 	let container = $state<HTMLElement | null>(null);
 	let colCount = $state(0);
@@ -49,10 +53,11 @@
 		try {
 			while (placedCount < items.length) {
 				const item = items[placedCount];
+				const index = placedCount;
 				placedCount += 1;
 				const fresh = !entered.has(item.id);
 				entered.add(item.id);
-				columns[shortestColumn()].push({ item, fresh });
+				columns[shortestColumn()].push({ item, fresh, index });
 				// placement must be sequential: each brick lands in the column
 				// whose height reflects the previous brick
 				// oxlint-disable-next-line no-await-in-loop
@@ -102,7 +107,7 @@
 		<div class="flex min-w-0 flex-1 flex-col gap-5">
 			{#each columns[i] as placed (placed.item.id)}
 				<div class={placed.fresh ? 'animate-brick-in' : undefined}>
-					{@render brick(placed.item)}
+					{@render brick(placed.item, placed.index < EAGER_BRICKS)}
 				</div>
 			{/each}
 		</div>

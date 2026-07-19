@@ -3,12 +3,20 @@
 	import BrickShell from '../BrickShell.svelte';
 	import AuthorChip from '../AuthorChip.svelte';
 
-	let { brick }: { brick: BlogBrick } = $props();
+	// priority: an above-the-fold brick loads its cover eagerly and at high
+	// fetch priority; the rest of the wall stays lazy
+	let { brick, priority = false }: { brick: BlogBrick; priority?: boolean } = $props();
 </script>
 
 <BrickShell accent="blog" href={brick.url}>
 	{#if brick.coverImage}
-		<img src={brick.coverImage} alt="" loading="lazy" class="aspect-[8/5] w-full bg-brick-blog/15 object-cover" />
+		<img
+			src={brick.coverImage}
+			alt=""
+			loading={priority ? 'eager' : 'lazy'}
+			fetchpriority={priority ? 'high' : undefined}
+			class="aspect-[8/5] w-full bg-brick-blog/15 object-cover"
+		/>
 	{/if}
 	<div class="flex flex-col gap-3 p-4">
 		<span

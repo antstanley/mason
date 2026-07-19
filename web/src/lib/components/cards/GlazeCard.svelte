@@ -19,7 +19,10 @@
 	import AuthorChip from '../AuthorChip.svelte';
 	import Sensitive from '../Sensitive.svelte';
 
-	let { brick }: { brick: PostBrick } = $props();
+	// priority: an above-the-fold brick loads its FIRST image eagerly and at
+	// high fetch priority (the rest of its strip, and the rest of the wall, stay
+	// lazy). glaze is all pictures, so this is where it earns the most.
+	let { brick, priority = false }: { brick: PostBrick; priority?: boolean } = $props();
 
 	const images = $derived(brick.images);
 	const count = $derived(images.length);
@@ -114,7 +117,13 @@
 							rel="noopener noreferrer"
 							class="block h-full w-full shrink-0 focus-visible:outline-offset-[-3px]"
 						>
-							<img src={im.src} alt={im.alt} loading="lazy" class="h-full w-full object-cover" />
+							<img
+								src={im.src}
+								alt={im.alt}
+								loading={priority && i === 0 ? 'eager' : 'lazy'}
+								fetchpriority={priority && i === 0 ? 'high' : undefined}
+								class="h-full w-full object-cover"
+							/>
 						</a>
 					{/each}
 				</div>
@@ -159,7 +168,8 @@
 						<img
 							src={first.src}
 							alt={first.alt}
-							loading="lazy"
+							loading={priority ? 'eager' : 'lazy'}
+							fetchpriority={priority ? 'high' : undefined}
 							class="block w-full bg-brick-post/15 object-cover"
 							style:aspect-ratio={ratio(first)}
 						/>
@@ -171,7 +181,8 @@
 								<img
 									src={im.src}
 									alt={im.alt}
-									loading="lazy"
+									loading={priority && i === 0 ? 'eager' : 'lazy'}
+									fetchpriority={priority && i === 0 ? 'high' : undefined}
 									class="h-full w-full object-cover {i === 0 || count === 2 ? 'row-span-2' : ''}"
 								/>
 							{/each}

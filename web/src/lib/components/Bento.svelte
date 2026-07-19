@@ -9,7 +9,7 @@
 		filler = false
 	}: {
 		items: Brick[];
-		brick: Snippet<[Brick]>;
+		brick: Snippet<[Brick, boolean]>;
 		// glaze wall: lay the whole grid on a muted field so every gap the dense
 		// packing leaves — the holes between bricks and the seams around them —
 		// reads as a solid muted filler block, grout between the pictures.
@@ -22,6 +22,9 @@
 	// the holes those wide bricks leave behind, so the wall stays tight.
 	const ROW = 4; // px per auto-row track; smaller packs bricks tighter
 	const GAP = 12; // px; matches the gap-3 between bricks
+	// the roughly-first-screen bricks load eagerly and at high priority; the
+	// rest stay lazy so the wall's tail costs nothing until it is scrolled to
+	const EAGER_BRICKS = 6;
 
 	let container = $state<HTMLElement | null>(null);
 	let cols = $state(1);
@@ -91,10 +94,10 @@
 	style:grid-auto-rows="{ROW}px"
 	style:grid-auto-flow="row dense"
 >
-	{#each items as item (item.id)}
+	{#each items as item, i (item.id)}
 		<div class="min-w-0" style:grid-column="span {colSpan(item)}" use:autoRows>
 			<div class={entered.has(item.id) ? undefined : 'animate-brick-in'}>
-				{@render brick(item)}
+				{@render brick(item, i < EAGER_BRICKS)}
 			</div>
 		</div>
 	{/each}

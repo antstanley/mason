@@ -45,6 +45,25 @@ export async function fetchFeed(
   return (await res.json()) as FeedResponse;
 }
 
+/** Warm the local engine before the wall is actually asked for. Ensures the
+ *  service worker controls the page, then fires a feed request whose result is
+ *  discarded. That moves the cold-start tax off the critical path: the wasm
+ *  compiles and the persisted caches import ahead of time, and for a real
+ *  handle the follow graph and author feeds land in their (did-keyed, seed
+ *  independent) caches too, so the wall the reader actually opens reuses them
+ *  and skips the network fan-out. A no-op in server mode; best-effort always. */
+export async function warmFeed(actor: string, mode?: string): Promise<void> {
+  if (!localMode || !browser || !("serviceWorker" in navigator)) return;
+  try {
+    await swControlsPage();
+    const params = new URLSearchParams({ actor });
+    if (mode) params.set("mode", mode);
+    await fetch(`${BASE}/api/feed?${params}`);
+  } catch {
+    // warming is best-effort; the real request pays the cost if this didn't
+  }
+}
+
 export class FeedError extends Error {
   constructor(
     public code: string,
