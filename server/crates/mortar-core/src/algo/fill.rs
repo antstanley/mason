@@ -24,14 +24,9 @@ const FAN_OUT: usize = 16;
 /// concurrently → warming off. Any follow-graph failure leaves an empty (but
 /// terminated) snapshot rather than an error; actor existence was already
 /// checked by resolve.
-pub async fn fill(
-    state: Arc<AppState>,
-    snapshot: Arc<Snapshot>,
-    viewer: String,
-    seed: u64,
-    mode: Mode,
-) {
+pub async fn fill(state: Arc<AppState>, snapshot: Arc<Snapshot>) {
     let started = Instant::now();
+    let (viewer, seed, mode) = (snapshot.viewer.clone(), snapshot.seed, snapshot.mode);
 
     let follows = match fetch::get_follows_cached(&state, &viewer).await {
         Ok(f) => f,
@@ -94,32 +89,7 @@ pub async fn fill(
             let posts_fill = fan_out_authors(&state, &snapshot, &cohort, false, |_| true);
 
             let repos_fill = async {
-                let mut repos = stream::iter(cohort.iter().cloned().map(|author| {
-                    let state = Arc::clone(&state);
-                    async move {
-                        // blogs and archived streams both read the author's repo,
-                        // so they share one identity lookup rather than racing
-                        // for two
-                        let Some(pds) = fetch::pds_cached(&state, &author.did).await else {
-                            return (author, Arc::new(StdDocs::default()), Arc::new(Vec::new()));
-                        };
-                        let (docs, streams) = tokio::join!(
-                            fetch::std_docs_cached(&state, &pds, &author),
-                            fetch::streams_cached(&state, &pds, &author),
-                        );
-                        (author, docs, streams)
-                    }
-                }))
-                .buffer_unordered(fetch::REPO_FAN_OUT);
-
-                let mut yielding: Vec<String> = Vec::new();
-                while let Some((author, docs, streams)) = repos.next().await {
-                    if !docs.bricks.is_empty() || !streams.is_empty() {
-                        yielding.push(author.did);
-                    }
-                    snapshot.admit_repo_yield(&docs, &streams).await;
-                    snapshot.notify_progress();
-                }
+                let yielding = fan_out_repos(&state, &snapshot, &cohort).await;
                 snapshot.finish_slow_fan().await;
                 yielding
             };
@@ -131,10 +101,17 @@ pub async fn fill(
         }
     };
 
+    // Only the authors that ANSWERED are remembered as fanned out, and before
+    // warming ends so no wave can trigger against a half-recorded set. One
+    // whose fetch failed transiently was never really asked: the failure is
+    // not cached, so the next wave (which excludes only the fanned) simply
+    // asks them again.
+    snapshot.record_fanned(&answered).await;
     snapshot.finish_warming().await;
     tracing::debug!(
-        "snapshot {} warmed: {answered} authors in {:?}",
+        "snapshot {} warmed: {} authors in {:?}",
         snapshot.id,
+        answered.len(),
         started.elapsed()
     );
 
@@ -142,17 +119,110 @@ pub async fn fill(
     cohort::record_activity(&state, &activity_key, yielding_authors).await;
 }
 
+/// One extension wave: fan out to the next slice of the follow graph this
+/// wall has never asked, so an endless scroll quarries the whole graph rather
+/// than ending at the first cohort. Triggered by `get_page` when the pool
+/// runs low; the snapshot's `extending` flag keeps waves single-file, and the
+/// caller has already set it. The live list is not re-read here: a wave feeds
+/// a wall long past its first paint, and ended streams are pruned separately.
+pub async fn extend(state: Arc<AppState>, snapshot: Arc<Snapshot>) {
+    let started = Instant::now();
+    let follows = match fetch::get_follows_cached(&state, &snapshot.viewer).await {
+        Ok(f) => f,
+        Err(e) => {
+            // transient, so the graph is NOT marked spent: a later page retries
+            tracing::debug!("wave follows fetch for {} failed: {e}", snapshot.viewer);
+            snapshot.finish_extension(false).await;
+            return;
+        }
+    };
+    let fanned = snapshot.fanned().await;
+    let wave = cohort::next_wave(&follows, snapshot.seed, &fanned);
+    if wave.is_empty() {
+        tracing::debug!("snapshot {}: follow graph spent", snapshot.id);
+        snapshot.finish_extension(true).await;
+        return;
+    }
+    // the admission caps were budgeted for one cohort; each wave brings that
+    // budget again so its authors are not turned away at a full door
+    snapshot.raise_caps().await;
+
+    let (answered, yielding) = match snapshot.mode {
+        Mode::Glaze => fan_out_authors(&state, &snapshot, &wave, true, Brick::is_image_post).await,
+        Mode::Wall => {
+            let posts = fan_out_authors(&state, &snapshot, &wave, false, |_| true);
+            let repos = fan_out_repos(&state, &snapshot, &wave);
+            let ((answered, mut yielding), repo_authors) = futures::join!(posts, repos);
+            yielding.extend(repo_authors);
+            (answered, yielding)
+        }
+    };
+
+    // as in the initial fill: only the authors that answered count as fanned,
+    // so a transient blip is asked again by the next wave rather than costing
+    // this wall a hundred authors for its whole life. Recorded before the
+    // extension is finished, so the next wave can never race a stale set.
+    snapshot.record_fanned(&answered).await;
+    snapshot.finish_extension(false).await;
+    tracing::debug!(
+        "snapshot {}: wave of {} authors in {:?}",
+        snapshot.id,
+        wave.len(),
+        started.elapsed()
+    );
+    let activity_key = cohort::activity_key(&snapshot.viewer, snapshot.mode);
+    cohort::record_activity(&state, &activity_key, yielding).await;
+}
+
+/// Fan the repo reads (blogs and archived streams) across a cohort, admitting
+/// as they land. Returns the authors that yielded. Shared by the initial fill
+/// and the extension waves; only the initial fill counts it as a slow fan.
+async fn fan_out_repos(
+    state: &Arc<AppState>,
+    snapshot: &Arc<Snapshot>,
+    cohort: &[Author],
+) -> Vec<String> {
+    let mut repos = stream::iter(cohort.iter().cloned().map(|author| {
+        let state = Arc::clone(state);
+        async move {
+            // blogs and archived streams both read the author's repo, so they
+            // share one identity lookup rather than racing for two
+            let Some(pds) = fetch::pds_cached(&state, &author.did).await else {
+                return (author, Arc::new(StdDocs::default()), Arc::new(Vec::new()));
+            };
+            let (docs, streams) = tokio::join!(
+                fetch::std_docs_cached(&state, &pds, &author),
+                fetch::streams_cached(&state, &pds, &author),
+            );
+            (author, docs, streams)
+        }
+    }))
+    .buffer_unordered(fetch::REPO_FAN_OUT);
+
+    let mut yielding: Vec<String> = Vec::new();
+    while let Some((author, docs, streams)) = repos.next().await {
+        if !docs.bricks.is_empty() || !streams.is_empty() {
+            yielding.push(author.did);
+        }
+        snapshot.admit_repo_yield(&docs, &streams).await;
+        snapshot.notify_progress();
+    }
+    yielding
+}
+
 /// Fan out author feeds across the cohort, admitting the bricks that pass
-/// `keep`. The full wall keeps everything; glaze keeps only image posts. Returns
-/// (authors answered, authors that yielded at least one kept brick) so the
-/// caller can warm-start the next cohort with them.
+/// `keep`. The full wall keeps everything; glaze keeps only image posts.
+/// Returns (authors that answered, authors that yielded at least one kept
+/// brick): the first is what `record_fanned` remembers, the second warm-starts
+/// the next cohort. An author whose fetch failed transiently is in neither
+/// list, so a later wave asks them again.
 async fn fan_out_authors(
     state: &Arc<AppState>,
     snapshot: &Arc<Snapshot>,
     cohort: &[Author],
     deep_media: bool,
     keep: impl Fn(&Brick) -> bool,
-) -> (usize, Vec<String>) {
+) -> (Vec<Author>, Vec<String>) {
     let mut feeds = stream::iter(cohort.iter().cloned().map(|author| {
         let state = Arc::clone(state);
         async move {
@@ -169,16 +239,19 @@ async fn fan_out_authors(
     }))
     .buffer_unordered(FAN_OUT);
 
-    let mut answered = 0usize;
+    let mut answered: Vec<Author> = Vec::new();
     let mut yielding: Vec<String> = Vec::new();
     while let Some((author, yield_)) = feeds.next().await {
-        answered += 1;
+        let Some(yield_) = yield_ else {
+            continue; // transient failure: never answered, never fanned
+        };
         // `keep` is a pure filter, so what survives it is known before any
         // admission; the batch is then admitted under one lock hold
         let kept: Vec<&Brick> = yield_.bricks.iter().filter(|b| keep(b)).collect();
         if !kept.is_empty() {
-            yielding.push(author.did);
+            yielding.push(author.did.clone());
         }
+        answered.push(author);
         snapshot.admit_all(kept).await;
         snapshot.notify_progress();
     }

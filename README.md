@@ -43,6 +43,12 @@ threshold (respond once bricks from 12 distinct authors have arrived, or 3 s)
 → keep filling in the background. A ~6 s mix deadline bounds the whole opening
 wait, so a cold wall never waits longer than that for its first screen.
 
+The wall extends itself. When scrolling drains the unlaid pool below two
+pages' worth, mortar fans out to the next 100 authors this wall has never
+asked (an extension wave, with the admission caps raised to make room), so an
+endless scroll quarries the whole follow graph rather than ending at the
+first cohort; the wall only ends when the graph is spent.
+
 Bricks are laid by the **grout score**: within-kind recency decay
 (half-lives: posts 12 h, blogs 3 d, archived streams 14 d; a Bluesky video
 ages like a post) inside a hard age window (posts 72 h, blogs 14 d, archived

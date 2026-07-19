@@ -125,19 +125,39 @@ pub async fn get_follows_cached(
     Ok(head)
 }
 
+/// Whether an author-feed failure is worth asking about again. Network
+/// trouble and server-side errors (the retry loop's leftovers) are transient;
+/// a plain 4xx is the AppView's honest answer (a suspended or deleted repo
+/// yields nothing) and deserves the cache.
+fn transient(error: &HttpError) -> bool {
+    match error {
+        HttpError::Transport(_) | HttpError::RetriesExhausted => true,
+        HttpError::Status(status) => *status == 429 || *status >= 500,
+    }
+}
+
+/// One author's recent posts. `None` is a transient failure with nothing
+/// cached: the author never answered, so the caller must not count them as
+/// fanned out; a later wave (or the next wall) simply asks again. A refusal
+/// caches as an empty yield, exactly like a genuinely quiet author.
 pub async fn author_feed_cached(
     state: &Arc<AppState>,
     author_did: &str,
-) -> Arc<bluesky::AuthorYield> {
+) -> Option<Arc<bluesky::AuthorYield>> {
     if let Some(cached) = state.caches.author_feed.get(&author_did.to_string()).await {
-        return cached;
+        return Some(cached);
     }
     let yield_ =
         match bluesky::get_author_feed(&state.http, &state.config.appview_base, author_did).await {
             Ok(yield_) => Arc::new(yield_),
-            Err(e) => {
-                // a single author failing must never sink the wall
+            // a single author failing must never sink the wall, but a blip
+            // must not be remembered as "this author posts nothing" either
+            Err(e) if transient(&e) => {
                 tracing::debug!("author feed {author_did} failed: {e}");
+                return None;
+            }
+            Err(e) => {
+                tracing::debug!("author feed {author_did} refused: {e}");
                 Arc::new(bluesky::AuthorYield { bricks: Vec::new() })
             }
         };
@@ -146,25 +166,30 @@ pub async fn author_feed_cached(
         .author_feed
         .insert(author_did.to_string(), Arc::clone(&yield_))
         .await;
-    yield_
+    Some(yield_)
 }
 
 /// One author's recent MEDIA posts, read deep for the glaze wall. Same shape as
-/// `author_feed_cached` but a separate endpoint (`posts_with_media`) and a
-/// separate cache, so the image wall's deeper read never displaces the full
-/// wall's shallow one for the same author.
+/// `author_feed_cached` (including `None` for a transient failure) but a
+/// separate endpoint (`posts_with_media`) and a separate cache, so the image
+/// wall's deeper read never displaces the full wall's shallow one for the same
+/// author.
 pub async fn image_feed_cached(
     state: &Arc<AppState>,
     author_did: &str,
-) -> Arc<bluesky::AuthorYield> {
+) -> Option<Arc<bluesky::AuthorYield>> {
     if let Some(cached) = state.caches.image_feed.get(&author_did.to_string()).await {
-        return cached;
+        return Some(cached);
     }
     let yield_ =
         match bluesky::get_image_feed(&state.http, &state.config.appview_base, author_did).await {
             Ok(yield_) => Arc::new(yield_),
-            Err(e) => {
+            Err(e) if transient(&e) => {
                 tracing::debug!("image feed {author_did} failed: {e}");
+                return None;
+            }
+            Err(e) => {
+                tracing::debug!("image feed {author_did} refused: {e}");
                 Arc::new(bluesky::AuthorYield { bricks: Vec::new() })
             }
         };
@@ -173,7 +198,7 @@ pub async fn image_feed_cached(
         .image_feed
         .insert(author_did.to_string(), Arc::clone(&yield_))
         .await;
-    yield_
+    Some(yield_)
 }
 
 /// Who is live on Streamplace, network-wide. Viewer-independent by

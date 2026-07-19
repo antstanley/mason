@@ -22,7 +22,7 @@ use xxhash_rust::xxh3::xxh3_64_with_seed;
 
 use super::{fill, mix, score};
 use crate::mode::Mode;
-use crate::model::Brick;
+use crate::model::{Author, Brick};
 use crate::platform::{self, Instant, SystemTime};
 // everything fetched arrives through the sources seam as bricks; no per-source
 // network or caching code lives in algo/
@@ -72,10 +72,27 @@ const SLOW_FANS: usize = 2;
 /// wall of nothing but posts is not mason, but neither is one that never
 /// arrives, and this bounds the whole opening wait to `MIX_DEADLINE`.
 const MIX_DEADLINE: Duration = Duration::from_secs(6);
+/// When the unlaid pool drops below this (two pages' worth), the initial fill
+/// is done, and the follow graph still holds authors this wall has never
+/// asked, `get_page` starts an extension wave (`fill::extend`): the next
+/// slice of the graph is fanned out so the scroll never hits bottom while
+/// there is still graph to quarry.
+const POOL_LOW_WATER: usize = 48;
+/// A wave that has not reported back after this long is presumed dead: a
+/// panicked or reaped task cannot clear its own claim, and without this a
+/// stuck `extending` would block every future wave for the snapshot's whole
+/// half-hour life. A healthy wave of a hundred authors finishes well inside
+/// this, even through the AppView rate limiter.
+const WAVE_DEAD_AFTER: Duration = Duration::from_secs(60);
 
 pub struct Snapshot {
     pub id: String,
     pub seed: u64,
+    /// Whose wall this is. The id only carries a hash of it; the extension
+    /// waves need the DID itself to fan out again, long after the initial
+    /// fill's arguments are gone.
+    pub viewer: String,
+    pub mode: Mode,
     /// When this snapshot was created, so the first page's mix wait can be
     /// bounded from the moment the fill began rather than restarted when the
     /// page request lands.
@@ -85,7 +102,7 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    fn new(id: String, seed: u64, mode: Mode) -> Self {
+    fn new(id: String, viewer: String, seed: u64, mode: Mode) -> Self {
         // glaze reads a single source (Bluesky posts): there are no rare-kind
         // fans to wait for, so its first page never defers laying for a better
         // mix. The full wall waits for the two slow fans (repos and live).
@@ -96,14 +113,20 @@ impl Snapshot {
         Self {
             id,
             seed,
+            viewer,
+            mode,
             created: Instant::now(),
             inner: Mutex::new(Inner {
                 pool: Vec::new(),
                 wall: Vec::new(),
                 seen: HashSet::new(),
                 kind_counts: [0; mix::KINDS],
+                kind_caps: KIND_CAPS,
                 author_counts: HashMap::new(),
+                fanned: HashSet::new(),
                 warming: true,
+                extending: None,
+                graph_spent: false,
                 slow_fans,
                 max_age_hours,
                 max_per_author,
@@ -172,18 +195,66 @@ impl Snapshot {
         }
         self.progress.notify_waiters();
     }
+
+    /// Remember the authors a fill or wave fanned out to; the next wave asks
+    /// the rest of the graph.
+    pub async fn record_fanned(&self, cohort: &[Author]) {
+        let mut inner = self.inner.lock().await;
+        inner.fanned.extend(cohort.iter().map(|a| a.did.clone()));
+    }
+
+    /// The authors already fanned out to, for computing the next wave.
+    pub async fn fanned(&self) -> HashSet<String> {
+        self.inner.lock().await.fanned.clone()
+    }
+
+    /// Raise the admission caps by one KIND_CAPS increment. Called once per
+    /// wave that found authors to ask: the caps were budgeted for one cohort,
+    /// and a second hundred authors must not be turned away at a door the
+    /// first hundred already filled.
+    pub async fn raise_caps(&self) {
+        let mut inner = self.inner.lock().await;
+        for (cap, base) in inner.kind_caps.iter_mut().zip(KIND_CAPS) {
+            *cap += base;
+        }
+    }
+
+    /// An extension wave is over. `graph_spent` when it found nobody left to
+    /// ask, which is the one way a wall with a finished fill genuinely ends;
+    /// a wave that merely failed leaves it unset so a later page retries.
+    pub async fn finish_extension(&self, graph_spent: bool) {
+        {
+            let mut inner = self.inner.lock().await;
+            inner.extending = None;
+            inner.graph_spent |= graph_spent;
+        }
+        self.progress.notify_waiters();
+    }
 }
 
 struct Inner {
     pool: Vec<Brick>,
     wall: Vec<Brick>,
     seen: HashSet<String>,
-    /// pool+wall population per kind, checked against KIND_CAPS
+    /// pool+wall population per kind, checked against `kind_caps`
     kind_counts: [usize; mix::KINDS],
+    /// Admission caps per kind: KIND_CAPS at birth, raised by one increment
+    /// per extension wave so each new slice of the graph has room to land.
+    kind_caps: [usize; mix::KINDS],
     /// bricks admitted per (author, kind), checked against
     /// MAX_BRICKS_PER_AUTHOR
     author_counts: HashMap<(String, usize), usize>,
+    /// Authors already fanned out to: the initial cohort and every wave
+    /// since. The next wave excludes them, so no author is asked twice.
+    fanned: HashSet<String>,
     warming: bool,
+    /// When the in-flight extension wave was claimed, `None` when none is.
+    /// Waves run single-file; the timestamp is the dead man's switch (see
+    /// `wave_in_flight`).
+    extending: Option<Instant>,
+    /// A wave found nobody left to fan out to: the follow graph is spent and
+    /// the wall can genuinely end.
+    graph_spent: bool,
     /// Fans that supply the rare kinds and have not finished: the repo reads
     /// (every blog, every archived stream) and the live list. Posts arrive
     /// from one fast endpoint and always win the race, so a wall laid the
@@ -209,7 +280,7 @@ impl Inner {
             return;
         }
         let slot = mix::kind_index(brick);
-        if self.kind_counts[slot] >= KIND_CAPS[slot] {
+        if self.kind_counts[slot] >= self.kind_caps[slot] {
             return;
         }
         let author = score::author_key(brick).to_string();
@@ -222,6 +293,21 @@ impl Inner {
             self.kind_counts[slot] += 1;
             self.pool.push(brick.clone());
         }
+    }
+
+    /// Whether an extension wave is genuinely in flight. A claim older than
+    /// `WAVE_DEAD_AFTER` is a dead task's: treated as no wave, so the next
+    /// page may claim a fresh one instead of waiting on a ghost forever.
+    fn wave_in_flight(&self) -> bool {
+        self.extending
+            .is_some_and(|since| since.elapsed() < WAVE_DEAD_AFTER)
+    }
+
+    /// Whether more bricks can still arrive or be laid: some are pooled, the
+    /// fill is running, a wave is in flight, or the graph has authors left to
+    /// ask. Only a spent graph with an empty pool ends the wall.
+    fn has_more(&self) -> bool {
+        !self.pool.is_empty() || self.warming || self.wave_in_flight() || !self.graph_spent
     }
 
     /// Distinct authors currently represented in the pool and on the wall.
@@ -268,16 +354,15 @@ pub async fn ensure_snapshot(
         .caches
         .snapshots
         .get_or_insert_with(id.clone(), || {
-            Arc::new(Snapshot::new(id.clone(), seed, mode))
+            Arc::new(Snapshot::new(id.clone(), did.to_string(), seed, mode))
         })
         .await;
 
     if inserted {
         let fill_state = Arc::clone(state);
         let fill_snapshot = Arc::clone(&snapshot);
-        let viewer = did.to_string();
         platform::spawn(async move {
-            fill::fill(fill_state, fill_snapshot, viewer, seed, mode).await;
+            fill::fill(fill_state, fill_snapshot).await;
         });
     }
 
@@ -378,10 +463,11 @@ async fn drop_ended_streams(state: &Arc<AppState>, snapshot: &Snapshot) {
 }
 
 /// Serve one page, laying new bricks from the pool as needed. Waits briefly
-/// while warming if the wall is still too short.
+/// while warming if the wall is still too short, and starts an extension wave
+/// when scrolling has nearly drained the pool with follow graph still unasked.
 pub async fn get_page(
     state: &Arc<AppState>,
-    snapshot: &Snapshot,
+    snapshot: &Arc<Snapshot>,
     offset: usize,
     size: usize,
     wait_for_mix: bool,
@@ -398,8 +484,15 @@ pub async fn get_page(
     // anchored to snapshot creation, so the first-paint wait already spent in
     // get_or_build counts against this budget rather than stacking on top of it
     let mix_deadline = snapshot.created + MIX_DEADLINE;
+    // At most one wave per page request. The `extending` flag already keeps
+    // waves single-file across requests; this keeps ONE request from spinning
+    // up wave after wave inside its own wait loop when the graph is yielding
+    // nothing fresh. Scroll retries are the pacing.
+    let mut wave_started = false;
     loop {
         let awaiting_mix;
+        let mut start_wave = false;
+        let mut page = None;
         // registered before the state check, same as get_or_build: a brick
         // admitted between the lock release and the await must still wake
         // this page, or it serves short after a full deadline of nothing
@@ -408,6 +501,20 @@ pub async fn get_page(
         {
             let mut guard = snapshot.inner.lock().await;
             let inner = &mut *guard;
+
+            // The wall extends itself: the fill is done, the pool has run low,
+            // and the follow graph still has authors this wall has never
+            // asked. Claimed under the lock, spawned below outside it.
+            if !wave_started
+                && !inner.warming
+                && !inner.wave_in_flight()
+                && !inner.graph_spent
+                && inner.pool.len() < POOL_LOW_WATER
+            {
+                inner.extending = Some(Instant::now());
+                wave_started = true;
+                start_wave = true;
+            }
 
             // Bricks are laid once and never move, so laying is the moment the
             // pool's composition becomes the wall's composition. Posts arrive
@@ -441,18 +548,38 @@ pub async fn get_page(
                         Utc::now(),
                     );
                 }
-                let exhausted = !inner.warming && inner.pool.is_empty();
-                if inner.wall.len() >= wanted || exhausted {
+                // a wall is only spent when nothing more can arrive: the fill
+                // is over, no wave is in flight, and the graph has nobody left
+                let exhausted = !inner.warming
+                    && inner.pool.is_empty()
+                    && !inner.wave_in_flight()
+                    && inner.graph_spent;
+                // this request's one wave has already come and gone, and the
+                // pool is dry regardless: whatever is laid is what this page
+                // gets. Serving short at once beats making the reader wait
+                // out the deadline for bricks that are not coming; the cursor
+                // stays alive, and the next request runs the next wave.
+                let wave_spent = wave_started && !inner.wave_in_flight() && inner.pool.is_empty();
+                if inner.wall.len() >= wanted || exhausted || wave_spent {
                     let end = wanted.min(inner.wall.len());
                     let items = inner
                         .wall
                         .get(offset.min(end)..end)
                         .map(<[Brick]>::to_vec)
                         .unwrap_or_default();
-                    let has_more = !inner.pool.is_empty() || inner.warming;
-                    return (items, has_more);
+                    page = Some((items, inner.has_more()));
                 }
             }
+        }
+        if start_wave {
+            let wave_state = Arc::clone(state);
+            let wave_snapshot = Arc::clone(snapshot);
+            platform::spawn(async move {
+                fill::extend(wave_state, wave_snapshot).await;
+            });
+        }
+        if let Some(page) = page {
+            return page;
         }
         // wake on the next brick, or on whichever deadline is next: the mix
         // deadline only defers laying, the hard one ends the page
@@ -482,7 +609,7 @@ pub async fn get_page(
                 .get(offset.min(end)..end)
                 .map(<[Brick]>::to_vec)
                 .unwrap_or_default();
-            return (items, inner.warming || !inner.pool.is_empty());
+            return (items, inner.has_more());
         }
         let _ = platform::timeout(remaining, notified).await;
     }
@@ -542,12 +669,20 @@ mod tests {
             wall: Vec::new(),
             seen: HashSet::new(),
             kind_counts: [0; mix::KINDS],
+            kind_caps: KIND_CAPS,
             author_counts: HashMap::new(),
+            fanned: HashSet::new(),
             warming: true,
+            extending: None,
+            graph_spent: false,
             slow_fans: SLOW_FANS,
             max_age_hours: None,
             max_per_author: MAX_BRICKS_PER_AUTHOR,
         }
+    }
+
+    fn test_snapshot(id: &str, seed: u64, mode: Mode) -> Snapshot {
+        Snapshot::new(id.into(), "did:plc:viewer".into(), seed, mode)
     }
 
     /// The root cause of the one-author wall: nothing stopped a chatty account
@@ -622,8 +757,8 @@ mod tests {
     /// two rare-kind fans.
     #[tokio::test]
     async fn glaze_waits_for_no_slow_fans() {
-        let wall = Snapshot::new("w".into(), 1, Mode::Wall);
-        let glaze = Snapshot::new("g".into(), 1, Mode::Glaze);
+        let wall = test_snapshot("w", 1, Mode::Wall);
+        let glaze = test_snapshot("g", 1, Mode::Glaze);
         assert_eq!(wall.inner.lock().await.slow_fans, SLOW_FANS);
         assert_eq!(glaze.inner.lock().await.slow_fans, 0);
     }
@@ -634,7 +769,7 @@ mod tests {
     /// full wall's four.
     #[tokio::test]
     async fn glaze_reaches_further_back_and_lets_authors_bring_more() {
-        let glaze = Snapshot::new("g".into(), 1, Mode::Glaze);
+        let glaze = test_snapshot("g", 1, Mode::Glaze);
         let mut inner = glaze.inner.lock().await;
         let now = Utc::now();
 
@@ -653,6 +788,123 @@ mod tests {
             GLAZE_MAX_BRICKS_PER_AUTHOR,
             "one author fills up to the glaze cap, not the full wall's four"
         );
+    }
+
+    /// The kind caps were budgeted for one cohort. A wave brings a fresh
+    /// hundred authors, and without raising the caps their bricks would be
+    /// turned away at a door the first cohort already filled.
+    #[tokio::test]
+    async fn raised_caps_let_a_wave_through_a_full_door() {
+        let snapshot = test_snapshot("s", 1, Mode::Wall);
+        let now = Utc::now();
+        {
+            let mut inner = snapshot.inner.lock().await;
+            // fill the blog slot to its cap: 15 authors bring 4 blogs each
+            let mut id = 0;
+            for author in 0..15 {
+                for _ in 0..4 {
+                    inner.admit(&blog(id, author), now);
+                    id += 1;
+                }
+            }
+            assert_eq!(inner.pool.len(), 60, "the blog cap is full");
+            inner.admit(&blog(999, 99), now);
+            assert_eq!(inner.pool.len(), 60, "a full door turns the blog away");
+        }
+
+        snapshot.raise_caps().await;
+        let mut inner = snapshot.inner.lock().await;
+        inner.admit(&blog(999, 99), now);
+        assert_eq!(
+            inner.pool.len(),
+            61,
+            "after the raise, the wave's blog lands"
+        );
+    }
+
+    /// A wave claim is a dead man's switch, not a latch: a task that panicked
+    /// or was reaped cannot clear its own flag, so a claim older than the
+    /// deadline counts as no wave at all and the next page may start a fresh
+    /// one instead of waiting on a ghost for the snapshot's whole life.
+    #[test]
+    fn a_dead_wave_is_presumed_lost_so_a_new_one_may_start() {
+        let mut i = inner();
+        i.extending = Some(Instant::now());
+        assert!(i.wave_in_flight(), "a fresh claim is a live wave");
+
+        if let Some(stale) = Instant::now().checked_sub(WAVE_DEAD_AFTER + Duration::from_secs(1)) {
+            i.extending = Some(stale);
+            assert!(
+                !i.wave_in_flight(),
+                "a wave silent past the deadline is dead, not in flight"
+            );
+        }
+    }
+
+    /// A wave that comes back empty-handed must not cost the reader the full
+    /// page deadline: once this request's wave has run and the pool is still
+    /// dry, the page serves short at once, keeps the cursor alive, and the
+    /// NEXT request runs the next wave (which here finds the graph spent and
+    /// ends the wall honestly).
+    #[tokio::test]
+    async fn an_empty_handed_wave_serves_short_at_once() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.graph.getFollows"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "follows": [{"did": "did:plc:quiet", "handle": "quiet.test"}]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "feed": [] })),
+            )
+            .mount(&server)
+            .await;
+
+        let state = Arc::new(AppState::new(crate::config::Config {
+            appview_base: server.uri(),
+            plc_base: server.uri(),
+            streamplace_base: server.uri(),
+        }));
+        let snapshot = Arc::new(test_snapshot("s", 1, Mode::Wall));
+        snapshot.finish_warming().await;
+
+        let began = Instant::now();
+        let (items, has_more) = get_page(&state, &snapshot, 0, 24, false).await;
+        assert!(items.is_empty(), "the quiet author yielded nothing to lay");
+        assert!(has_more, "one quiet author does not spend the graph");
+        assert!(
+            began.elapsed() < Duration::from_secs(4),
+            "an empty-handed wave made the reader wait {:?} instead of serving short",
+            began.elapsed()
+        );
+
+        let (items, has_more) = get_page(&state, &snapshot, 0, 24, false).await;
+        assert!(items.is_empty());
+        assert!(!has_more, "the next request's wave finds the graph spent");
+    }
+
+    /// The wall only ends when nothing more can arrive: pool empty, fill
+    /// over, no wave in flight, and a wave has confirmed the graph is spent.
+    /// Anything less keeps the cursor alive so the scroll can keep asking.
+    #[test]
+    fn only_a_spent_graph_with_an_empty_pool_ends_the_wall() {
+        let mut i = inner();
+        i.warming = false;
+        assert!(
+            i.has_more(),
+            "an unasked graph keeps the wall alive even with an empty pool"
+        );
+        i.graph_spent = true;
+        assert!(!i.has_more(), "spent graph, empty pool: the wall ends");
+        i.pool.push(post(1, 0, 1));
+        assert!(i.has_more(), "pooled bricks always mean more");
     }
 
     /// The mode is folded into the snapshot id, so a glaze wall and a full wall
@@ -704,7 +956,7 @@ mod tests {
     #[tokio::test]
     async fn a_later_page_never_waits_for_the_mix() {
         let state = Arc::new(AppState::new(crate::config::Config::default()));
-        let snapshot = Snapshot::new("s".into(), 1, Mode::Wall);
+        let snapshot = Arc::new(test_snapshot("s", 1, Mode::Wall));
         {
             let mut inner = snapshot.inner.lock().await;
             let now = Utc::now();
@@ -732,7 +984,7 @@ mod tests {
     /// spent, so the freeze that follows still has every brick to lay.
     #[tokio::test]
     async fn a_preview_lays_without_spending_the_pool() {
-        let snapshot = Snapshot::new("s".into(), 1, Mode::Wall);
+        let snapshot = test_snapshot("s", 1, Mode::Wall);
         {
             let mut inner = snapshot.inner.lock().await;
             let now = Utc::now();
@@ -761,7 +1013,7 @@ mod tests {
     /// the screen by the mixer's need factor, so the arrangement moves.
     #[tokio::test]
     async fn a_preview_reflows_when_a_brick_arrives() {
-        let snapshot = Snapshot::new("s".into(), 3, Mode::Wall);
+        let snapshot = test_snapshot("s", 3, Mode::Wall);
         {
             let mut inner = snapshot.inner.lock().await;
             let now = Utc::now();
@@ -794,7 +1046,7 @@ mod tests {
     #[tokio::test]
     async fn a_freeze_commits_the_first_page_without_waiting() {
         let state = Arc::new(AppState::new(crate::config::Config::default()));
-        let snapshot = Snapshot::new("s".into(), 1, Mode::Wall);
+        let snapshot = Arc::new(test_snapshot("s", 1, Mode::Wall));
         {
             let mut inner = snapshot.inner.lock().await;
             let now = Utc::now();
@@ -842,7 +1094,7 @@ mod tests {
             streamplace_base: server.uri(),
             ..Default::default()
         }));
-        let snapshot = Snapshot::new("s".into(), 1, Mode::Wall);
+        let snapshot = test_snapshot("s", 1, Mode::Wall);
         let now = Utc::now();
         {
             let mut inner = snapshot.inner.lock().await;

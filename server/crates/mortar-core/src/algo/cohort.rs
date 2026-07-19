@@ -79,6 +79,22 @@ pub async fn sample_cohort(
     cohort
 }
 
+/// The next wave of authors to fan out to, once scrolling has drained what
+/// the earlier waves yielded: the follow graph minus everyone already fanned
+/// out, seeded-shuffled, capped at COHORT_SIZE. Deterministic given the same
+/// follows and fanned set, so a snapshot rebuilt from its cursor walks its
+/// waves in the same order. Empty means the graph is spent.
+pub fn next_wave(follows: &[Follow], seed: u64, fanned: &HashSet<String>) -> Vec<Author> {
+    let mut rest: Vec<&Follow> = follows
+        .iter()
+        .filter(|f| !f.hidden() && !fanned.contains(f.did.as_str()))
+        .collect();
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    rest.shuffle(&mut rng);
+    rest.truncate(COHORT_SIZE);
+    rest.into_iter().map(Author::from).collect()
+}
+
 pub async fn record_activity(state: &Arc<AppState>, activity_key: &str, mut yielding: Vec<String>) {
     if yielding.is_empty() {
         return;
@@ -139,6 +155,56 @@ mod tests {
             vec!["did:plc:open"],
             "the opted-out author must be sampled out"
         );
+    }
+
+    /// A wave is the graph minus everyone already asked: it never repeats an
+    /// author, it is stable for a seed (a rebuilt snapshot walks the same
+    /// waves), and once the graph is spent it comes back empty, which is how
+    /// the wall learns it can genuinely end.
+    #[test]
+    fn waves_walk_the_graph_without_repeats_and_then_end() {
+        let follows: Vec<Follow> = (0..250).map(|n| follow(&format!("did:plc:f{n}"))).collect();
+        let mut fanned: HashSet<String> = HashSet::new();
+
+        let first = next_wave(&follows, 7, &fanned);
+        assert_eq!(first.len(), COHORT_SIZE);
+        assert_eq!(
+            next_wave(&follows, 7, &fanned)
+                .iter()
+                .map(|a| a.did.as_str())
+                .collect::<Vec<_>>(),
+            first.iter().map(|a| a.did.as_str()).collect::<Vec<_>>(),
+            "the same seed and fanned set must give the same wave"
+        );
+
+        fanned.extend(first.iter().map(|a| a.did.clone()));
+        let second = next_wave(&follows, 7, &fanned);
+        assert_eq!(second.len(), COHORT_SIZE);
+        assert!(
+            second.iter().all(|a| !fanned.contains(&a.did)),
+            "a wave must never repeat an author already fanned out to"
+        );
+
+        fanned.extend(second.iter().map(|a| a.did.clone()));
+        let third = next_wave(&follows, 7, &fanned);
+        assert_eq!(third.len(), 50, "the remainder of a 250-follow graph");
+
+        fanned.extend(third.iter().map(|a| a.did.clone()));
+        assert!(
+            next_wave(&follows, 7, &fanned).is_empty(),
+            "a spent graph must come back empty"
+        );
+    }
+
+    /// Hidden follows are excluded from waves exactly as from the first
+    /// cohort: the wave is a fan-out list, and fanning out to an opted-out
+    /// account would fetch content the wall must never lay.
+    #[test]
+    fn a_wave_excludes_hidden_follows() {
+        let follows = vec![follow("did:plc:open"), opted_out_follow("did:plc:sealed")];
+        let wave = next_wave(&follows, 1, &HashSet::new());
+        let dids: Vec<&str> = wave.iter().map(|a| a.did.as_str()).collect();
+        assert_eq!(dids, vec!["did:plc:open"]);
     }
 
     /// An account labelled adult is kept off a logged-out wall whole, the same
