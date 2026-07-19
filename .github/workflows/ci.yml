@@ -47,6 +47,9 @@ jobs:
       - name: Install web deps
         run: cd web && pnpm install --frozen-lockfile
 
+      - name: Assert Cargo.lock is fresh
+        run: cd server && cargo metadata --locked --format-version 1 > /dev/null
+
       - name: Test (nextest + tsc)
         run: just test
 

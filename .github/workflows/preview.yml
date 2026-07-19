@@ -49,6 +49,11 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
+      # fail fast if Cargo.lock is stale rather than let the build silently
+      # repair it and ship an unpinned dependency graph
+      - name: Assert Cargo.lock is fresh
+        run: cd server && cargo metadata --locked --format-version 1 > /dev/null
+
       # heavy toolchain work happens here, not in the builder MicroVM -
       # the pkg rides into the deploy zip via config sourceInclude
       - name: Build wasm feed engine
