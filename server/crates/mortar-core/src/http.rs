@@ -23,6 +23,11 @@ pub struct Http {
     /// Public AppView limits are undocumented; sustain ~10 rps with a burst
     /// deep enough that one cold snapshot fan-out clears quickly.
     appview_bucket: RateLimiter<NotKeyed, InMemoryState, DefaultClock>,
+    /// A clock parallel to the bucket's own, read only on wasm to size the
+    /// throttle sleep. governor's private clock is not reachable, but a fresh
+    /// DefaultClock scales from the same reference, so its `now` is comparable.
+    #[cfg(target_arch = "wasm32")]
+    clock: DefaultClock,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -71,6 +76,34 @@ impl Http {
                 Quota::per_second(NonZeroU32::new(10).expect("nonzero"))
                     .allow_burst(NonZeroU32::new(100).expect("nonzero")),
             ),
+            #[cfg(target_arch = "wasm32")]
+            clock: DefaultClock::default(),
+        }
+    }
+
+    /// Wait for the AppView bucket to hand out a slot.
+    ///
+    /// On native this is governor's own `until_ready`. On wasm it is a hand
+    /// rolled version of the same check-then-wait loop: governor's async wait
+    /// builds a futures-timer Delay that reaches for std::time::Instant and
+    /// std::thread, both of which trap on wasm32-unknown-unknown, so the sleep
+    /// goes through the gloo-timers seam (crate::platform::sleep) instead. The
+    /// gate is still `check()`, so a burst is never let through un-throttled.
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn await_appview_slot(&self) {
+        self.appview_bucket.until_ready().await;
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn await_appview_slot(&self) {
+        use governor::clock::Clock;
+        loop {
+            match self.appview_bucket.check() {
+                Ok(()) => return,
+                Err(not_until) => {
+                    crate::platform::sleep(not_until.wait_time_from(self.clock.now())).await;
+                }
+            }
         }
     }
 
@@ -81,7 +114,7 @@ impl Http {
     ) -> Result<T, HttpError> {
         for attempt in 0u32..3 {
             if matches!(bucket, Bucket::Appview) {
-                self.appview_bucket.until_ready().await;
+                self.await_appview_slot().await;
             }
             let response = match self.send(url).await {
                 Ok(r) => r,
