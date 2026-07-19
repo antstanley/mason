@@ -19,10 +19,13 @@ async fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(8787);
+    // Upstream defaults live in one place, Config::default(); the server only
+    // layers env overrides on top of them.
+    let d = Config::default();
     let config = Config {
-        appview_base: env_or("APPVIEW_BASE", "https://public.api.bsky.app"),
-        plc_base: env_or("PLC_BASE", "https://plc.directory"),
-        streamplace_base: env_or("STREAMPLACE_BASE", "https://stream.place"),
+        appview_base: env_or("APPVIEW_BASE", &d.appview_base),
+        plc_base: env_or("PLC_BASE", &d.plc_base),
+        streamplace_base: env_or("STREAMPLACE_BASE", &d.streamplace_base),
     };
     let state = Arc::new(AppState::new(config));
     let app = routes::router(state);
