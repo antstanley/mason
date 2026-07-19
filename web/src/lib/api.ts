@@ -13,17 +13,18 @@ export const localMode = BASE === "";
  *  Fetching in that gap goes to the network and 404s on a static host. */
 async function swControlsPage(): Promise<void> {
   if (navigator.serviceWorker.controller) return;
-  await navigator.serviceWorker.ready;
+  const controlled = new Promise<void>((resolve) =>
+    navigator.serviceWorker.addEventListener("controllerchange", () => resolve(), {
+      once: true,
+    }),
+  );
+  // hard-reloaded pages stay uncontrolled by design; don't hang forever. A
+  // rejected register() also leaves `ready` pending forever, so it must race the
+  // timeout too, or every feed request would await it eternally.
+  const timeout = new Promise<void>((resolve) => setTimeout(resolve, 2000));
+  await Promise.race([navigator.serviceWorker.ready, timeout]);
   if (navigator.serviceWorker.controller) return;
-  await Promise.race([
-    new Promise<void>((resolve) =>
-      navigator.serviceWorker.addEventListener("controllerchange", () => resolve(), {
-        once: true,
-      }),
-    ),
-    // hard-reloaded pages stay uncontrolled by design; don't hang forever
-    new Promise<void>((resolve) => setTimeout(resolve, 2000)),
-  ]);
+  await Promise.race([controlled, timeout]);
 }
 
 /** A feed request's role in the warm-then-commit first screen. "preview" lays a
