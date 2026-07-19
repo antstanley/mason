@@ -34,6 +34,11 @@ build: wasm
 test:
     cd server && cargo nextest run
     cd web && pnpm check:ci
+    cd web && pnpm test
+
+# service-worker smoke: the static build driven end to end in chromium
+test-e2e: build
+    cd web && pnpm test:e2e
 
 # run the wasm-only Rust paths (transport, timers, throttle) for real in a
 # headless browser; wasm-pack fetches a matching chromedriver if none is found
