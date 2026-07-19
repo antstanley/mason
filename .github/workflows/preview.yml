@@ -20,9 +20,14 @@ env:
 
 jobs:
   deploy:
-    # skip on fork PRs: they lack the OIDC id-token and preview secrets, so the
-    # deploy can only fail. fork PRs are covered by the secretless ci.yml.
-    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    # skip on fork PRs and dependabot PRs: both run without the OIDC id-token and
+    # preview secrets, so the deploy can only fail (the account id resolves empty
+    # and AssumeRole gets an invalid ARN). both are covered by the secretless
+    # ci.yml instead.
+    if: >-
+      github.event.action != 'closed'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     environment: preview # holds AWS_ACCOUNT_ID + PREVIEW_DOMAIN secrets
     steps:
@@ -98,7 +103,12 @@ jobs:
             }
 
   destroy:
-    if: github.event.action == 'closed'
+    # match the deploy job's gating: nothing was deployed for fork or dependabot
+    # PRs, so there is nothing to tear down (and the teardown lacks secrets too).
+    if: >-
+      github.event.action == 'closed'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     environment: preview
     steps:
