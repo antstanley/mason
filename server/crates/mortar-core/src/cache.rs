@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tokio::sync::Mutex;
@@ -21,6 +22,11 @@ pub struct TtlCache<K, V> {
     entries: Mutex<HashMap<K, Entry<V>>>,
     default_ttl: Duration,
     max_capacity: usize,
+    /// Set on every insert, cleared when the cache is exported for
+    /// persistence; lets the persist layer skip caches that haven't changed.
+    /// Imports do NOT set it: what was just read back from disk is, by
+    /// definition, already persisted.
+    dirty: AtomicBool,
 }
 
 struct Entry<V> {
@@ -34,7 +40,22 @@ impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
             entries: Mutex::new(HashMap::new()),
             default_ttl,
             max_capacity,
+            dirty: AtomicBool::new(false),
         }
+    }
+
+    /// Has this cache been written to since the last `take_dirty`? Expiry and
+    /// eviction don't count: export filters expired entries anyway, and a
+    /// persisted copy of an evicted entry is just a cache warmer.
+    pub fn is_dirty(&self) -> bool {
+        self.dirty.load(Ordering::Relaxed)
+    }
+
+    /// Clear the dirty flag, returning whether it was set. Call immediately
+    /// before exporting: an insert racing the export re-sets the flag, so the
+    /// next persist cycle picks it up.
+    pub fn take_dirty(&self) -> bool {
+        self.dirty.swap(false, Ordering::Relaxed)
     }
 
     pub async fn get(&self, key: &K) -> Option<V> {
@@ -71,6 +92,7 @@ impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
                 expires_at: Instant::now() + self.default_ttl,
             },
         );
+        self.dirty.store(true, Ordering::Relaxed);
         (value, true)
     }
 
@@ -127,13 +149,22 @@ impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
             .collect()
     }
 
-    /// Restore exported entries, dropping anything already expired.
-    pub async fn import_map<T>(&self, entries: Vec<(K, T, u64)>, wrap: impl Fn(T) -> V) {
+    /// Restore exported entries, dropping anything already expired. Does not
+    /// mark the cache dirty: what was just imported is already persisted.
+    pub async fn import_map<T>(&self, imported: Vec<(K, T, u64)>, wrap: impl Fn(T) -> V) {
         let now_unix = crate::platform::unix_now_ms();
-        for (key, value, expires_unix) in entries {
+        let mut entries = self.entries.lock().await;
+        for (key, value, expires_unix) in imported {
             if expires_unix > now_unix {
                 let ttl = Duration::from_millis(expires_unix - now_unix);
-                self.insert_with_ttl(key, wrap(value), ttl).await;
+                self.trim(&mut entries);
+                entries.insert(
+                    key,
+                    Entry {
+                        value: wrap(value),
+                        expires_at: Instant::now() + ttl,
+                    },
+                );
             }
         }
     }
@@ -148,6 +179,7 @@ impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
                 expires_at: Instant::now() + ttl,
             },
         );
+        self.dirty.store(true, Ordering::Relaxed);
     }
 }
 

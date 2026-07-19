@@ -32,23 +32,42 @@ fn state() -> Arc<AppState> {
     })
 }
 
-/// Snapshot of the warm caches as JSON; the service worker stores this in
-/// IndexedDB after serving a page, so a reaped SW instance wakes up warm.
+/// Every persistable cache name; the service worker iterates this on startup
+/// to import whatever survived in IndexedDB.
 #[wasm_bindgen]
-pub async fn export_caches() -> Result<String, JsValue> {
-    let state = state();
-    let bundle = mortar_core::persist::export(&state.caches).await;
-    serde_json::to_string(&bundle).map_err(|e| JsValue::from_str(&e.to_string()))
+pub fn cache_names() -> Vec<String> {
+    mortar_core::persist::CACHE_NAMES
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect()
 }
 
-/// Restore a previously exported bundle. Anything unparseable or stale is
+/// Names of the caches written to since their last export; the service worker
+/// persists exactly these, so a page that only warmed one cache only pays for
+/// one.
+#[wasm_bindgen]
+pub fn dirty_cache_names() -> Vec<String> {
+    let state = state();
+    mortar_core::persist::dirty_cache_names(&state.caches)
+        .iter()
+        .map(|name| (*name).to_string())
+        .collect()
+}
+
+/// One cache as JSON, dirty flag cleared; the service worker stores it under
+/// a per-cache IndexedDB key, so a reaped SW instance wakes up warm.
+#[wasm_bindgen]
+pub async fn export_cache(name: String) -> Option<String> {
+    let state = state();
+    mortar_core::persist::export_cache(&state.caches, &name).await
+}
+
+/// Restore one previously exported cache. Anything unparseable or stale is
 /// silently discarded; it's only a cache.
 #[wasm_bindgen]
-pub async fn import_caches(json: String) {
-    if let Ok(bundle) = serde_json::from_str(&json) {
-        let state = state();
-        mortar_core::persist::import(&state.caches, bundle).await;
-    }
+pub async fn import_cache(name: String, json: String) {
+    let state = state();
+    mortar_core::persist::import_cache(&state.caches, &name, &json).await;
 }
 
 /// Serialize an ErrorEnvelope into the JsValue this module throws. Everything
