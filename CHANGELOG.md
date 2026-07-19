@@ -1,5 +1,99 @@
 # mason
 
+## 0.6.3
+
+### Patch Changes
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - the glaze alt-text overlay now works with a keyboard alone: opening it moves
+  focus onto the close control, escape or the close button hands focus back to
+  the alt trigger, the trigger reports its state with aria-expanded and
+  aria-controls, and the covered picture and its paging controls go inert so tab
+  and pointer stay on the panel.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - the glaze filmstrip is friendlier to keyboard and screen-reader users:
+  tabbing to the prev/next arrows reveals them instead of moving focus onto
+  invisible buttons, and a polite live region announces "image n of m" as the
+  strip pages.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - keyboard users on the glaze wall now see a brick's caption, author, and alt
+  button: focusing into a card reveals them the same way hovering does, and the
+  concealed alt button leaves the tab order until the card is revealed, so focus
+  no longer lands on an invisible control.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - fix: switching between bento and masonry no longer throws away your loaded wall.
+  Only picking (or leaving) glaze re-fetches, since glaze is a different feed; the
+  two grid-only layouts now just relay the same bricks instead of wiping the wall
+  and refetching from the top.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - darken the glaze brick's floating controls so their text clears the 4.5:1
+  contrast bar over any image: the paging arrows, the image counter, and the
+  touch reveal button sit on a heavier ink scrim, and the caption bar is now
+  near-opaque like the alt panel.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - fix: a valid handle no longer gets told it does not exist. mason now only shows
+  the handle-not-found message when the feed engine actually reports the actor is
+  missing, rather than on any 404. In local mode a request that slips past the
+  service worker onto the static host used to 404 and wrongly accuse a real
+  handle; that case now reads as a plain feed-unavailable hiccup.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - tidy the wall's headings for screen readers: a failed wall now shows exactly one
+  h1 (the failure itself, with the sr-only wall title stepping aside) instead of
+  two, and every brick, not just blogs, carries a consistent accessible name on
+  its article rather than a lone heading on some cards.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - brick links are scrubbed before they reach the wall: a blog or stream record
+  that smuggles a `javascript:`, `data:`, or other non-http(s) url in its link
+  field now lands without a link at all instead of arming the card, and the client
+  picker refuses to rewrite anything but a real http(s) address.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - fix: the wall no longer hangs on an endless skeleton when the service worker
+  fails to register. Waiting for the worker to be ready is now bounded by the same
+  short timeout as everything else, so a registration that never settles falls
+  through to a normal request instead of leaving you staring at a loading wall
+  forever.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - the switch-wall button's aria-label dropped its em dash for a comma, so screen
+  readers announce "switch wall, currently viewing @handle" instead of reading the
+  dash aloud.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - the switch-wall panel is now a proper modal: it marks itself aria-modal and
+  closes when focus tabs out of it, so keyboard users no longer walk into the
+  dimmed wall behind the open switcher.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - server mode now checks where a PDS pointer actually leads before it knocks: a
+  DID document can no longer steer mortar at loopback, private, link-local, or
+  cloud-metadata addresses, and only https endpoints are followed. hostile bricks
+  stay outside the wall.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - fix: scrolling a playing clip off the wall before it finishes loading no longer
+  leaves a phantom playing in the background. If a video card is torn down while
+  the player library is still loading, the player now bows out instead of building
+  itself on a detached brick and quietly fetching segments (and audio) with nothing
+  left to stop it.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - the wall now narrates itself to screen readers: a single polite live region
+  reports laying bricks, how many fresh bricks landed, when more bricks did not
+  arrive, and when that is every brick, the pagination-failure tail is a status
+  region, and the wall is marked aria-busy while the first screen loads.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - fix: going back to a wall you already scrolled now returns it exactly as you left
+  it. mason keeps each wall you visit for the length of the session, so browser
+  back/forward rehydrates the same bricks in the same order (and your scroll lands
+  where it should) instead of rolling a fresh arrangement that dropped you back at
+  a single screen.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - fix: switching walls mid-load no longer bleeds the old wall into the new one.
+  When you jump to a different wall while the first one is still fetching, a late
+  response from the old wall could shove its bricks into the new wall, overwrite
+  the cursor, or wrongly mark pagination finished (a wall stuck at one screen).
+  Both the load-more and freeze steps now bail out when the wall has moved on, and
+  resetting a wall clears the loading flag so the fresh wall starts clean.
+
+- [#27](https://github.com/antstanley/mason/pull/27) [`856271e`](https://github.com/antstanley/mason/commit/856271ee572594122dae19c3cb4e450d7d7cde76) Thanks [@antstanley](https://github.com/antstanley)! - the warming reflow now stops for everyone: navigation keys and focus landing on
+  the wall freeze it just like a scroll or a swipe does, and a reader who asks for
+  reduced motion never sees the auto-reflow at all because the wall freezes before
+  it starts moving.
+
 ## 0.6.2
 
 ### Patch Changes
