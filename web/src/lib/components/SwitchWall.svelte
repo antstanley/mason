@@ -81,7 +81,7 @@
 		onclick={() => (open ? closePanel(false) : openPanel())}
 		aria-haspopup="dialog"
 		aria-expanded={open}
-		aria-label="Switch wall — currently viewing @{actor}"
+		aria-label="Switch wall, currently viewing @{actor}"
 		title="Switch wall"
 		class="inline-flex min-h-9 min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded-full bg-[oklch(0.51_0.16_350)] p-0.5 font-semibold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95 sm:gap-2 sm:pr-4"
 	>
