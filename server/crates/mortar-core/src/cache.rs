@@ -92,15 +92,23 @@ impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
         }
         let now = Instant::now();
         entries.retain(|_, e| e.expires_at > now);
-        // still over: drop soonest-to-expire entries
-        while entries.len() >= self.max_capacity {
-            let Some(key) = entries
-                .iter()
-                .min_by_key(|(_, e)| e.expires_at)
-                .map(|(k, _)| k.clone())
-            else {
-                break;
-            };
+        if entries.len() < self.max_capacity {
+            return;
+        }
+        // Still over the ceiling with everything live: evict the soonest-to-
+        // expire entries in one batch. Removing a single min per insert costs
+        // an O(n) scan on every insert once a 20k cache is full; dropping a
+        // slice (~10%) amortizes that over the inserts that follow.
+        let batch = (self.max_capacity / 10).max(1);
+        let target = self.max_capacity.saturating_sub(batch);
+        let drop_count = entries.len() - target;
+        let mut by_expiry: Vec<(Instant, K)> = entries
+            .iter()
+            .map(|(k, e)| (e.expires_at, k.clone()))
+            .collect();
+        // soonest-to-expire first
+        by_expiry.sort_by_key(|(expires_at, _)| *expires_at);
+        for (_, key) in by_expiry.into_iter().take(drop_count) {
             entries.remove(&key);
         }
     }
