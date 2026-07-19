@@ -9,7 +9,13 @@
 // cursor's embedded seed covers correctness either way.)
 
 import { build, files, version } from "$service-worker";
-import init, { export_caches, feed_page, import_caches } from "$lib/mortar-wasm/pkg/mortar_wasm";
+import init, {
+  cache_names,
+  dirty_cache_names,
+  export_cache,
+  feed_page,
+  import_cache,
+} from "$lib/mortar-wasm/pkg/mortar_wasm";
 import wasmUrl from "$lib/mortar-wasm/pkg/mortar_wasm_bg.wasm?url";
 import type { ErrorEnvelope, MortarErrorCode } from "$lib/types";
 
@@ -28,11 +34,16 @@ const SHELL = `mason-shell-${version}`;
 // this worker keeps serving the copy it cached here until it is itself replaced.
 const PRECACHE = ["/", ...build, ...files, wasmUrl];
 
-// --- IndexedDB: one store, one key -----------------------------------------
+// --- IndexedDB: one store, one key per cache --------------------------------
 
 const IDB_NAME = "mason";
 const IDB_STORE = "kv";
-const IDB_KEY = "mortar-caches-v1";
+// one key per mortar cache, so a page that only warmed one cache only writes
+// one; the payload embeds mortar's persist VERSION, and mortar discards
+// mismatches on import
+const IDB_CACHE_PREFIX = "mortar-cache:";
+// pre-v4 whole-bundle key; deleted on startup, its shape is no longer read
+const IDB_LEGACY_KEY = "mortar-caches-v1";
 
 function idbOpen(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -43,25 +54,60 @@ function idbOpen(): Promise<IDBDatabase> {
   });
 }
 
-async function idbGet(key: string): Promise<unknown> {
+async function idbGetMany(keys: string[]): Promise<unknown[]> {
   const db = await idbOpen();
   try {
-    return await new Promise((resolve, reject) => {
-      const req = db.transaction(IDB_STORE, "readonly").objectStore(IDB_STORE).get(key);
-      req.addEventListener("success", () => resolve(req.result));
-      req.addEventListener("error", () => reject(req.error));
+    const store = db.transaction(IDB_STORE, "readonly").objectStore(IDB_STORE);
+    return await Promise.all(
+      keys.map(
+        (key) =>
+          new Promise((resolve, reject) => {
+            const req = store.get(key);
+            req.addEventListener("success", () => resolve(req.result));
+            req.addEventListener("error", () => reject(req.error));
+          }),
+      ),
+    );
+  } finally {
+    db.close();
+  }
+}
+
+async function idbPutMany(entries: [string, string][]): Promise<void> {
+  const db = await idbOpen();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      const store = tx.objectStore(IDB_STORE);
+      for (const [key, value] of entries) store.put(value, key);
+      tx.addEventListener("complete", () => resolve());
+      tx.addEventListener("error", () => reject(tx.error));
     });
   } finally {
     db.close();
   }
 }
 
-async function idbPut(key: string, value: string): Promise<void> {
+/** Delete keys this build will never read again: the pre-v4 whole-bundle key
+ *  and any mortar-cache:* key whose cache mortar no longer persists (a renamed
+ *  or dropped cache would otherwise orphan its key forever). */
+async function idbSweepStale(validNames: Set<string>): Promise<void> {
   const db = await idbOpen();
   try {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(IDB_STORE, "readwrite");
-      tx.objectStore(IDB_STORE).put(value, key);
+      const store = tx.objectStore(IDB_STORE);
+      const req = store.getAllKeys();
+      req.addEventListener("success", () => {
+        for (const key of req.result) {
+          if (typeof key !== "string") continue;
+          const stale =
+            key === IDB_LEGACY_KEY ||
+            (key.startsWith(IDB_CACHE_PREFIX) &&
+              !validNames.has(key.slice(IDB_CACHE_PREFIX.length)));
+          if (stale) store.delete(key);
+        }
+      });
       tx.addEventListener("complete", () => resolve());
       tx.addEventListener("error", () => reject(tx.error));
     });
@@ -84,12 +130,21 @@ const ensureInit = () =>
       // that; the network is only the cold-start fallback for a fresh install.
       const hit = await caches.open(SHELL).then((cache) => cache.match(wasmUrl));
       await init({ module_or_path: hit ? await hit.arrayBuffer() : wasmUrl });
+      const names = cache_names();
       try {
-        const saved = await idbGet(IDB_KEY);
-        if (typeof saved === "string") await import_caches(saved);
+        const saved = await idbGetMany(names.map((name) => IDB_CACHE_PREFIX + name));
+        await Promise.all(
+          names.map((name, i) => {
+            const payload = saved[i];
+            return typeof payload === "string" ? import_cache(name, payload) : undefined;
+          }),
+        );
       } catch {
         // no persisted caches (or unreadable); start cold
       }
+      // reclaim keys this build will never read: the pre-v4 whole bundle and
+      // any per-cache key orphaned by a cache rename or removal
+      void idbSweepStale(new Set(names)).catch(() => {});
     } catch (e) {
       // never memoise a failed init: let the next request retry rather than
       // leaving the session bricked behind a permanently-rejected promise
@@ -100,12 +155,38 @@ const ensureInit = () =>
 
 const PERSIST_INTERVAL_MS = 4000;
 let lastPersist = 0;
+// persist cycles run one at a time: two overlapping cycles (two tabs share one
+// SW) could otherwise interleave export and write so the OLDER payload commits
+// last under a key whose dirty flag the newer export already cleared. Each new
+// cycle chains behind the in-flight one, so a freeze arriving mid-persist
+// still runs afterwards and captures the frozen state; nothing is dropped.
+let persisting: Promise<void> = Promise.resolve();
 
-async function persistCaches(): Promise<void> {
-  if (Date.now() - lastPersist < PERSIST_INTERVAL_MS) return;
+/** Write the caches that changed since the last export, each under its own
+ *  IDB key: cost scales with what this page touched, not with everything a
+ *  long session has cached. Preview polls (350ms cadence, same data warming
+ *  up) never persist; the freeze that ends them always does. */
+function persistCaches(intent?: string): Promise<void> {
+  if (intent === "preview") return Promise.resolve();
+  const cycle = persisting.then(() => persistCycle(intent));
+  // persistCycle never rejects, but never let the chain jam on a rejection
+  persisting = cycle.catch(() => {});
+  return cycle;
+}
+
+async function persistCycle(intent?: string): Promise<void> {
+  // throttle is judged when the cycle actually runs, after any in-flight one
+  if (intent !== "freeze" && Date.now() - lastPersist < PERSIST_INTERVAL_MS) return;
   lastPersist = Date.now();
   try {
-    await idbPut(IDB_KEY, await export_caches());
+    const exported = await Promise.all(
+      dirty_cache_names().map(async (name): Promise<[string, string] | undefined> => {
+        const payload = await export_cache(name);
+        return typeof payload === "string" ? [IDB_CACHE_PREFIX + name, payload] : undefined;
+      }),
+    );
+    const entries = exported.filter((entry) => entry !== undefined);
+    if (entries.length > 0) await idbPutMany(entries);
   } catch {
     // persistence is best-effort; next page tries again
   }
@@ -210,7 +291,8 @@ self.addEventListener("fetch", (event) => {
     const response = serveFeed(event.request);
     event.respondWith(response);
     // keep the SW alive until the warm caches hit IndexedDB
-    event.waitUntil(response.then(() => persistCaches()));
+    const intent = url.searchParams.get("intent") ?? undefined;
+    event.waitUntil(response.then(() => persistCaches(intent)));
     return;
   }
 
