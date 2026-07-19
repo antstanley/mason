@@ -263,6 +263,202 @@ mod tests {
         assert_eq!(err.status_and_code(), (403, "login_required"));
     }
 
+    /// The wall extends itself: a follow graph bigger than one cohort keeps
+    /// yielding past the initial fill. 101 follows means a 100-author cohort
+    /// with one author left over; only an extension wave can fetch that last
+    /// author, so an endless scroll that lays all 101 posts proves the wave
+    /// ran, and the final page reporting no cursor proves a spent graph still
+    /// ends the wall honestly.
+    #[tokio::test]
+    async fn the_scroll_extends_past_the_first_cohort() {
+        use wiremock::{Request, Respond};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "did": "did:plc:viewer",
+                "handle": "viewer.test"
+            })))
+            .mount(&server)
+            .await;
+
+        let follows: Vec<serde_json::Value> = (0..101)
+            .map(|n| {
+                serde_json::json!({"did": format!("did:plc:f{n}"), "handle": format!("f{n}.test")})
+            })
+            .collect();
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.graph.getFollows"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "follows": follows })),
+            )
+            .mount(&server)
+            .await;
+
+        // every author answers with one fresh post of their own, so each
+        // author on the wall is one fan-out that actually happened
+        struct OnePostEach;
+        impl Respond for OnePostEach {
+            fn respond(&self, request: &Request) -> ResponseTemplate {
+                let actor = request
+                    .url
+                    .query_pairs()
+                    .find(|(k, _)| k == "actor")
+                    .map(|(_, v)| v.to_string())
+                    .unwrap_or_default();
+                let created = (chrono::Utc::now() - chrono::TimeDelta::hours(1)).to_rfc3339();
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"feed": [{
+                    "post": {
+                        "uri": format!("at://{actor}/app.bsky.feed.post/1"),
+                        "author": {"did": actor, "handle": "a.test"},
+                        "record": {"text": "hi", "createdAt": created},
+                        "likeCount": 1, "repostCount": 0
+                    }
+                }]}))
+            }
+        }
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .respond_with(OnePostEach)
+            .mount(&server)
+            .await;
+
+        let state = Arc::new(AppState::new(Config {
+            appview_base: server.uri(),
+            plc_base: server.uri(),
+            streamplace_base: server.uri(),
+        }));
+
+        let mut cursor: Option<String> = None;
+        let mut laid: Vec<String> = Vec::new();
+        let mut ended = false;
+        for _ in 0..30 {
+            let page = handle_feed(
+                &state,
+                "did:plc:viewer",
+                cursor.as_deref(),
+                Mode::Wall,
+                FeedIntent::Normal,
+            )
+            .await
+            .expect("every page must lay");
+            laid.extend(page.items.iter().map(|b| b.id().to_string()));
+            match page.cursor {
+                Some(next) => cursor = Some(next),
+                None => {
+                    ended = true;
+                    break;
+                }
+            }
+        }
+
+        let distinct: std::collections::HashSet<&str> = laid.iter().map(String::as_str).collect();
+        assert_eq!(
+            distinct.len(),
+            101,
+            "all 101 authors' posts laid: the wave fetched the one the cohort missed"
+        );
+        assert_eq!(laid.len(), 101, "and none of them twice");
+        assert!(
+            ended,
+            "a spent graph must end the wall with no cursor, not spin forever"
+        );
+    }
+
+    /// A transient author-feed failure must not silence that author for the
+    /// wall's whole life. The initial fill's fetch dies (three 5xx, enough to
+    /// exhaust the retry loop), so the author is never recorded as fanned and
+    /// nothing is cached; the first page's extension wave asks them again,
+    /// succeeds, and lays their post. The old behavior lost them forever.
+    #[tokio::test]
+    async fn a_transiently_failed_author_is_asked_again_by_the_next_wave() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "did": "did:plc:viewer",
+                "handle": "viewer.test"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.graph.getFollows"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "follows": [{"did": "did:plc:flaky", "handle": "flaky.test"}]
+            })))
+            .mount(&server)
+            .await;
+
+        // the fill's one author-feed read: three 500s exhaust the internal
+        // retry loop, so the fetch surfaces as a transient failure...
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .respond_with(ResponseTemplate::new(500).insert_header("retry-after", "0"))
+            .up_to_n_times(3)
+            .mount(&server)
+            .await;
+        // ...and the wave's retry finds the author alive with a fresh post
+        let created = (chrono::Utc::now() - chrono::TimeDelta::hours(1)).to_rfc3339();
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"feed": [{
+                    "post": {
+                        "uri": "at://did:plc:flaky/app.bsky.feed.post/1",
+                        "author": {"did": "did:plc:flaky", "handle": "flaky.test"},
+                        "record": {"text": "back online", "createdAt": created},
+                        "likeCount": 0, "repostCount": 0
+                    }
+                }]})),
+            )
+            .mount(&server)
+            .await;
+
+        let state = Arc::new(AppState::new(Config {
+            appview_base: server.uri(),
+            plc_base: server.uri(),
+            streamplace_base: server.uri(),
+        }));
+
+        let first = handle_feed(
+            &state,
+            "did:plc:viewer",
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect("the first page must lay");
+        assert_eq!(
+            first.items.len(),
+            1,
+            "the wave must recover the transiently failed author's post"
+        );
+        assert_eq!(
+            first.items[0].id(),
+            "at://did:plc:flaky/app.bsky.feed.post/1"
+        );
+
+        let cursor = first
+            .cursor
+            .expect("one recovered author is not a spent graph yet");
+        let last = handle_feed(
+            &state,
+            "did:plc:viewer",
+            Some(&cursor),
+            Mode::Wall,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect("the last page must answer");
+        assert!(last.items.is_empty());
+        assert!(
+            last.cursor.is_none(),
+            "with the author recovered and fanned, the graph is spent and the wall ends"
+        );
+    }
+
     /// The whole point of glaze: the same author feed the full wall reads, but
     /// only its image-bearing posts reach the page. A text-only post and a
     /// native-video post from the same author are left off.
