@@ -580,6 +580,12 @@ pub async fn get_page(
     drop_ended_streams(state, snapshot).await;
     let started = Instant::now();
     let deadline = started + Duration::from_secs(8);
+    // the offset rides in on the cursor, and a cursor is attacker-writable:
+    // an offset near usize::MAX would overflow the addition below. Treat it
+    // as the end of the feed rather than panic (debug) or wrap (release).
+    let Some(wanted) = offset.checked_add(size) else {
+        return (Vec::new(), false);
+    };
     // anchored to snapshot creation, so the first-paint wait already spent in
     // get_or_build counts against this budget rather than stacking on top of it
     let mix_deadline = snapshot.created + MIX_DEADLINE;
@@ -593,7 +599,6 @@ pub async fn get_page(
         {
             let mut guard = snapshot.inner.lock().await;
             let inner = &mut *guard;
-            let wanted = offset + size;
 
             // Bricks are laid once and never move, so laying is the moment the
             // pool's composition becomes the wall's composition. Posts arrive
@@ -652,7 +657,6 @@ pub async fn get_page(
             // lay first: bricks that arrived during the wait belong on it
             let mut guard = snapshot.inner.lock().await;
             let inner = &mut *guard;
-            let wanted = offset + size;
             if inner.wall.len() < wanted && !inner.pool.is_empty() {
                 let missing = wanted - inner.wall.len();
                 mix::lay(
