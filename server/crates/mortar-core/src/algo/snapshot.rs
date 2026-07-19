@@ -837,18 +837,25 @@ fn followed_live<'a>(
 /// The live streams this particular viewer follows, as bricks.
 async fn live_bricks(state: &Arc<AppState>, follows: &[bluesky::Follow]) -> Vec<Brick> {
     let network = live_cached(state).await;
-    let mut bricks = Vec::new();
-    for stream in followed_live(&network, follows) {
-        // only now, for the handful that survive the filter, is it worth
-        // finding out where their repo (and so their poster) lives
-        let pds = pds_cached(state, stream.did()).await;
-        bricks.push(
-            stream
-                .clone()
-                .into_brick(&state.config.streamplace_base, pds.as_deref()),
-        );
-    }
-    bricks
+    // only now, for the handful that survive the filter, is it worth finding
+    // out where each repo (and so its poster) lives. Resolve them concurrently
+    // rather than one plc round trip at a time; `buffered` bounds the fan-out
+    // and preserves input order, so the pool sees the same bricks in the same
+    // order the serial version produced.
+    let followed: Vec<streamplace::LiveStream> = followed_live(&network, follows)
+        .into_iter()
+        .cloned()
+        .collect();
+    stream::iter(followed.into_iter().map(|live| {
+        let state = Arc::clone(state);
+        async move {
+            let pds = pds_cached(&state, live.did()).await;
+            live.into_brick(&state.config.streamplace_base, pds.as_deref())
+        }
+    }))
+    .buffered(REPO_FAN_OUT)
+    .collect()
+    .await
 }
 
 /// Where an author's repo lives. Cached for a day: identity moves rarely, and
