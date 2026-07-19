@@ -121,7 +121,9 @@
 			<a href="/" class="hidden min-h-11 items-center font-display text-2xl font-black tracking-tight md:inline-flex">
 				mason&nbsp;<span aria-hidden="true">🧱</span>
 			</a>
-			<div class="flex flex-wrap items-center justify-between gap-3 text-sm md:justify-end">
+			<!-- one line, always: the bar never wraps on mobile (nowrap), so every
+			     control has to earn its width at 375px -->
+			<div class="flex flex-nowrap items-center justify-between gap-2 text-sm sm:gap-3 md:flex-wrap md:justify-end">
 				<LayoutPicker />
 				<ClientPicker />
 				<SwitchWall actor={actor ?? ''} />

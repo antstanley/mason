@@ -7,6 +7,7 @@
 	import { goto } from '$app/navigation';
 	import { cleanHandle, lastHandle } from '$lib/state/handle.svelte';
 	import { profile } from '$lib/state/profile.svelte';
+	import Icon from './Icon.svelte';
 
 	let { actor }: { actor: string } = $props();
 
@@ -82,8 +83,7 @@
 		aria-haspopup="dialog"
 		aria-expanded={open}
 		aria-label="Switch wall, currently viewing @{actor}"
-		title="Switch wall"
-		class="inline-flex min-h-9 min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded-full bg-[oklch(0.51_0.16_350)] p-0.5 font-semibold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95 sm:gap-2 sm:pr-4"
+		class="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-pop-pink-quiet p-0.5 font-semibold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95 sm:min-h-9 sm:min-w-0 sm:justify-start sm:gap-2 sm:pr-4"
 	>
 		{#if profile.avatar}
 			<img src={profile.avatar} alt="" class="size-8 shrink-0 rounded-full object-cover" />
@@ -96,7 +96,7 @@
 			</span>
 		{/if}
 		<span class="hidden max-w-[10rem] truncate sm:inline">@{actor}</span>
-		<span aria-hidden="true" class="hidden opacity-80 sm:inline">⇄</span>
+		<Icon name="arrow-left-right" class="hidden size-4 shrink-0 opacity-80 sm:block" />
 	</button>
 
 	{#if open}

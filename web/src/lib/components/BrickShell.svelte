@@ -26,7 +26,7 @@
 
 <article
 	aria-label={label}
-	class="group overflow-hidden rounded-card border-2 bg-chalk shadow-brick transition-all duration-200 motion-safe:hover:-translate-y-1 motion-safe:hover:rotate-[0.6deg] hover:shadow-brick-lift dark:bg-kiln {accentClass}"
+	class="group overflow-hidden rounded-card border-2 bg-chalk shadow-brick transition-[transform,box-shadow,border-color] duration-200 motion-safe:hover:-translate-y-1 motion-safe:hover:rotate-[0.6deg] hover:shadow-brick-lift dark:bg-kiln {accentClass}"
 >
 	{#if href}
 		<a

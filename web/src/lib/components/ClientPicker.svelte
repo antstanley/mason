@@ -6,6 +6,7 @@
 	import { tick } from 'svelte';
 	import { CLIENTS, client, type ClientId } from '$lib/state/client.svelte';
 	import ClientIcon from './ClientIcon.svelte';
+	import Icon from './Icon.svelte';
 
 	let open = $state(false);
 	let root = $state<HTMLElement | null>(null);
@@ -83,27 +84,30 @@
 		aria-haspopup="listbox"
 		aria-expanded={open}
 		aria-label="Open posts in {current.label}"
-		class="flex min-h-11 items-center gap-1.5 rounded-full px-3 text-sm font-semibold transition-colors hover:bg-ink/5 dark:hover:bg-chalk/10"
+		class="flex min-h-11 items-center gap-1.5 rounded-full px-2 text-sm font-semibold transition-colors hover:bg-ink/5 sm:px-3 dark:hover:bg-chalk/10"
 	>
 		<ClientIcon id={current.id} size="size-6 sm:size-[1.3em]" />
-		<!-- mobile is tight, so the trigger is icon-only there; the label and
-		     chevron return at sm. Stacking every label in one cell keeps the
-		     trigger as wide as the longest name so the header does not shift as
-		     clients change. -->
-		<span class="hidden text-left sm:grid">
-			{#each CLIENTS as option (option.id)}
-				<span class="col-start-1 row-start-1 {option.id === current.id ? '' : 'invisible'}">
-					{option.label}
-				</span>
-			{/each}
+		<!-- a bare butterfly says nothing to a first-time visitor, so mobile shows
+		     a tiny "opens in" caption over the client name; the chevron returns at
+		     sm. Stacking every label in one cell keeps the trigger as wide as the
+		     longest name so the header does not shift as clients change. -->
+		<span class="flex flex-col text-left text-xs sm:block sm:text-sm">
+			<span class="text-[0.625rem] leading-none opacity-75 sm:hidden">opens in</span>
+			<span class="grid">
+				{#each CLIENTS as option (option.id)}
+					<span class="col-start-1 row-start-1 {option.id === current.id ? '' : 'invisible'}">
+						{option.label}
+					</span>
+				{/each}
+			</span>
 		</span>
 		<span
 			aria-hidden="true"
-			class="hidden text-xs opacity-60 transition-transform duration-200 sm:inline {open
+			class="hidden opacity-60 transition-transform duration-200 sm:inline-block {open
 				? 'rotate-180'
 				: ''}"
 		>
-			▾
+			<Icon name="chevron-down" class="size-3.5" />
 		</span>
 	</button>
 
@@ -129,11 +133,11 @@
 						<span class="flex-1">{option.label}</span>
 						<span
 							aria-hidden="true"
-							class="text-brick-post-ink dark:text-brick-post {option.id === client.id
+							class="shrink-0 text-brick-post-ink dark:text-brick-post {option.id === client.id
 								? ''
 								: 'invisible'}"
 						>
-							✓
+							<Icon name="check" class="size-4" />
 						</span>
 					</button>
 				</li>

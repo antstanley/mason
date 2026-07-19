@@ -56,11 +56,14 @@
 					onchange={() => layout.set(option.id as LayoutId)}
 					class="peer sr-only"
 				/>
+				<!-- mobile stacks a tiny label under the icon (an unlabeled emoji row
+				     is a guessing game for a first-time visitor); from sm the label
+				     sits beside it. min-h-11 keeps the touch target at 44px. -->
 				<span
-					class="flex min-h-9 items-center justify-center gap-1.5 rounded-full px-3 text-sm font-semibold text-ink transition-colors duration-300 peer-checked:text-chalk peer-focus-visible:outline-3 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-pop-pink-deep motion-reduce:transition-none sm:px-4 dark:text-chalk dark:peer-checked:text-ink"
+					class="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-full px-2 text-sm font-semibold text-ink transition-colors duration-300 peer-checked:text-chalk peer-focus-visible:outline-3 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-pop-pink-deep motion-reduce:transition-none sm:min-h-9 sm:flex-row sm:gap-1.5 sm:px-4 dark:text-chalk dark:peer-checked:text-ink"
 				>
-					<span aria-hidden="true" class="text-2xl leading-none sm:text-sm">{option.icon}</span>
-					<span class="sr-only sm:not-sr-only">{option.label}</span>
+					<span aria-hidden="true" class="text-lg leading-none sm:text-sm">{option.icon}</span>
+					<span class="text-[0.625rem] leading-none sm:text-sm sm:leading-normal">{option.label}</span>
 				</span>
 			</label>
 		{/each}

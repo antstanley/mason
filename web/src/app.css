@@ -38,6 +38,9 @@
   --color-pop-pink: oklch(0.68 0.24 350);
   /* CTA fill: white text needs a deeper pink than the display accent */
   --color-pop-pink-deep: oklch(0.52 0.22 350);
+  /* header chip fill: pop-pink-deep with the chroma dialed down, so the
+     persistent switcher sits quieter than the one-shot CTA. white text 6.3:1 */
+  --color-pop-pink-quiet: oklch(0.51 0.16 350);
   --color-pop-lime: oklch(0.85 0.21 128);
   --color-pop-sun: oklch(0.85 0.17 90);
 
