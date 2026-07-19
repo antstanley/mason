@@ -83,7 +83,7 @@
 		aria-haspopup="listbox"
 		aria-expanded={open}
 		aria-label="Open posts in {current.label}"
-		class="flex min-h-11 items-center gap-1.5 rounded-full px-3 text-sm font-semibold transition-colors hover:bg-ink/5 dark:hover:bg-chalk/10"
+		class="flex min-h-11 items-center gap-1.5 rounded-full px-2 text-sm font-semibold transition-colors hover:bg-ink/5 sm:px-3 dark:hover:bg-chalk/10"
 	>
 		<ClientIcon id={current.id} size="size-6 sm:size-[1.3em]" />
 		<!-- a bare butterfly says nothing to a first-time visitor, so mobile shows

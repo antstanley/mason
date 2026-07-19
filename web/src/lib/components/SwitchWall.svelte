@@ -82,7 +82,7 @@
 		aria-haspopup="dialog"
 		aria-expanded={open}
 		aria-label="Switch wall, currently viewing @{actor}"
-		class="inline-flex min-h-11 min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden rounded-full bg-pop-pink-quiet p-0.5 pr-3 font-semibold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95 sm:min-h-9 sm:gap-2 sm:pr-4"
+		class="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-pop-pink-quiet p-0.5 font-semibold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95 sm:min-h-9 sm:min-w-0 sm:justify-start sm:gap-2 sm:pr-4"
 	>
 		{#if profile.avatar}
 			<img src={profile.avatar} alt="" class="size-8 shrink-0 rounded-full object-cover" />
@@ -94,9 +94,7 @@
 				{(actor ?? '?').slice(0, 1)}
 			</span>
 		{/if}
-		<!-- the handle stays visible on mobile too: a bare avatar reads as "my
-		     account", and this wall belongs to whoever the link pointed at -->
-		<span class="max-w-[5.5rem] truncate text-xs sm:max-w-[10rem] sm:text-sm">@{actor}</span>
+		<span class="hidden max-w-[10rem] truncate sm:inline">@{actor}</span>
 		<span aria-hidden="true" class="hidden opacity-80 sm:inline">⇄</span>
 	</button>
 
