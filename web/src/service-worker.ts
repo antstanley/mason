@@ -11,6 +11,7 @@
 import { build, files, version } from "$service-worker";
 import init, { export_caches, feed_page, import_caches } from "$lib/mortar-wasm/pkg/mortar_wasm";
 import wasmUrl from "$lib/mortar-wasm/pkg/mortar_wasm_bg.wasm?url";
+import type { ErrorEnvelope } from "$lib/types";
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -164,7 +165,13 @@ async function serveFeed(request: Request): Promise<Response> {
   // normal committed page (every page after the first).
   const intent = url.searchParams.get("intent") ?? undefined;
   if (!actor) {
-    return json({ error: "bad_request", message: "missing required parameter: actor" }, 400);
+    return json(
+      {
+        error: "bad_request",
+        message: "missing required parameter: actor",
+      } satisfies ErrorEnvelope,
+      400,
+    );
   }
   try {
     const body = await feed_page(actor, cursor, mode, intent);
@@ -173,12 +180,15 @@ async function serveFeed(request: Request): Promise<Response> {
       headers: { "content-type": "application/json" },
     });
   } catch (raw) {
-    // mortar throws a JSON envelope {status, error, message}
+    // mortar throws the ErrorEnvelope JSON {error, message, status}; the exact
+    // strings are pinned by a fixture test in mortar-core's error.rs
     try {
-      const envelope = JSON.parse(String(raw)) as { status?: number };
+      const envelope = JSON.parse(String(raw)) as ErrorEnvelope;
+      if (typeof envelope?.error !== "string") throw new Error("not an envelope");
       return json(envelope, envelope.status ?? 502);
     } catch {
-      return json({ error: "wasm", message: String(raw) }, 500);
+      // anything else on this channel is a wasm-side failure, not a feed error
+      return json({ error: "wasm", message: String(raw) } satisfies ErrorEnvelope, 500);
     }
   }
 }

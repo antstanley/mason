@@ -94,3 +94,19 @@ export interface FeedResponse {
    *  the client keeps polling and reflowing the first screen until it settles. */
   warming?: boolean;
 }
+
+/** The one error shape mortar emits in both build modes: the native server
+ *  sends it as a JSON body (status on the response line), the wasm build
+ *  throws it as a JSON string with `status` in-band. Mirrors ErrorEnvelope in
+ *  server/crates/mortar-core/src/error.rs, where a fixture test pins the exact
+ *  wire strings per error variant. */
+export interface ErrorEnvelope {
+  /** Machine code ("actor_not_found", "login_required", ...); classification
+   *  happens on this, so codes are wire contract, not cosmetics. */
+  error: string;
+  /** Human-readable detail; display only, never matched on. */
+  message: string;
+  /** HTTP status; present only on the wasm channel, which has no HTTP layer
+   *  of its own until the service worker builds the Response. */
+  status?: number;
+}

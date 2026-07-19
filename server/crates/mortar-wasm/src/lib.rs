@@ -7,6 +7,7 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 use mortar_core::config::Config;
+use mortar_core::error::ErrorEnvelope;
 use mortar_core::feed::{FeedIntent, handle_feed};
 use mortar_core::mode::Mode;
 use mortar_core::state::AppState;
@@ -50,11 +51,19 @@ pub async fn import_caches(json: String) {
     }
 }
 
+/// Serialize an ErrorEnvelope into the JsValue this module throws. Everything
+/// feed_page throws goes through here, so the service worker only ever has to
+/// parse one shape: the envelope pinned in mortar-core's error.rs.
+fn throw(envelope: ErrorEnvelope) -> JsValue {
+    // an envelope is two strings and an int; serializing it cannot fail
+    JsValue::from_str(&serde_json::to_string(&envelope).expect("envelope serializes"))
+}
+
 /// One feed page as a JSON string (FeedResponse). `mode` is the wall variant
 /// ("glaze" for the image wall; anything else is the full wall). `intent` is
 /// "preview" or "freeze" for the warm-then-commit first screen, absent for a
-/// normal committed page. Errors throw a JSON string
-/// `{"status": u16, "error": code, "message": ...}` so the service worker can
+/// normal committed page. Errors throw the ErrorEnvelope JSON
+/// `{"error": code, "message": ..., "status": u16}` so the service worker can
 /// build a Response with the right status.
 #[wasm_bindgen]
 pub async fn feed_page(
@@ -67,14 +76,15 @@ pub async fn feed_page(
     let mode = Mode::from_query(mode.as_deref());
     let intent = FeedIntent::from_query(intent.as_deref());
     match handle_feed(&state, &actor, cursor.as_deref(), mode, intent).await {
-        Ok(response) => {
-            serde_json::to_string(&response).map_err(|e| JsValue::from_str(&e.to_string()))
-        }
-        Err(error) => {
-            let (status, _) = error.status_and_code();
-            let mut body = error.body();
-            body["status"] = serde_json::json!(status);
-            Err(JsValue::from_str(&body.to_string()))
-        }
+        Ok(response) => serde_json::to_string(&response).map_err(|e| {
+            // even a serializer failure speaks the envelope, so the service
+            // worker never sees a bare non-JSON message on this channel
+            throw(ErrorEnvelope {
+                error: "internal".to_string(),
+                message: e.to_string(),
+                status: Some(500),
+            })
+        }),
+        Err(error) => Err(throw(error.envelope_with_status())),
     }
 }
