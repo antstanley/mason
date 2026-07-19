@@ -238,7 +238,7 @@
 			     because the row is, until the caption lifts them both) -->
 			<div class="flex w-full items-center justify-between gap-2">
 				<div
-					class="m-3 min-w-0 rounded-full bg-chalk py-1.5 pr-4 pl-1.5 opacity-0 shadow-brick transition-opacity duration-300 group-focus-within:opacity-100 dark:bg-kiln [@media(hover:hover)]:group-hover:opacity-100 motion-reduce:transition-none {revealed
+					class="m-3 min-w-0 rounded-full bg-chalk py-1.5 pr-4 pl-1.5 opacity-0 shadow-brick transition-opacity duration-300 dark:bg-kiln [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:opacity-100 motion-reduce:transition-none {revealed
 						? '[@media(hover:none)]:opacity-100'
 						: ''}"
 				>
@@ -253,16 +253,16 @@
 					aria-expanded={revealed}
 					class="pointer-events-auto m-3 hidden size-11 shrink-0 place-items-center rounded-lg bg-ink/55 text-chalk backdrop-blur-sm [@media(hover:none)]:grid"
 				>
-					<!-- the same chevron glyph the strip arrows use, turned to point up
-					     (reveal) or down (tuck away) -->
-					<span aria-hidden="true" class="rotate-90 text-lg leading-none font-bold">
-						{revealed ? '›' : '‹'}
+					<!-- the strip arrows' glyph family, doubled up and turned to point
+					     up (reveal) or down (tuck away) -->
+					<span aria-hidden="true" class="rotate-90 text-xl leading-none font-bold">
+						{revealed ? '»' : '«'}
 					</span>
 				</button>
 			</div>
 			{#if brick.text || alts.length}
 				<div
-					class="invisible max-h-0 w-full overflow-hidden opacity-0 transition-[max-height,opacity,visibility] duration-300 ease-out group-focus-within:visible group-focus-within:max-h-40 group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:visible [@media(hover:hover)]:group-hover:max-h-40 [@media(hover:hover)]:group-hover:opacity-100 motion-reduce:transition-none {revealed
+					class="invisible max-h-0 w-full overflow-hidden opacity-0 transition-[max-height,opacity,visibility] duration-300 ease-out [@media(hover:hover)]:group-focus-within:visible [@media(hover:hover)]:group-focus-within:max-h-40 [@media(hover:hover)]:group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:visible [@media(hover:hover)]:group-hover:max-h-40 [@media(hover:hover)]:group-hover:opacity-100 motion-reduce:transition-none {revealed
 						? '[@media(hover:none)]:visible [@media(hover:none)]:max-h-40 [@media(hover:none)]:opacity-100'
 						: ''}"
 				>
