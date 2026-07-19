@@ -34,6 +34,7 @@ class FeedState {
     this.cursor = null;
     this.done = false;
     this.error = null;
+    this.loading = false;
     this.initialLoad = true;
     this.warming = true;
     this.#seen.clear();
@@ -77,30 +78,36 @@ class FeedState {
   async freeze(generation = this.#generation, previewError?: unknown) {
     if (!this.warming || generation !== this.#generation) return;
     // supersede the preview loop; from here the wall never moves
-    this.#generation++;
+    const gen = ++this.#generation;
     this.warming = false;
     this.loading = true;
     this.error = null;
     try {
       const page = await fetchFeed(this.#actor, this.cursor, this.#mode, "freeze");
+      if (this.#generation !== gen) return; // a newer wall took over
       this.#replace(page.items);
       this.cursor = page.cursor;
       if (!page.cursor) this.done = true;
     } catch (e) {
+      if (this.#generation !== gen) return; // a newer wall took over
       this.#fail(previewError ?? e);
     } finally {
-      this.loading = false;
-      this.initialLoad = false;
+      if (this.#generation === gen) {
+        this.loading = false;
+        this.initialLoad = false;
+      }
     }
   }
 
   async loadMore() {
     // while warming the reflow owns the wall; pagination waits for the freeze
     if (this.loading || this.done || this.warming || !this.#actor) return;
+    const gen = this.#generation;
     this.loading = true;
     this.error = null;
     try {
       const page = await fetchFeed(this.#actor, this.cursor, this.#mode);
+      if (this.#generation !== gen) return; // a newer wall took over
       // belt-and-braces dedupe across pages
       const fresh = page.items.filter((b) => !this.#seen.has(b.id));
       for (const b of fresh) this.#seen.add(b.id);
@@ -108,10 +115,13 @@ class FeedState {
       this.cursor = page.cursor;
       if (!page.cursor) this.done = true;
     } catch (e) {
+      if (this.#generation !== gen) return; // a newer wall took over
       this.#fail(e);
     } finally {
-      this.loading = false;
-      this.initialLoad = false;
+      if (this.#generation === gen) {
+        this.loading = false;
+        this.initialLoad = false;
+      }
     }
   }
 
