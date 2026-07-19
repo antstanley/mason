@@ -4,9 +4,15 @@
 //! IndexedDB after serving a page and imports it on startup, turning the
 //! post-idle rebuild from seconds of network fan-out into milliseconds.
 //!
-//! Snapshots themselves are NOT persisted; they hold locks and in-flight
-//! state, and the seed-carrying cursor already rebuilds them
-//! deterministically from these warm caches.
+//! Persisted: did, follows, author_feed, image_feed (the glaze wall's deep
+//! media read), std_docs, pds, streams, profiles (the wall owner's logged-out
+//! opt-out), and activity. Each is a warm cache that a cold wall would
+//! otherwise repay in network round trips.
+//!
+//! NOT persisted: the live list (60 seconds from being a lie, one call to
+//! rebuild) and snapshots themselves (they hold locks and in-flight state, and
+//! the seed-carrying cursor already rebuilds them deterministically from the
+//! warm caches above).
 
 use std::sync::Arc;
 
@@ -18,21 +24,24 @@ use crate::sources::bluesky::{AuthorYield, Follow};
 
 /// Bump when any persisted shape changes; imports of older bundles are
 /// discarded wholesale (they're just caches).
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 type Entries<K, V> = Vec<(K, V, u64)>;
 
-/// The live list is deliberately absent: it is 60 seconds from being a lie,
-/// and it costs one call to rebuild.
+/// What survives a service-worker reap. The live list and the snapshots are
+/// deliberately absent (see the module doc); everything else a cold wall would
+/// have to refetch is here.
 #[derive(Serialize, Deserialize)]
 pub struct PersistedCaches {
     pub version: u32,
     pub did: Entries<String, String>,
     pub follows: Entries<String, Vec<Follow>>,
     pub author_feed: Entries<String, AuthorYield>,
+    pub image_feed: Entries<String, AuthorYield>,
     pub std_docs: Entries<String, StdDocs>,
     pub pds: Entries<String, String>,
     pub streams: Entries<String, Vec<Brick>>,
+    pub profiles: Entries<String, bool>,
     pub activity: Entries<String, Vec<String>>,
 }
 
@@ -42,9 +51,11 @@ pub async fn export(caches: &Caches) -> PersistedCaches {
         did: caches.did.export_map(Clone::clone).await,
         follows: caches.follows.export_map(|v| v.as_ref().clone()).await,
         author_feed: caches.author_feed.export_map(|v| v.as_ref().clone()).await,
+        image_feed: caches.image_feed.export_map(|v| v.as_ref().clone()).await,
         std_docs: caches.std_docs.export_map(|v| v.as_ref().clone()).await,
         pds: caches.pds.export_map(Clone::clone).await,
         streams: caches.streams.export_map(|v| v.as_ref().clone()).await,
+        profiles: caches.profiles.export_map(Clone::clone).await,
         activity: caches.activity.export_map(|v| v.as_ref().clone()).await,
     }
 }
@@ -61,11 +72,16 @@ pub async fn import(caches: &Caches, persisted: PersistedCaches) {
         .import_map(persisted.author_feed, Arc::new)
         .await;
     caches
+        .image_feed
+        .import_map(persisted.image_feed, Arc::new)
+        .await;
+    caches
         .std_docs
         .import_map(persisted.std_docs, Arc::new)
         .await;
     caches.pds.import_map(persisted.pds, |v| v).await;
     caches.streams.import_map(persisted.streams, Arc::new).await;
+    caches.profiles.import_map(persisted.profiles, |v| v).await;
     caches
         .activity
         .import_map(persisted.activity, Arc::new)
@@ -116,6 +132,37 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(follows[0].handle, "bob.test");
+    }
+
+    #[tokio::test]
+    async fn image_feed_and_profiles_survive_the_trip() {
+        let source = Caches::new();
+        source
+            .image_feed
+            .insert(
+                "did:plc:alice".into(),
+                Arc::new(AuthorYield { bricks: vec![] }),
+            )
+            .await;
+        source.profiles.insert("did:plc:alice".into(), true).await;
+
+        let json = serde_json::to_string(&export(&source).await).unwrap();
+        let restored = Caches::new();
+        import(&restored, serde_json::from_str(&json).unwrap()).await;
+
+        assert!(
+            restored
+                .image_feed
+                .get(&"did:plc:alice".to_string())
+                .await
+                .is_some(),
+            "the glaze wall's media read must persist"
+        );
+        assert_eq!(
+            restored.profiles.get(&"did:plc:alice".to_string()).await,
+            Some(true),
+            "the wall owner's logged-out opt-out must persist"
+        );
     }
 
     #[tokio::test]
