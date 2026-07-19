@@ -97,12 +97,16 @@ impl Http {
             if (200..300).contains(&status) {
                 return response.json().await;
             }
-            if status == 429 || status >= 500 {
+            if (status == 429 || status >= 500) && attempt < 2 {
                 let retry_after = response.retry_after();
                 tracing::debug!("{status} from {url}, backing off (attempt {attempt})");
                 crate::platform::sleep(backoff(attempt, retry_after)).await;
                 continue;
             }
+            // a retryable status on the FINAL attempt lands here too: no
+            // further request will be made, so sleeping (up to a 30s
+            // Retry-After) only delays the answer; hand back the real status
+            // instead of a generic RetriesExhausted
             return Err(HttpError::Status(status));
         }
         Err(HttpError::RetriesExhausted)
