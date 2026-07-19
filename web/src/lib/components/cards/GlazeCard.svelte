@@ -132,7 +132,7 @@
 			<!-- controls: siblings of the strip, so they page it instead of opening
 			     the post. A native swipe pages it too. -->
 			<div
-				class="pointer-events-none absolute inset-x-2 top-1/2 flex -translate-y-1/2 justify-between opacity-0 transition-opacity group-hover:opacity-100 motion-reduce:transition-none [@media(hover:none)]:opacity-100"
+				class="pointer-events-none absolute inset-x-2 top-1/2 flex -translate-y-1/2 justify-between opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 motion-reduce:transition-none [@media(hover:none)]:opacity-100"
 			>
 				<button
 					type="button"
@@ -152,10 +152,12 @@
 				</button>
 			</div>
 			<div
+				aria-hidden="true"
 				class="pointer-events-none absolute top-2 right-2 rounded-full bg-ink/55 px-2 py-0.5 text-xs font-semibold text-chalk backdrop-blur-sm"
 			>
 				{index + 1}/{count}
 			</div>
+			<p class="sr-only" aria-live="polite">image {index + 1} of {count}</p>
 		{:else}
 			<a
 				href={clientUrl(brick.url)}
