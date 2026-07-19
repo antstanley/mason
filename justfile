@@ -15,8 +15,16 @@ dev-server:
     #!/usr/bin/env bash
     trap 'kill 0' EXIT
     (cd server && cargo run -p mortar-server) &
+    server=$!
     (cd web && PUBLIC_MASON_SERVER_URL=http://localhost:8787 pnpm dev) &
-    wait
+    web=$!
+    # exit as soon as the FIRST child dies, then the EXIT trap tears the other
+    # down; a bare `wait` would block until both exit and leave a survivor
+    # lingering. `wait -n` would be cleaner but needs bash 4+, and macOS ships
+    # bash 3.2, so poll the two pids instead.
+    while kill -0 "$server" 2>/dev/null && kill -0 "$web" 2>/dev/null; do
+        sleep 1
+    done
 
 # fully static production build (local mode) → web/build/
 build: wasm
