@@ -5,6 +5,12 @@ use chrono::{DateTime, Utc};
 
 use crate::model::{Brick, VideoSource};
 
+/// How far in the future a `created_at` may sit before it stops being clock
+/// skew and starts being a lie. Timestamps are author-supplied JSON; clamping
+/// a future date to age zero would pin it to the top of every wall, so past
+/// this skew it gets the unparseable-date treatment instead.
+const MAX_FUTURE_SKEW_SECS: i64 = 600;
+
 /// Half-life in hours per brick kind: posts churn fast, blogs simmer, an
 /// archived stream is nearly evergreen. Shorter than the medium's shelf life
 /// on purpose, so the freshest brick of a kind clearly outranks yesterday's.
@@ -61,10 +67,21 @@ pub fn within_age(brick: &Brick, now: DateTime<Utc>, max_age_hours: f64) -> bool
     if is_live(brick) {
         return true;
     }
-    match created_at(brick) {
-        Some(t) => (now - t).num_seconds().max(0) as f64 / 3600.0 <= max_age_hours,
+    match age_seconds(brick, now) {
+        Some(age) => age as f64 / 3600.0 <= max_age_hours,
         None => false,
     }
+}
+
+/// A brick's age in seconds, clamped to zero within the skew allowance. A
+/// timestamp further in the future than the skew is treated exactly like an
+/// unparseable one: None, so the brick sinks and ages out.
+fn age_seconds(brick: &Brick, now: DateTime<Utc>) -> Option<i64> {
+    let age = (now - created_at(brick)?).num_seconds();
+    if age < -MAX_FUTURE_SKEW_SECS {
+        return None;
+    }
+    Some(age.max(0))
 }
 
 pub fn created_at(brick: &Brick) -> Option<DateTime<Utc>> {
@@ -101,8 +118,8 @@ fn engagement(brick: &Brick) -> f64 {
 /// recency_decay × engagement_boost. Only meaningful relative to bricks of
 /// the same kind; cross-kind balance is the mixer's job, not the score's.
 pub fn grout(brick: &Brick, now: DateTime<Utc>) -> f64 {
-    let age_hours = created_at(brick)
-        .map(|t| (now - t).num_seconds().max(0) as f64 / 3600.0)
+    let age_hours = age_seconds(brick, now)
+        .map(|age| age as f64 / 3600.0)
         .unwrap_or(f64::MAX / 2.0);
     let decay = 0.5_f64.powf(age_hours / half_life_hours(brick));
     let boost = 1.0 + (1.0 + engagement(brick)).ln();
@@ -210,6 +227,21 @@ mod tests {
         // but a wider window is still a window: 40 days out is gone either way
         let forty_days = post(&(now() - TimeDelta::hours(24 * 40)).to_rfc3339(), 0, 0);
         assert!(!within_age(&forty_days, now(), 24.0 * 30.0));
+    }
+
+    #[test]
+    fn a_future_dated_brick_sinks_instead_of_pinning() {
+        // created_at is untrusted author JSON: a post "from" next year used to
+        // clamp to age zero and sit at the top of every wall it touched. Past
+        // the skew allowance it is treated like an unparseable date instead.
+        let liar = post(&(now() + TimeDelta::hours(24)).to_rfc3339(), 9999, 0);
+        assert!(!is_fresh(&liar, now()), "a future-dated brick is not fresh");
+        let ok = post("2026-07-01T00:00:00Z", 0, 0);
+        assert!(grout(&ok, now()) > grout(&liar, now()));
+
+        // a few seconds of honest clock skew still counts as brand new
+        let skewed = post(&(now() + TimeDelta::seconds(30)).to_rfc3339(), 0, 0);
+        assert!(is_fresh(&skewed, now()));
     }
 
     #[test]
