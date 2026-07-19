@@ -56,7 +56,7 @@ jobs:
       - name: Build wasm (generates web/src/lib/mortar-wasm/pkg)
         run: just wasm
 
-      - name: Test (nextest + tsc)
+      - name: Test (nextest + tsc + vitest)
         run: just test
 
       - name: Lint (oxlint + knip + clippy)
@@ -93,3 +93,41 @@ jobs:
 
       - name: Test (wasm-bindgen-test, headless chrome)
         run: just test-wasm
+
+  # the service-worker smoke: build the real static site, then drive it in
+  # chromium so /api/feed round-trips through the wasm engine end to end
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Rust toolchain (wasm32)
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: "1.97.0"
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: server
+      - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        with:
+          tool: just,wasm-pack@0.15.0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install web deps
+        run: cd web && pnpm install --frozen-lockfile
+
+      - name: Install chromium
+        run: cd web && pnpm exec playwright install --with-deps chromium
+
+      - name: Build the static site (wasm + vite)
+        run: just build
+
+      - name: Service-worker smoke (playwright)
+        run: cd web && pnpm test:e2e
