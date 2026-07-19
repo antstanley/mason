@@ -38,10 +38,17 @@
 		{/if}
 		<div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
 			<AuthorChip author={brick.author} />
-			<div class="flex shrink-0 gap-2 text-xs font-semibold opacity-75">
-				<span aria-label="{brick.likeCount} likes"><span aria-hidden="true">♥</span> {brick.likeCount}</span>
-				<span aria-label="{brick.repostCount} reposts"><span aria-hidden="true">↻</span> {brick.repostCount}</span>
-			</div>
+			<!-- a fresh brick has no tallies yet; zeros would just read as neglect -->
+			{#if brick.likeCount > 0 || brick.repostCount > 0}
+				<div class="flex shrink-0 gap-2 text-xs font-semibold opacity-75">
+					{#if brick.likeCount > 0}
+						<span aria-label="{brick.likeCount} likes"><span aria-hidden="true">♥</span> {brick.likeCount}</span>
+					{/if}
+					{#if brick.repostCount > 0}
+						<span aria-label="{brick.repostCount} reposts"><span aria-hidden="true">↻</span> {brick.repostCount}</span>
+					{/if}
+				</div>
+			{/if}
 		</div>
 	</div>
 </BrickShell>

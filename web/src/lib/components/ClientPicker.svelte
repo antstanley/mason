@@ -86,16 +86,19 @@
 		class="flex min-h-11 items-center gap-1.5 rounded-full px-3 text-sm font-semibold transition-colors hover:bg-ink/5 dark:hover:bg-chalk/10"
 	>
 		<ClientIcon id={current.id} size="size-6 sm:size-[1.3em]" />
-		<!-- mobile is tight, so the trigger is icon-only there; the label and
-		     chevron return at sm. Stacking every label in one cell keeps the
-		     trigger as wide as the longest name so the header does not shift as
-		     clients change. -->
-		<span class="hidden text-left sm:grid">
-			{#each CLIENTS as option (option.id)}
-				<span class="col-start-1 row-start-1 {option.id === current.id ? '' : 'invisible'}">
-					{option.label}
-				</span>
-			{/each}
+		<!-- a bare butterfly says nothing to a first-time visitor, so mobile shows
+		     a tiny "opens in" caption over the client name; the chevron returns at
+		     sm. Stacking every label in one cell keeps the trigger as wide as the
+		     longest name so the header does not shift as clients change. -->
+		<span class="flex flex-col text-left text-xs sm:block sm:text-sm">
+			<span class="text-[0.625rem] leading-none opacity-75 sm:hidden">opens in</span>
+			<span class="grid">
+				{#each CLIENTS as option (option.id)}
+					<span class="col-start-1 row-start-1 {option.id === current.id ? '' : 'invisible'}">
+						{option.label}
+					</span>
+				{/each}
+			</span>
 		</span>
 		<span
 			aria-hidden="true"

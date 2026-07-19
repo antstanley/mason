@@ -170,7 +170,7 @@
 					type="button"
 					onclick={() => slide(-1)}
 					aria-label="Previous image"
-					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/70 text-lg font-bold text-chalk backdrop-blur-sm transition-colors hover:bg-ink/80"
+					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/70 text-lg font-bold text-chalk backdrop-blur-sm transition-colors hover:bg-ink/80 [@media(hover:none)]:size-11"
 				>
 					<span aria-hidden="true">‹</span>
 				</button>
@@ -178,7 +178,7 @@
 					type="button"
 					onclick={() => slide(1)}
 					aria-label="Next image"
-					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/70 text-lg font-bold text-chalk backdrop-blur-sm transition-colors hover:bg-ink/80"
+					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/70 text-lg font-bold text-chalk backdrop-blur-sm transition-colors hover:bg-ink/80 [@media(hover:none)]:size-11"
 				>
 					<span aria-hidden="true">›</span>
 				</button>
@@ -251,32 +251,18 @@
 					onclick={() => (revealed = !revealed)}
 					aria-label={revealed ? 'Hide post details' : 'Show post details'}
 					aria-expanded={revealed}
-					class="pointer-events-auto m-3 hidden size-9 shrink-0 place-items-center rounded-lg bg-ink/55 text-chalk backdrop-blur-sm [@media(hover:none)]:grid"
+					class="pointer-events-auto m-3 hidden size-11 shrink-0 place-items-center rounded-lg bg-ink/55 text-chalk backdrop-blur-sm [@media(hover:none)]:grid"
 				>
-					<!-- lucide chevrons-up / chevrons-down -->
-					<svg
-						viewBox="0 0 24 24"
-						class="size-5"
-						fill="none"
-						stroke="currentColor"
-						stroke-width="2"
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						aria-hidden="true"
-					>
-						{#if revealed}
-							<path d="m7 6 5 5 5-5" />
-							<path d="m7 13 5 5 5-5" />
-						{:else}
-							<path d="m17 11-5-5-5 5" />
-							<path d="m17 18-5-5-5 5" />
-						{/if}
-					</svg>
+					<!-- the same chevron glyph the strip arrows use, turned to point up
+					     (reveal) or down (tuck away) -->
+					<span aria-hidden="true" class="rotate-90 text-lg leading-none font-bold">
+						{revealed ? '›' : '‹'}
+					</span>
 				</button>
 			</div>
 			{#if brick.text || alts.length}
 				<div
-					class="invisible max-h-0 w-full overflow-hidden opacity-0 transition-all duration-300 ease-out group-focus-within:visible group-focus-within:max-h-40 group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:visible [@media(hover:hover)]:group-hover:max-h-40 [@media(hover:hover)]:group-hover:opacity-100 motion-reduce:transition-none {revealed
+					class="invisible max-h-0 w-full overflow-hidden opacity-0 transition-[max-height,opacity,visibility] duration-300 ease-out group-focus-within:visible group-focus-within:max-h-40 group-focus-within:opacity-100 [@media(hover:hover)]:group-hover:visible [@media(hover:hover)]:group-hover:max-h-40 [@media(hover:hover)]:group-hover:opacity-100 motion-reduce:transition-none {revealed
 						? '[@media(hover:none)]:visible [@media(hover:none)]:max-h-40 [@media(hover:none)]:opacity-100'
 						: ''}"
 				>

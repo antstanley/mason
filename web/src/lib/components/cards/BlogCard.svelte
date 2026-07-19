@@ -26,7 +26,7 @@
 		>
 			{brick.publication.name}
 		</span>
-		<p class="font-display text-lg leading-tight font-bold">{brick.title}</p>
+		<p class="font-display text-lg leading-snug font-bold">{brick.title}</p>
 		{#if brick.description}
 			<p class="line-clamp-3 text-sm leading-snug opacity-75">{brick.description}</p>
 		{/if}

@@ -68,6 +68,14 @@
 	}
 
 	let pumping = $state(false);
+	// the pump backed off after consecutive empty pages: the wall is not done
+	// and not errored, just paused. Surfaced below so the tail does not simply
+	// vanish; a scroll (or the button) pumps again and clears it.
+	let stalled = $state(false);
+	// a fresh wall (reset re-warms) must not inherit the old wall's pause
+	$effect(() => {
+		if (feed.warming) stalled = false;
+	});
 
 	/** Keep laying bricks while the bottom of the wall is still within reach.
 	 *
@@ -83,6 +91,7 @@
 		// pagination waits for the freeze
 		if (pumping || feed.warming) return;
 		pumping = true;
+		stalled = false;
 		try {
 			let stalls = 0;
 			while (!feed.done && withinReach()) {
@@ -96,7 +105,14 @@
 				// a page that added nothing: the snapshot is still warming, or it
 				// failed. Back off a little, then a little more, and let the next
 				// scroll try again rather than spin on the spot.
-				if (feed.error || ++stalls > 3) break;
+				if (feed.error) break;
+				if (++stalls > 3) {
+					// giving up quietly used to strand the reader with no ending and
+					// no error; say the wall paused instead, and let the next pump
+					// (a scroll, or the button) pick it back up
+					stalled = true;
+					break;
+				}
 				await new Promise((resume) => setTimeout(resume, 400 * stalls));
 			}
 		} finally {
@@ -136,7 +152,9 @@
 		} else if (feed.error && n > 0) {
 			wallStatus = 'more bricks did not arrive';
 		} else if (feed.done && !feed.error) {
-			wallStatus = 'that is every brick';
+			wallStatus = n === 0 ? 'this wall has no bricks yet' : 'that is every brick';
+		} else if (stalled) {
+			wallStatus = 'the wall paused. scroll or retry for more';
 		} else if (n > lastCount) {
 			const added = n - lastCount;
 			wallStatus = added === 1 ? '1 new brick' : `${added} new bricks`;
@@ -226,6 +244,7 @@
 						bind:this={retryInput}
 						bind:value={retryValue}
 						type="text"
+						placeholder="your.handle.bsky.social"
 						autocapitalize="none"
 						autocorrect="off"
 						spellcheck="false"
@@ -256,6 +275,46 @@
 				</a>
 			</p>
 		</div>
+	{:else if feed.done && feed.items.length === 0}
+		<!-- a wall with nothing on it is a site, not a dead end: the end message
+		     over a blank page would read as a finished wall, and this one has not
+		     started -->
+		<div class="mx-auto max-w-md py-20 text-center">
+			<p class="text-5xl" aria-hidden="true">🧱🌱</p>
+			<h1 class="font-display mt-4 text-2xl font-bold">this wall has no bricks yet</h1>
+			<p class="mt-2 opacity-75">
+				nothing laid here so far. walls grow as the people behind them post, so check back, or
+				start from another handle:
+			</p>
+			<form onsubmit={retrySubmit} class="mt-6 flex gap-2">
+				<label class="sr-only" for="retry-handle">Your Bluesky handle</label>
+				<input
+					id="retry-handle"
+					bind:this={retryInput}
+					bind:value={retryValue}
+					type="text"
+					placeholder="your.handle.bsky.social"
+					autocapitalize="none"
+					autocorrect="off"
+					spellcheck="false"
+					class="min-w-0 flex-1 rounded-full border-2 border-ink/20 bg-chalk px-5 py-3 font-semibold transition-colors dark:border-chalk/20 dark:bg-kiln"
+				/>
+				<button
+					type="submit"
+					class="shrink-0 cursor-pointer rounded-full bg-pop-pink-deep px-5 py-3 font-display font-bold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95"
+				>
+					lay bricks
+				</button>
+			</form>
+			<p class="mt-6 text-sm">
+				<a
+					href="/?actor=demo"
+					class="inline-flex min-h-11 items-center px-2 font-semibold text-brick-post-ink hover:underline dark:text-brick-post"
+				>
+					or wander the demo wall
+				</a>
+			</p>
+		</div>
 	{:else}
 		{#if layout.id === 'masonry'}
 			<Masonry items={feed.items} {brick} warming={feed.warming} />
@@ -274,6 +333,24 @@
 				>
 					more bricks did not arrive. tap to retry
 				</button>
+			</div>
+		{:else if stalled && !feed.done && !feed.error}
+			<!-- the pump backed off after empty pages: not an error, not the end.
+			     Without this the skeleton tail just vanishes and the wall seems to
+			     stop mid-course. A scroll pumps again on its own; the button is the
+			     same nudge made visible. No countdowns, no spinners: unhurried. -->
+			<div role="status" class="flex flex-col items-center gap-4 py-10 text-center">
+				<p class="font-display text-lg font-bold opacity-70">
+					the wall paused. the next bricks were not ready yet.
+				</p>
+				<button
+					type="button"
+					onclick={() => void pump()}
+					class="cursor-pointer rounded-full border-2 border-brick-blog/60 bg-chalk px-6 py-3 font-display font-bold shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95 dark:bg-kiln"
+				>
+					try for more
+				</button>
+				<p class="text-sm opacity-75">scrolling on tries again too</p>
 			</div>
 		{:else if feed.warming || feed.loading || pumping}
 			<!-- warming: the first screen is still reflowing, so a skeleton tail says

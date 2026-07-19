@@ -129,7 +129,7 @@
 	</Sensitive>
 	<div class="flex flex-col gap-3 p-4">
 		{#if brick.title}
-			<p class="font-display leading-tight font-bold">{brick.title}</p>
+			<p class="font-display leading-snug font-bold">{brick.title}</p>
 		{/if}
 		{#if brick.activity || (brick.live && brick.viewerCount !== null)}
 			<p class="flex flex-wrap items-center gap-x-2 text-sm opacity-75">
@@ -147,7 +147,7 @@
 				href={clientUrl(brick.url)}
 				target="_blank"
 				rel="noopener noreferrer"
-				class="shrink-0 text-sm font-semibold text-brick-video-ink hover:underline dark:text-brick-video-bright"
+				class="inline-flex min-h-11 shrink-0 items-center text-sm font-semibold text-brick-video-ink hover:underline dark:text-brick-video-bright"
 			>
 				{brick.live ? 'watch live' : 'watch'} on {sourceName} ↗
 			</a>
