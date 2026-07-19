@@ -59,9 +59,11 @@ impl Http {
     pub fn new() -> Self {
         Self {
             #[cfg(not(target_arch = "wasm32"))]
+            // The 10s request ceiling lives in get_json (crate::platform::timeout)
+            // so native and wasm share one policy; reqwest carries no timeout of
+            // its own, or the two would stack.
             client: reqwest::Client::builder()
                 .user_agent("mason-mortar/0.1 (atproto discovery wall; https://github.com)")
-                .timeout(Duration::from_secs(10))
                 .build()
                 .expect("reqwest client builds"),
             // 10/s sustained is Bluesky's public ceiling (3000 per 5 minutes)
@@ -116,7 +118,17 @@ impl Http {
             if matches!(bucket, Bucket::Appview) {
                 self.await_appview_slot().await;
             }
-            let response = match self.send(url).await {
+            // One timeout policy for both transports, living here in shared
+            // code: native reqwest and the browser's gloo_net GET (which has no
+            // AbortController) both get a 10s ceiling, so a hung upstream can
+            // never stall the retry loop indefinitely. A timeout maps to the
+            // transport-error path, so the loop backs off and advances.
+            let sent = match crate::platform::timeout(Duration::from_secs(10), self.send(url)).await
+            {
+                Ok(inner) => inner,
+                Err(()) => Err(HttpError::Transport("timed out after 10s".into())),
+            };
+            let response = match sent {
                 Ok(r) => r,
                 Err(e) if attempt < 2 => {
                     tracing::debug!("transport error on {url}: {e}, retrying");
