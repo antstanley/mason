@@ -40,9 +40,37 @@ fmt-check:
     cd web && pnpm oxfmt --check src
     cd server && cargo fmt --all --check
 
-# the video rule: autoplay must never appear in web source
+# the video rule: no autoplay attributes and no programmatic play() outside the
+# one sanctioned, click-gated player. filesystem grep (not git grep) so new,
+# unsnapshotted files in this jj repo are seen too.
 guard-autoplay:
-    ! git grep -n 'autoplay' web/src
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # no autoplay attribute or autostart flag anywhere in web source
+    if grep -rniE 'autoplay|autostartload' web/src; then
+        echo "guard-autoplay: found an autoplay reference in web/src" >&2
+        exit 1
+    fi
+    # the only sanctioned .play() is VideoPlayer.svelte, gated behind a click
+    if grep -rnF '.play(' web/src --exclude=VideoPlayer.svelte; then
+        echo "guard-autoplay: found a programmatic .play( outside VideoPlayer.svelte" >&2
+        exit 1
+    fi
+
+# no em dashes anywhere in tracked source, docs, or config (U+2014)
+guard-dashes:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # build the pattern from bytes so this recipe holds no literal em dash
+    dash=$(printf '\xe2\x80\x94')
+    if grep -rl "$dash" \
+        --exclude-dir=.git --exclude-dir=.jj --exclude-dir=node_modules \
+        --exclude-dir=target --exclude-dir=build \
+        web/src web/vite.config.ts web/knip.json web/package.json web/tsconfig.json \
+        server README.md AGENTS.md PRODUCT.md CHANGELOG.md .changeset justfile; then
+        echo "guard-dashes: found a U+2014 em dash in tracked source" >&2
+        exit 1
+    fi
 
 # deploy to AWS via blogwright (S3 + CloudFront, MicroVM build)
 deploy env='production': wasm
