@@ -20,6 +20,7 @@
 	const currentMode = $derived(isGlaze ? 'glaze' : undefined);
 
 	let sentinel = $state<HTMLElement | null>(null);
+	let wallRoot = $state<HTMLElement | null>(null);
 	let retryInput = $state<HTMLInputElement | null>(null);
 	let retryValue = $state('');
 
@@ -150,16 +151,34 @@
 	// moving the instant they reach for it. It also freezes on its own when the
 	// wall settles or the warm ceiling hits (both handled in feed state).
 	const freezeOnEngage = () => void feed.freeze();
+	// a keyboard or switch user has no wheel or scroll to reach with, so the
+	// navigation keys and focus landing on the wall are their way of engaging.
+	const NAV_KEYS = new Set(['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' ']);
+	const freezeOnKey = (event: KeyboardEvent) => {
+		if (NAV_KEYS.has(event.key)) freezeOnEngage();
+	};
+	const freezeOnFocusIn = (event: FocusEvent) => {
+		if (wallRoot && event.target instanceof Node && wallRoot.contains(event.target)) freezeOnEngage();
+	};
 	$effect(() => {
 		if (!feed.warming) return;
+		// reduced-motion readers never see the auto-reflow: freeze before it moves
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+			freezeOnEngage();
+			return;
+		}
 		const opts = { passive: true, once: true } as const;
 		window.addEventListener('wheel', freezeOnEngage, opts);
 		window.addEventListener('touchmove', freezeOnEngage, opts);
 		window.addEventListener('scroll', freezeOnEngage, opts);
+		window.addEventListener('keydown', freezeOnKey);
+		window.addEventListener('focusin', freezeOnFocusIn);
 		return () => {
 			window.removeEventListener('wheel', freezeOnEngage);
 			window.removeEventListener('touchmove', freezeOnEngage);
 			window.removeEventListener('scroll', freezeOnEngage);
+			window.removeEventListener('keydown', freezeOnKey);
+			window.removeEventListener('focusin', freezeOnFocusIn);
 		};
 	});
 </script>
@@ -180,7 +199,7 @@
 
 <!-- aria-busy tells assistive tech the wall is still being laid on first paint;
      the live region below narrates every later transition -->
-<div aria-busy={feed.initialLoad}>
+<div bind:this={wallRoot} aria-busy={feed.initialLoad}>
 	<p class="sr-only" aria-live="polite">{wallStatus}</p>
 	{#if feed.initialLoad}
 		<SkeletonGrid count={12} />
