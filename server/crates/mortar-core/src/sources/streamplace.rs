@@ -20,6 +20,7 @@ use serde::Deserialize;
 use crate::http::{Bucket, Http, HttpError};
 use crate::model::{AspectRatio, Author, Brick, VideoBrick, VideoSource};
 use crate::sources::pds::blob_url;
+use crate::sources::util::is_http_url;
 
 /// Archived streams read per author. They are long, rare, and long-lived; a
 /// handful each is plenty.
@@ -145,8 +146,11 @@ impl LiveStream {
             _ => None,
         };
         Brick::Video(VideoBrick {
+            // the record's own url is third-party; only an http(s) one may reach
+            // the anchor, otherwise fall back to the stream.place watch page
             url: self
                 .url
+                .filter(|u| is_http_url(u))
                 .unwrap_or_else(|| watch_url(base, &self.author, None)),
             playlist: format!(
                 "{base}/xrpc/place.stream.playback.getLivePlaylist?streamer={}",

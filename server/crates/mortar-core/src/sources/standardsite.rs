@@ -8,6 +8,7 @@ use serde::Deserialize;
 use crate::http::{Bucket, Http, HttpError};
 use crate::model::{Author, BlogBrick, Brick, Publication};
 use crate::sources::pds::blob_url;
+use crate::sources::util::is_http_url;
 
 /// (bricks, suppressed post uris from bskyPostRef; the blog card wins over
 /// its cross-posted skeet)
@@ -223,10 +224,17 @@ async fn fetch_publication(http: &Http, pds: &str, fallback_repo: &str, site: &s
 
 fn canonical_url(doc: &DocumentRecord, publication: &Publication) -> String {
     let base = publication.url.trim_end_matches('/');
-    match &doc.path {
+    let url = match &doc.path {
         Some(path) if !base.is_empty() => format!("{base}{path}"),
         _ if !base.is_empty() => base.to_string(),
         _ => String::new(),
+    };
+    // the publication url is third-party; a link-out card must never carry a
+    // javascript:/data: scheme to the anchor. Drop anything but http(s).
+    if is_http_url(&url) {
+        url
+    } else {
+        String::new()
     }
 }
 
@@ -327,6 +335,33 @@ mod tests {
             .await
             .unwrap();
         assert!(result.bricks.is_empty());
+    }
+
+    #[test]
+    fn a_non_http_publication_url_yields_no_link() {
+        let doc = DocumentRecord {
+            title: "Trap".into(),
+            site: None,
+            published_at: "2026-07-01T00:00:00Z".into(),
+            path: Some("/x".into()),
+            description: None,
+            cover_image: None,
+            tags: Vec::new(),
+            bsky_post_ref: None,
+        };
+        let hostile = Publication {
+            name: "evil".into(),
+            url: "javascript:alert(1)".into(),
+            icon: None,
+        };
+        assert_eq!(canonical_url(&doc, &hostile), "");
+
+        let ok = Publication {
+            name: "blog".into(),
+            url: "https://blog.example.com".into(),
+            icon: None,
+        };
+        assert_eq!(canonical_url(&doc, &ok), "https://blog.example.com/x");
     }
 
     #[tokio::test]

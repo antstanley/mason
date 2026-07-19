@@ -39,13 +39,16 @@ export const client = new ClientState();
  *  rewritten: blog links and stream.place pages are not Bluesky posts, and no
  *  other client knows how to show them. They pass through untouched. */
 export function clientUrl(url: string, host: string = client.host): string {
-  if (host === "bsky.app") return url;
+  let parsed: URL;
   try {
-    const parsed = new URL(url);
-    if (parsed.hostname !== "bsky.app") return url;
-    parsed.hostname = host;
-    return parsed.toString();
+    parsed = new URL(url);
   } catch {
-    return url;
+    return "";
   }
+  // only http(s) may reach an <a href>; javascript:/data:/vbscript: are dropped
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+  // only bsky.app posts are rewritten; everything else passes through untouched
+  if (host === "bsky.app" || parsed.hostname !== "bsky.app") return url;
+  parsed.hostname = host;
+  return parsed.toString();
 }
