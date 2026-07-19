@@ -1,5 +1,5 @@
 import { browser } from "$app/environment";
-import type { ErrorEnvelope, FeedResponse } from "./types";
+import type { ErrorEnvelope, FeedMode, FeedResponse } from "./types";
 
 /** Empty → local mode: same-origin fetch, intercepted by the wasm service
  *  worker. Set → server mode: direct CORS call to that mortar instance.
@@ -30,13 +30,13 @@ async function swControlsPage(): Promise<void> {
 /** A feed request's role in the warm-then-commit first screen. "preview" lays a
  *  non-committed first screen the client reflows while the wall warms; "freeze"
  *  commits it and begins paging; omitted is a normal committed page (every page
- *  after the first). */
+ *  after the first). Pinned by the contract fixture (see contract-check.ts). */
 export type FeedIntent = "preview" | "freeze";
 
 export async function fetchFeed(
   actor: string,
   cursor?: string | null,
-  mode?: string,
+  mode?: FeedMode,
   intent?: FeedIntent,
 ): Promise<FeedResponse> {
   if (localMode && browser && "serviceWorker" in navigator) {
@@ -63,7 +63,7 @@ export async function fetchFeed(
  *  handle the follow graph and author feeds land in their (did-keyed, seed
  *  independent) caches too, so the wall the reader actually opens reuses them
  *  and skips the network fan-out. A no-op in server mode; best-effort always. */
-export async function warmFeed(actor: string, mode?: string): Promise<void> {
+export async function warmFeed(actor: string, mode?: FeedMode): Promise<void> {
   if (!localMode || !browser || !("serviceWorker" in navigator)) return;
   try {
     await swControlsPage();

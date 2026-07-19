@@ -11,7 +11,7 @@
 import { build, files, version } from "$service-worker";
 import init, { export_caches, feed_page, import_caches } from "$lib/mortar-wasm/pkg/mortar_wasm";
 import wasmUrl from "$lib/mortar-wasm/pkg/mortar_wasm_bg.wasm?url";
-import type { ErrorEnvelope } from "$lib/types";
+import type { ErrorEnvelope, MortarErrorCode } from "$lib/types";
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -167,7 +167,9 @@ async function serveFeed(request: Request): Promise<Response> {
   if (!actor) {
     return json(
       {
-        error: "bad_request",
+        // typed as MortarErrorCode: mortar would answer this exact code, so
+        // renaming it there (and in the contract fixture) fails here too
+        error: "bad_request" satisfies MortarErrorCode,
         message: "missing required parameter: actor",
       } satisfies ErrorEnvelope,
       400,

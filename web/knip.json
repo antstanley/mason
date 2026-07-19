@@ -1,7 +1,10 @@
 {
 	"$schema": "https://unpkg.com/knip@latest/schema.json",
 	"entry": [
-		"src/routes/**/+*.{svelte,ts}"
+		"src/routes/**/+*.{svelte,ts}",
+		// tsc-only wire-contract guard (issue #33): nothing imports it at
+		// runtime on purpose, so it is an entry, not dead code
+		"src/lib/contract-check.ts"
 	],
 	"project": "src/**/*.{svelte,ts}",
 	"ignoreDependencies": [

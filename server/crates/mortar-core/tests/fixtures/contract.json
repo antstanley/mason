@@ -1,0 +1,379 @@
+{
+  "bricks": {
+    "blog": {
+      "bare": {
+        "author": {
+          "avatar": null,
+          "did": "did:plc:bare",
+          "displayName": null,
+          "handle": "bare.example.com"
+        },
+        "coverImage": null,
+        "description": null,
+        "id": "at://did:plc:bare/site.standard.document/bare",
+        "kind": "blog",
+        "publication": {
+          "icon": null,
+          "name": "the hod",
+          "url": "https://blog.example.com"
+        },
+        "publishedAt": "2026-01-02T03:04:05.000Z",
+        "tags": [],
+        "title": "bare",
+        "url": "https://blog.example.com/bare"
+      },
+      "full": {
+        "author": {
+          "avatar": "https://cdn.example.com/avatar.jpg",
+          "did": "did:plc:mason",
+          "displayName": "mason",
+          "handle": "mason.example.com"
+        },
+        "coverImage": "https://cdn.example.com/cover.jpg",
+        "description": "every brick",
+        "id": "at://did:plc:mason/site.standard.document/full",
+        "kind": "blog",
+        "publication": {
+          "icon": "https://blog.example.com/icon.png",
+          "name": "the hod",
+          "url": "https://blog.example.com"
+        },
+        "publishedAt": "2026-01-02T03:04:05.000Z",
+        "tags": [
+          "masonry",
+          "atproto"
+        ],
+        "title": "one wall",
+        "url": "https://blog.example.com/one-wall"
+      }
+    },
+    "post": {
+      "bare": {
+        "author": {
+          "avatar": null,
+          "did": "did:plc:bare",
+          "displayName": null,
+          "handle": "bare.example.com"
+        },
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "external": null,
+        "id": "at://did:plc:bare/app.bsky.feed.post/bare",
+        "images": [],
+        "kind": "post",
+        "likeCount": 0,
+        "repostCount": 0,
+        "text": "just words",
+        "url": "https://bsky.app/profile/bare.example.com/post/bare"
+      },
+      "full": {
+        "author": {
+          "avatar": "https://cdn.example.com/avatar.jpg",
+          "did": "did:plc:mason",
+          "displayName": "mason",
+          "handle": "mason.example.com"
+        },
+        "blur": {
+          "label": "!warn"
+        },
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "external": {
+          "description": "worth a read",
+          "thumb": "https://cdn.example.com/thumb.jpg",
+          "title": "an article",
+          "uri": "https://example.com/article"
+        },
+        "id": "at://did:plc:mason/app.bsky.feed.post/full",
+        "images": [
+          {
+            "alt": "a brick",
+            "aspectRatio": {
+              "height": 3,
+              "width": 4
+            },
+            "src": "https://cdn.example.com/brick.jpg"
+          }
+        ],
+        "kind": "post",
+        "likeCount": 12,
+        "repostCount": 3,
+        "text": "one wall, every brick",
+        "url": "https://bsky.app/profile/mason.example.com/post/full"
+      }
+    },
+    "video": {
+      "bare": {
+        "activity": null,
+        "aspectRatio": null,
+        "author": {
+          "avatar": null,
+          "did": "did:plc:bare",
+          "displayName": null,
+          "handle": "bare.example.com"
+        },
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "durationMs": null,
+        "id": "at://did:plc:bare/app.bsky.feed.post/vid",
+        "kind": "video",
+        "likeCount": 0,
+        "live": false,
+        "playlist": "https://video.example.com/bare.m3u8",
+        "poster": null,
+        "source": "bluesky",
+        "title": "",
+        "url": "https://bsky.app/profile/bare.example.com/post/vid",
+        "viewerCount": null
+      },
+      "full": {
+        "activity": "music",
+        "aspectRatio": {
+          "height": 9,
+          "width": 16
+        },
+        "author": {
+          "avatar": "https://cdn.example.com/avatar.jpg",
+          "did": "did:plc:mason",
+          "displayName": "mason",
+          "handle": "mason.example.com"
+        },
+        "blur": {
+          "label": "!warn"
+        },
+        "createdAt": "2026-01-02T03:04:05.000Z",
+        "durationMs": 5400000,
+        "id": "at://did:plc:mason/place.stream.livestream/full",
+        "kind": "video",
+        "likeCount": 7,
+        "live": true,
+        "playlist": "https://stream.place/playback/full.m3u8",
+        "poster": "https://cdn.example.com/poster.jpg",
+        "source": "streamplace",
+        "title": "laying bricks live",
+        "url": "https://stream.place/mason.example.com",
+        "viewerCount": 42
+      }
+    }
+  },
+  "errors": {
+    "actor_not_found": {
+      "server": {
+        "error": "actor_not_found",
+        "message": "actor not found: nobody.example.com"
+      },
+      "wasm": {
+        "error": "actor_not_found",
+        "message": "actor not found: nobody.example.com",
+        "status": 404
+      }
+    },
+    "bad_request": {
+      "server": {
+        "error": "bad_request",
+        "message": "missing required parameter: actor"
+      },
+      "wasm": {
+        "error": "bad_request",
+        "message": "missing required parameter: actor",
+        "status": 400
+      }
+    },
+    "login_required": {
+      "server": {
+        "error": "login_required",
+        "message": "login required: sealed.example.com"
+      },
+      "wasm": {
+        "error": "login_required",
+        "message": "login required: sealed.example.com",
+        "status": 403
+      }
+    },
+    "upstream": {
+      "server": {
+        "error": "upstream",
+        "message": "upstream error: appview timed out"
+      },
+      "wasm": {
+        "error": "upstream",
+        "message": "upstream error: appview timed out",
+        "status": 502
+      }
+    }
+  },
+  "pages": {
+    "committed": {
+      "cursor": "opaque-cursor-token",
+      "items": [
+        {
+          "author": {
+            "avatar": "https://cdn.example.com/avatar.jpg",
+            "did": "did:plc:mason",
+            "displayName": "mason",
+            "handle": "mason.example.com"
+          },
+          "blur": {
+            "label": "!warn"
+          },
+          "createdAt": "2026-01-02T03:04:05.000Z",
+          "external": {
+            "description": "worth a read",
+            "thumb": "https://cdn.example.com/thumb.jpg",
+            "title": "an article",
+            "uri": "https://example.com/article"
+          },
+          "id": "at://did:plc:mason/app.bsky.feed.post/full",
+          "images": [
+            {
+              "alt": "a brick",
+              "aspectRatio": {
+                "height": 3,
+                "width": 4
+              },
+              "src": "https://cdn.example.com/brick.jpg"
+            }
+          ],
+          "kind": "post",
+          "likeCount": 12,
+          "repostCount": 3,
+          "text": "one wall, every brick",
+          "url": "https://bsky.app/profile/mason.example.com/post/full"
+        },
+        {
+          "author": {
+            "avatar": null,
+            "did": "did:plc:bare",
+            "displayName": null,
+            "handle": "bare.example.com"
+          },
+          "createdAt": "2026-01-02T03:04:05.000Z",
+          "external": null,
+          "id": "at://did:plc:bare/app.bsky.feed.post/bare",
+          "images": [],
+          "kind": "post",
+          "likeCount": 0,
+          "repostCount": 0,
+          "text": "just words",
+          "url": "https://bsky.app/profile/bare.example.com/post/bare"
+        },
+        {
+          "author": {
+            "avatar": "https://cdn.example.com/avatar.jpg",
+            "did": "did:plc:mason",
+            "displayName": "mason",
+            "handle": "mason.example.com"
+          },
+          "coverImage": "https://cdn.example.com/cover.jpg",
+          "description": "every brick",
+          "id": "at://did:plc:mason/site.standard.document/full",
+          "kind": "blog",
+          "publication": {
+            "icon": "https://blog.example.com/icon.png",
+            "name": "the hod",
+            "url": "https://blog.example.com"
+          },
+          "publishedAt": "2026-01-02T03:04:05.000Z",
+          "tags": [
+            "masonry",
+            "atproto"
+          ],
+          "title": "one wall",
+          "url": "https://blog.example.com/one-wall"
+        },
+        {
+          "author": {
+            "avatar": null,
+            "did": "did:plc:bare",
+            "displayName": null,
+            "handle": "bare.example.com"
+          },
+          "coverImage": null,
+          "description": null,
+          "id": "at://did:plc:bare/site.standard.document/bare",
+          "kind": "blog",
+          "publication": {
+            "icon": null,
+            "name": "the hod",
+            "url": "https://blog.example.com"
+          },
+          "publishedAt": "2026-01-02T03:04:05.000Z",
+          "tags": [],
+          "title": "bare",
+          "url": "https://blog.example.com/bare"
+        },
+        {
+          "activity": "music",
+          "aspectRatio": {
+            "height": 9,
+            "width": 16
+          },
+          "author": {
+            "avatar": "https://cdn.example.com/avatar.jpg",
+            "did": "did:plc:mason",
+            "displayName": "mason",
+            "handle": "mason.example.com"
+          },
+          "blur": {
+            "label": "!warn"
+          },
+          "createdAt": "2026-01-02T03:04:05.000Z",
+          "durationMs": 5400000,
+          "id": "at://did:plc:mason/place.stream.livestream/full",
+          "kind": "video",
+          "likeCount": 7,
+          "live": true,
+          "playlist": "https://stream.place/playback/full.m3u8",
+          "poster": "https://cdn.example.com/poster.jpg",
+          "source": "streamplace",
+          "title": "laying bricks live",
+          "url": "https://stream.place/mason.example.com",
+          "viewerCount": 42
+        },
+        {
+          "activity": null,
+          "aspectRatio": null,
+          "author": {
+            "avatar": null,
+            "did": "did:plc:bare",
+            "displayName": null,
+            "handle": "bare.example.com"
+          },
+          "createdAt": "2026-01-02T03:04:05.000Z",
+          "durationMs": null,
+          "id": "at://did:plc:bare/app.bsky.feed.post/vid",
+          "kind": "video",
+          "likeCount": 0,
+          "live": false,
+          "playlist": "https://video.example.com/bare.m3u8",
+          "poster": null,
+          "source": "bluesky",
+          "title": "",
+          "url": "https://bsky.app/profile/bare.example.com/post/vid",
+          "viewerCount": null
+        }
+      ]
+    },
+    "final": {
+      "cursor": null,
+      "items": []
+    },
+    "preview": {
+      "cursor": "opaque-cursor-token",
+      "items": [],
+      "warming": true
+    }
+  },
+  "query": {
+    "intent": {
+      "freeze": true,
+      "preview": true
+    },
+    "mode": {
+      "glaze": true
+    }
+  },
+  "vocab": {
+    "videoSource": {
+      "bluesky": true,
+      "streamplace": true
+    }
+  }
+}

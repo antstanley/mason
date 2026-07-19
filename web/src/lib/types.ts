@@ -1,4 +1,19 @@
-// Mirrors mortar's serde output (server/crates/mortar-core/src/model.rs)
+// Mirrors mortar's serde output (server/crates/mortar-core/src/model.rs).
+//
+// Drift guard: web/src/lib/contract-check.ts asserts these types against
+// server/crates/mortar-core/tests/fixtures/contract.json, which a Rust test
+// (server/crates/mortar-core/tests/contract.rs) pins byte-for-byte against the
+// real serialization. A rename or shape change on either side now fails a
+// check (cargo test there, tsc here) instead of shipping silently.
+//
+// The import below is the guard's own tripwire: it is type-only (erased at
+// compile time, so nothing reaches the runtime graph; the cycle with
+// contract-check importing this file back is legal for types), and it exists
+// so that DELETING contract-check.ts is itself a tsc error rather than a
+// silent loss of coverage. The named block is empty on purpose: only the
+// module's existence is being asserted, none of its exports are wanted here.
+// oxlint-disable-next-line no-empty-named-blocks
+import type {} from "./contract-check";
 
 export interface Author {
   did: string;
@@ -94,6 +109,18 @@ export interface FeedResponse {
    *  the client keeps polling and reflowing the first screen until it settles. */
   warming?: boolean;
 }
+
+/** The named walls a feed request can ask for via `?mode=`; absent asks for
+ *  the default full wall. Mirrors Mode::from_query in
+ *  server/crates/mortar-core/src/mode.rs; pinned by the contract fixture. */
+export type FeedMode = "glaze";
+
+/** The machine codes mortar itself can emit in an ErrorEnvelope. Mirrors
+ *  AppError::status_and_code in server/crates/mortar-core/src/error.rs; pinned
+ *  by the contract fixture. The web adds its own out-of-band codes ("wasm",
+ *  "unknown") for failures that never reached mortar, so ErrorEnvelope.error
+ *  stays a plain string. */
+export type MortarErrorCode = "bad_request" | "actor_not_found" | "login_required" | "upstream";
 
 /** The one error shape mortar emits in both build modes: the native server
  *  sends it as a JSON body (status on the response line), the wasm build
