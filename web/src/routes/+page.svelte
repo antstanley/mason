@@ -9,14 +9,17 @@
 	// the URL is the source of truth: /?actor=handle; shareable walls
 	const actor = $derived(page.url.searchParams.get('actor'));
 
+	// the glaze layout is also an algorithm: choosing it re-fetches an
+	// images-only wall, the same way switching actor does. Only the glaze
+	// transition changes this value, so bento <-> masonry no longer re-mixes;
+	// $derived only propagates on a real change.
+	const mode = $derived(layout.id === 'glaze' ? 'glaze' : undefined);
+
 	$effect(() => {
 		const current = actor;
-		// the glaze layout is also an algorithm: choosing it re-fetches an
-		// images-only wall, the same way switching actor does. Tracking layout.id
-		// makes the switch to (or from) glaze a fresh wall.
-		const mode = layout.id === 'glaze' ? 'glaze' : undefined;
+		const currentMode = mode;
 		// untrack: reset mutates feed state; tracking it would loop this effect
-		if (current) untrack(() => feed.reset(current, mode));
+		if (current) untrack(() => feed.reset(current, currentMode));
 	});
 </script>
 
