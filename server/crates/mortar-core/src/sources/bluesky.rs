@@ -8,6 +8,7 @@ use crate::http::{Bucket, Http, HttpError};
 use crate::model::{
     AspectRatio, Author, Blur, Brick, ExternalEmbed, ImageEmbed, PostBrick, VideoBrick, VideoSource,
 };
+use crate::sources::util::urlencode;
 
 /// One author's recent posts, videos among them.
 #[derive(Serialize, Deserialize, Clone)]
@@ -132,7 +133,10 @@ pub async fn get_profile(http: &Http, base: &str, actor: &str) -> Result<Profile
         #[serde(default)]
         labels: Vec<Label>,
     }
-    let url = format!("{base}/xrpc/app.bsky.actor.getProfile?actor={actor}");
+    let url = format!(
+        "{base}/xrpc/app.bsky.actor.getProfile?actor={}",
+        urlencode(actor)
+    );
     let profile: ProfileView = http.get_json(&url, Bucket::Appview).await?;
     Ok(Profile {
         did: profile.did,
@@ -165,9 +169,12 @@ pub async fn get_follows(
     let mut follows = Vec::new();
     let mut cursor = from;
     for _ in 0..max_pages {
-        let mut url = format!("{base}/xrpc/app.bsky.graph.getFollows?actor={did}&limit=100");
+        let mut url = format!(
+            "{base}/xrpc/app.bsky.graph.getFollows?actor={}&limit=100",
+            urlencode(did)
+        );
         if let Some(c) = &cursor {
-            url.push_str(&format!("&cursor={c}"));
+            url.push_str(&format!("&cursor={}", urlencode(c)));
         }
         let page: FollowsPage = http.get_json(&url, Bucket::Appview).await?;
         follows.extend(page.follows);
@@ -206,7 +213,8 @@ async fn author_feed(
     limit: u32,
 ) -> Result<AuthorYield, HttpError> {
     let url = format!(
-        "{base}/xrpc/app.bsky.feed.getAuthorFeed?actor={did}&limit={limit}&filter={filter}"
+        "{base}/xrpc/app.bsky.feed.getAuthorFeed?actor={}&limit={limit}&filter={filter}",
+        urlencode(did)
     );
     let page: AuthorFeed = http.get_json(&url, Bucket::Appview).await?;
 

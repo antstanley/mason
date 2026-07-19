@@ -20,7 +20,7 @@ use serde::Deserialize;
 use crate::http::{Bucket, Http, HttpError};
 use crate::model::{AspectRatio, Author, Brick, VideoBrick, VideoSource};
 use crate::sources::pds::blob_url;
-use crate::sources::util::is_http_url;
+use crate::sources::util::{is_http_url, urlencode};
 
 /// Archived streams read per author. They are long, rare, and long-lived; a
 /// handful each is plenty.
@@ -32,19 +32,6 @@ const WIDESCREEN: AspectRatio = AspectRatio {
     width: 16,
     height: 9,
 };
-
-/// at-uris are full of `:` and `/`, none of which may be read as query
-/// structure.
-fn urlencode(raw: &str) -> String {
-    raw.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (b as char).to_string()
-            }
-            other => format!("%{other:02X}"),
-        })
-        .collect()
-}
 
 /// The creation time encoded in a record key.
 ///

@@ -1,5 +1,21 @@
 //! Small shared helpers for the source layer.
 
+/// Percent-encode a value being interpolated into a query string. Everything
+/// outside the RFC 3986 unreserved set is escaped, so `&`, `#`, `?`, and spaces
+/// in a caller-supplied actor, did, or cursor can never rewrite or truncate the
+/// upstream query (or poison a cache key keyed on it). Normal ASCII handles are
+/// unreserved and pass through byte for byte.
+pub fn urlencode(raw: &str) -> String {
+    raw.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            other => format!("%{other:02X}"),
+        })
+        .collect()
+}
+
 /// Whether a URL is safe to hand a brick, which is to say safe to reach an
 /// `<a href>` in the browser: only http and https. Third-party records carry
 /// arbitrary strings in their url fields, and `javascript:`, `data:`, and
