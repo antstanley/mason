@@ -1,6 +1,6 @@
 {
 	"name": "mason",
-	"version": "0.6.2",
+	"version": "0.6.3",
 	"private": true,
 	"description": "One wall, every brick. An atproto discovery app.",
 	"packageManager": "pnpm@11.9.0",
