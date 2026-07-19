@@ -12,16 +12,8 @@ use tokio::sync::Mutex;
 use crate::algo::snapshot::Snapshot;
 use crate::model::Brick;
 use crate::platform::Instant;
-use crate::sources::bluesky::{AuthorYield, Follow};
-use crate::sources::streamplace::LiveStream;
-
-/// One author's standard.site yield.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
-pub struct StdDocs {
-    pub bricks: Vec<Brick>,
-    /// post URIs suppressed via bskyPostRef; the blog card wins
-    pub suppressed_posts: Vec<String>,
-}
+// yield types come through the sources seam, never a source submodule directly
+use crate::sources::{AuthorYield, Follow, LiveStream, StdDocs};
 
 pub struct TtlCache<K, V> {
     entries: Mutex<HashMap<K, Entry<V>>>,

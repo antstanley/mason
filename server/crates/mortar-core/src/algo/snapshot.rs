@@ -21,16 +21,12 @@ use tokio::sync::{Mutex, Notify};
 use xxhash_rust::xxh3::xxh3_64_with_seed;
 
 use super::{mix, score};
-use crate::cache::{
-    STD_DOCS_NEGATIVE_TTL, STD_DOCS_POSITIVE_TTL, STREAMS_NEGATIVE_TTL, STREAMS_POSITIVE_TTL,
-    StdDocs,
-};
-use crate::error::AppError;
 use crate::mode::Mode;
 use crate::model::{Author, Brick};
 use crate::platform::{self, Instant, SystemTime};
-use crate::sources::bluesky::AuthorYield;
-use crate::sources::{bluesky, pds, standardsite, streamplace};
+// everything fetched arrives through the sources seam as bricks (plus the
+// Follow list); no per-source network or caching code lives in algo/
+use crate::sources::{Follow, StdDocs, fetch};
 use crate::state::AppState;
 
 /// Sampled authors per snapshot; never fan out to the whole follow graph.
@@ -72,20 +68,6 @@ const KIND_CAPS: [usize; mix::KINDS] = [500, 60, 30, 20, 5];
 /// Author-feed fan-out concurrency (the AppView rate limiter, 10/s, is the
 /// real governor here).
 const FAN_OUT: usize = 16;
-/// Repo-read fan-out. Higher, because these go to a hundred different PDSes
-/// rather than to one rate-limited AppView, and the slowest of them must not
-/// hold up the rest.
-const REPO_FAN_OUT: usize = 32;
-/// Pages of the follow graph (100 each) the first wall will wait for. One page
-/// is one round trip and 100 follows, already more than the 100-author cohort
-/// samples, so the first wall waits for exactly that and no more; each further
-/// page is a sequential round trip that fetches nothing while it blocks. The
-/// rest of the graph is chased in the background (`FOLLOW_PAGES_MAX`) and the
-/// NEXT wall samples the whole of it.
-const FOLLOW_PAGES_EAGER: usize = 1;
-/// The cap on the whole graph, chased in the background. The cohort sampler
-/// has never needed more than this.
-const FOLLOW_PAGES_MAX: usize = 20;
 /// The fans that supply the rare kinds: repo reads, and the live list.
 const SLOW_FANS: usize = 2;
 /// How long the FIRST page will wait for those two before laying anyway,
@@ -315,7 +297,7 @@ async fn fill(
 ) {
     let started = Instant::now();
 
-    let follows = match get_follows_cached(&state, &viewer).await {
+    let follows = match fetch::get_follows_cached(&state, &viewer).await {
         Ok(f) => f,
         Err(e) => {
             tracing::warn!("follows fetch for {viewer} failed: {e}");
@@ -355,7 +337,7 @@ async fn fill(
             // them. It runs alongside the fan-out so it lands in time for the
             // first paint.
             let live_fill = async {
-                let bricks = live_bricks(&state, &follows).await;
+                let bricks = fetch::live_bricks(&state, &follows).await;
                 if !bricks.is_empty() {
                     tracing::debug!("{} of the follow graph is live", bricks.len());
                     let now = Utc::now();
@@ -389,17 +371,17 @@ async fn fill(
                         // blogs and archived streams both read the author's repo,
                         // so they share one identity lookup rather than racing
                         // for two
-                        let Some(pds) = pds_cached(&state, &author.did).await else {
+                        let Some(pds) = fetch::pds_cached(&state, &author.did).await else {
                             return (author, Arc::new(StdDocs::default()), Arc::new(Vec::new()));
                         };
                         let (docs, streams) = tokio::join!(
-                            std_docs_cached(&state, &pds, &author),
-                            streams_cached(&state, &pds, &author),
+                            fetch::std_docs_cached(&state, &pds, &author),
+                            fetch::streams_cached(&state, &pds, &author),
                         );
                         (author, docs, streams)
                     }
                 }))
-                .buffer_unordered(REPO_FAN_OUT);
+                .buffer_unordered(fetch::REPO_FAN_OUT);
 
                 let mut yielding: Vec<String> = Vec::new();
                 while let Some((author, docs, streams)) = repos.next().await {
@@ -482,9 +464,9 @@ async fn fan_out_authors(
             // wall skims their last thirty posts. Separate caches, so neither
             // read clobbers the other's.
             let yield_ = if deep_media {
-                image_feed_cached(&state, &author.did).await
+                fetch::image_feed_cached(&state, &author.did).await
             } else {
-                author_feed_cached(&state, &author.did).await
+                fetch::author_feed_cached(&state, &author.did).await
             };
             (author, yield_)
         }
@@ -540,19 +522,12 @@ async fn drop_ended_streams(state: &Arc<AppState>, snapshot: &Snapshot) {
         }
     }
 
-    // Prune against a live list we ALREADY hold. Fetching one here would put a
-    // network round trip in the middle of somebody's scroll every time the
-    // sixty-second cache lapsed, to answer a question that only matters to the
-    // rare wall with a live brick still in its pool. Refresh it for the next
-    // page instead, and let this one through.
-    let Some(network) = state.caches.live.get(&0u8).await else {
-        let refresh = Arc::clone(state);
-        platform::spawn(async move {
-            let _ = live_cached(&refresh).await;
-        });
+    // Prune against a live list we ALREADY hold. The seam refreshes a lapsed
+    // one in the background for the next page and lets this one through, so a
+    // network round trip never lands in the middle of somebody's scroll.
+    let Some(still_live) = fetch::cached_live_uris(state).await else {
         return;
     };
-    let still_live: HashSet<&str> = network.iter().map(|s| s.uri()).collect();
 
     let mut inner = snapshot.inner.lock().await;
     let before = inner.pool.len();
@@ -679,244 +654,13 @@ pub async fn get_page(
     }
 }
 
-/// The follow graph, but only as much of it as a waiting person can justify.
-///
-/// Follows page 100 at a time and each page is a round trip that blocks the
-/// next, so a 2000-follow graph costs twenty sequential requests: ten seconds
-/// in which not one post has been fetched, and a wall that arrives empty. The
-/// cohort samples 100 authors regardless, so a few hundred follows is plenty
-/// to build the first wall out of. The rest is fetched behind the user's back
-/// and cached, so their NEXT wall samples the whole graph.
-async fn get_follows_cached(
-    state: &Arc<AppState>,
-    did: &str,
-) -> Result<Arc<Vec<bluesky::Follow>>, AppError> {
-    if let Some(follows) = state.caches.follows.get(&did.to_string()).await {
-        return Ok(follows);
-    }
-    let (head, cursor) = bluesky::get_follows(
-        &state.http,
-        &state.config.appview_base,
-        did,
-        None,
-        FOLLOW_PAGES_EAGER,
-    )
-    .await
-    .map_err(|e| AppError::Upstream(e.to_string()))?;
-    let head = Arc::new(head);
-
-    let Some(cursor) = cursor else {
-        // the whole graph fitted in the head start; nothing left to chase
-        state
-            .caches
-            .follows
-            .insert(did.to_string(), Arc::clone(&head))
-            .await;
-        return Ok(head);
-    };
-
-    // Deliberately NOT cached: a partial graph must never masquerade as the
-    // whole one. The task below replaces it with the real thing.
-    let rest_state = Arc::clone(state);
-    let rest_did = did.to_string();
-    let rest_head = Arc::clone(&head);
-    platform::spawn(async move {
-        let remaining = FOLLOW_PAGES_MAX.saturating_sub(FOLLOW_PAGES_EAGER);
-        match bluesky::get_follows(
-            &rest_state.http,
-            &rest_state.config.appview_base,
-            &rest_did,
-            Some(cursor),
-            remaining,
-        )
-        .await
-        {
-            Ok((tail, _)) => {
-                let mut whole = rest_head.as_ref().clone();
-                whole.extend(tail);
-                tracing::debug!("follow graph for {rest_did} completed: {}", whole.len());
-                rest_state
-                    .caches
-                    .follows
-                    .insert(rest_did, Arc::new(whole))
-                    .await;
-            }
-            Err(e) => tracing::debug!("completing follow graph for {rest_did} failed: {e}"),
-        }
-    });
-
-    Ok(head)
-}
-
-async fn author_feed_cached(state: &Arc<AppState>, author_did: &str) -> Arc<AuthorYield> {
-    if let Some(cached) = state.caches.author_feed.get(&author_did.to_string()).await {
-        return cached;
-    }
-    let yield_ =
-        match bluesky::get_author_feed(&state.http, &state.config.appview_base, author_did).await {
-            Ok(yield_) => Arc::new(yield_),
-            Err(e) => {
-                // a single author failing must never sink the wall
-                tracing::debug!("author feed {author_did} failed: {e}");
-                Arc::new(AuthorYield { bricks: Vec::new() })
-            }
-        };
-    state
-        .caches
-        .author_feed
-        .insert(author_did.to_string(), Arc::clone(&yield_))
-        .await;
-    yield_
-}
-
-/// One author's recent MEDIA posts, read deep for the glaze wall. Same shape as
-/// `author_feed_cached` but a separate endpoint (`posts_with_media`) and a
-/// separate cache, so the image wall's deeper read never displaces the full
-/// wall's shallow one for the same author.
-async fn image_feed_cached(state: &Arc<AppState>, author_did: &str) -> Arc<AuthorYield> {
-    if let Some(cached) = state.caches.image_feed.get(&author_did.to_string()).await {
-        return cached;
-    }
-    let yield_ =
-        match bluesky::get_image_feed(&state.http, &state.config.appview_base, author_did).await {
-            Ok(yield_) => Arc::new(yield_),
-            Err(e) => {
-                tracing::debug!("image feed {author_did} failed: {e}");
-                Arc::new(AuthorYield { bricks: Vec::new() })
-            }
-        };
-    state
-        .caches
-        .image_feed
-        .insert(author_did.to_string(), Arc::clone(&yield_))
-        .await;
-    yield_
-}
-
-/// Who is live on Streamplace, network-wide. Viewer-independent by
-/// construction, which is what makes the single cache key honest: this
-/// function must never see the follow graph, or one viewer's friends would be
-/// served to the next.
-async fn live_cached(state: &Arc<AppState>) -> Arc<Vec<streamplace::LiveStream>> {
-    if let Some(cached) = state.caches.live.get(&0u8).await {
-        return cached;
-    }
-    let streams = match streamplace::get_live(&state.http, &state.config.streamplace_base).await {
-        Ok(streams) => Arc::new(streams),
-        Err(e) => {
-            tracing::debug!("streamplace live list failed: {e}");
-            Arc::new(Vec::new())
-        }
-    };
-    state.caches.live.insert(0u8, Arc::clone(&streams)).await;
-    streams
-}
-
-/// Which of the network's live streams belong to this viewer. Separated out
-/// so the filter can be tested without a whole AppState: it is the seam where
-/// a shared cache becomes one person's wall, and getting it wrong shows a
-/// viewer strangers.
-fn followed_live<'a>(
-    network: &'a [streamplace::LiveStream],
-    follows: &[bluesky::Follow],
-) -> Vec<&'a streamplace::LiveStream> {
-    // hidden follows are excluded here too: their live stream comes from
-    // Streamplace, a source the AppView's labels never reach, so the cohort
-    // filter alone would miss it
-    let followed: HashSet<&str> = follows
-        .iter()
-        .filter(|f| !f.hidden())
-        .map(|f| f.did.as_str())
-        .collect();
-    network
-        .iter()
-        .filter(|s| followed.contains(s.did()))
-        .collect()
-}
-
-/// The live streams this particular viewer follows, as bricks.
-async fn live_bricks(state: &Arc<AppState>, follows: &[bluesky::Follow]) -> Vec<Brick> {
-    let network = live_cached(state).await;
-    // only now, for the handful that survive the filter, is it worth finding
-    // out where each repo (and so its poster) lives. Resolve them concurrently
-    // rather than one plc round trip at a time; `buffered` bounds the fan-out
-    // and preserves input order, so the pool sees the same bricks in the same
-    // order the serial version produced.
-    let followed: Vec<streamplace::LiveStream> = followed_live(&network, follows)
-        .into_iter()
-        .cloned()
-        .collect();
-    stream::iter(followed.into_iter().map(|live| {
-        let state = Arc::clone(state);
-        async move {
-            let pds = pds_cached(&state, live.did()).await;
-            live.into_brick(&state.config.streamplace_base, pds.as_deref())
-        }
-    }))
-    .buffered(REPO_FAN_OUT)
-    .collect()
-    .await
-}
-
-/// Where an author's repo lives. Cached for a day: identity moves rarely, and
-/// both the blog and the stream reader need the answer for every author.
-async fn pds_cached(state: &Arc<AppState>, did: &str) -> Option<String> {
-    if let Some(cached) = state.caches.pds.get(&did.to_string()).await {
-        return Some(cached);
-    }
-    match pds::resolve(&state.http, &state.config.plc_base, did).await {
-        Ok(pds) => {
-            state.caches.pds.insert(did.to_string(), pds.clone()).await;
-            Some(pds)
-        }
-        Err(e) => {
-            tracing::debug!("pds resolution for {did} failed: {e}");
-            None
-        }
-    }
-}
-
-/// One author's archived Streamplace videos.
-async fn streams_cached(state: &Arc<AppState>, pds: &str, author: &Author) -> Arc<Vec<Brick>> {
-    if let Some(cached) = state.caches.streams.get(&author.did).await {
-        return cached;
-    }
-    let bricks =
-        match streamplace::get_videos(&state.http, pds, &state.config.streamplace_base, author)
-            .await
-        {
-            Ok(bricks) => Arc::new(bricks),
-            Err(e) => {
-                // a transient PDS failure is not "this author never streams";
-                // caching it would silence them for a day. Skip the insert so
-                // the next snapshot simply asks again. A genuine empty repo
-                // comes back Ok(empty) and takes the negative TTL below.
-                tracing::debug!("streamplace videos for {} failed: {e}", author.did);
-                return Arc::new(Vec::new());
-            }
-        };
-    // the same shape as blogs: the few who stream get rechecked within the
-    // hour, the many who never will are left alone for a day
-    let ttl = if bricks.is_empty() {
-        STREAMS_NEGATIVE_TTL
-    } else {
-        STREAMS_POSITIVE_TTL
-    };
-    state
-        .caches
-        .streams
-        .insert_with_ttl(author.did.clone(), Arc::clone(&bricks), ttl)
-        .await;
-    bricks
-}
-
 /// Cohort: up to KNOWN_ACTIVE authors that yielded content before, topped up
 /// with a seeded-random sample of the rest so refreshes rotate through the
 /// whole follow graph.
 async fn sample_cohort(
     state: &Arc<AppState>,
     activity_key: &str,
-    follows: &[bluesky::Follow],
+    follows: &[Follow],
     seed: u64,
 ) -> Vec<Author> {
     let known_active = state
@@ -930,7 +674,7 @@ async fn sample_cohort(
     // author-feed label filter cannot see. This is the single choke point that
     // keeps a logged-out opt-out (and an adult-labelled account) off every
     // source at once.
-    let by_did: std::collections::HashMap<&str, &bluesky::Follow> = follows
+    let by_did: std::collections::HashMap<&str, &Follow> = follows
         .iter()
         .filter(|f| !f.hidden())
         .map(|f| (f.did.as_str(), f))
@@ -944,7 +688,7 @@ async fn sample_cohort(
         .collect();
 
     let chosen: HashSet<&str> = cohort.iter().map(|a| a.did.as_str()).collect();
-    let mut rest: Vec<&bluesky::Follow> = follows
+    let mut rest: Vec<&Follow> = follows
         .iter()
         .filter(|f| !f.hidden() && !chosen.contains(f.did.as_str()))
         .collect();
@@ -956,37 +700,6 @@ async fn sample_cohort(
             .map(Author::from),
     );
     cohort
-}
-
-async fn std_docs_cached(state: &Arc<AppState>, pds: &str, author: &Author) -> Arc<StdDocs> {
-    if let Some(cached) = state.caches.std_docs.get(&author.did).await {
-        return cached;
-    }
-    let docs = match standardsite::get_documents(&state.http, pds, author).await {
-        Ok(result) => Arc::new(StdDocs {
-            bricks: result.bricks,
-            suppressed_posts: result.suppressed_posts,
-        }),
-        Err(e) => {
-            // same as streams: a transient failure must not be remembered for
-            // a day as "this author publishes nothing". Skip the insert; only
-            // a successful empty listing earns the negative TTL.
-            tracing::debug!("standard.site fetch for {} failed: {e}", author.did);
-            return Arc::new(StdDocs::default());
-        }
-    };
-    // publishers get rechecked soon; the silent majority is cached for a day
-    let ttl = if docs.bricks.is_empty() {
-        STD_DOCS_NEGATIVE_TTL
-    } else {
-        STD_DOCS_POSITIVE_TTL
-    };
-    state
-        .caches
-        .std_docs
-        .insert_with_ttl(author.did.clone(), Arc::clone(&docs), ttl)
-        .await;
-    docs
 }
 
 async fn record_activity(state: &Arc<AppState>, activity_key: &str, mut yielding: Vec<String>) {
@@ -1060,10 +773,6 @@ mod tests {
             tags: vec![],
             published_at: Utc::now().to_rfc3339(),
         })
-    }
-
-    fn live_stream(did: &str) -> streamplace::LiveStream {
-        streamplace::LiveStream::for_test(did)
     }
 
     fn inner() -> Inner {
@@ -1199,12 +908,8 @@ mod tests {
         );
     }
 
-    /// The live list is one call for the WHOLE network, cached under a single
-    /// key and shared by every viewer on the machine. The filter is therefore
-    /// the only thing standing between a viewer and a wall of strangers, and
-    /// it must key off the follow graph, not off who asked first.
-    fn follow(did: &str) -> bluesky::Follow {
-        bluesky::Follow {
+    fn follow(did: &str) -> Follow {
+        Follow {
             did: did.into(),
             handle: format!("{did}.test"),
             display_name: None,
@@ -1213,42 +918,11 @@ mod tests {
         }
     }
 
-    fn opted_out_follow(did: &str) -> bluesky::Follow {
+    fn opted_out_follow(did: &str) -> Follow {
         let mut f = follow(did);
         f.labels =
             serde_json::from_value(serde_json::json!([{"val": "!no-unauthenticated"}])).unwrap();
         f
-    }
-
-    #[test]
-    fn a_viewer_only_sees_the_streams_they_follow() {
-        let network = vec![
-            live_stream("did:plc:friend"),
-            live_stream("did:plc:stranger"),
-        ];
-        let follows = vec![follow("did:plc:friend")];
-
-        let mine = followed_live(&network, &follows);
-        assert_eq!(mine.len(), 1);
-        assert_eq!(mine[0].did(), "did:plc:friend");
-
-        // and someone who follows nobody live gets nothing, rather than
-        // inheriting whatever the last viewer's snapshot happened to cache
-        assert!(followed_live(&network, &[]).is_empty());
-    }
-
-    /// A followed account that opted out of logged-out visibility is kept off
-    /// the wall whole: not just their posts (dropped in the author-feed reader)
-    /// but their live stream too, which comes from a different source that
-    /// never sees the AppView label.
-    #[test]
-    fn an_opted_out_friend_is_not_shown_live() {
-        let network = vec![live_stream("did:plc:friend")];
-        let follows = vec![opted_out_follow("did:plc:friend")];
-        assert!(
-            followed_live(&network, &follows).is_empty(),
-            "an opted-out friend's stream must not surface to a logged-out wall"
-        );
     }
 
     /// The cohort is where posts, blogs and archived streams are all fanned out
@@ -1481,7 +1155,7 @@ mod tests {
 
         // the fill populates this; the prune reads it rather than fetching one
         // mid-scroll
-        live_cached(&state).await;
+        fetch::live_cached(&state).await;
         drop_ended_streams(&state, &snapshot).await;
 
         let inner = snapshot.inner.lock().await;

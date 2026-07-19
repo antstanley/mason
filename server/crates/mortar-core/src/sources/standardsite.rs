@@ -17,6 +17,14 @@ pub struct StandardSiteYield {
     pub suppressed_posts: Vec<String>,
 }
 
+/// One author's standard.site yield, as cached and persisted.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+pub struct StdDocs {
+    pub bricks: Vec<Brick>,
+    /// post URIs suppressed via bskyPostRef; the blog card wins
+    pub suppressed_posts: Vec<String>,
+}
+
 pub async fn get_documents(
     http: &Http,
     pds: &str,

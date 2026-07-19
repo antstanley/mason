@@ -18,9 +18,10 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::cache::{Caches, StdDocs};
+use crate::cache::Caches;
 use crate::model::Brick;
-use crate::sources::bluesky::{AuthorYield, Follow};
+// yield types come through the sources seam, never a source submodule directly
+use crate::sources::{AuthorYield, Follow, StdDocs};
 
 /// Bump when any persisted shape changes; imports of older bundles are
 /// discarded wholesale (they're just caches).
