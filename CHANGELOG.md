@@ -1,5 +1,17 @@
 # mason
 
+## 0.6.4
+
+### Patch Changes
+
+- [#44](https://github.com/antstanley/mason/pull/44) [`68f6fbd`](https://github.com/antstanley/mason/commit/68f6fbdaaaf18a216f6fc463bb399e87a29f33d5) Thanks [@antstanley](https://github.com/antstanley)! - scope the WCAG 2.2 AA claim honestly (video captions excepted pending upstream data) and reserve a caption-track path: VideoBrick grows an optional captions list and the player renders track elements when it is populated
+
+- [#43](https://github.com/antstanley/mason/pull/43) [`38fd727`](https://github.com/antstanley/mason/commit/38fd727f2b403f5cf7ad64c1e6315cde1c8490e7) Thanks [@antstanley](https://github.com/antstanley)! - a deploy no longer hard-reloads an active tab: the reload waits until the tab is hidden or the next navigation, so the wall, scroll position, and playing video survive
+
+- [#47](https://github.com/antstanley/mason/pull/47) [`d5ab5a9`](https://github.com/antstanley/mason/commit/d5ab5a982d5abf4fe95f3c0bbb642971d028f6fa) Thanks [@antstanley](https://github.com/antstanley)! - persist only the caches that changed, each under its own key, and never during preview polls
+
+- [#48](https://github.com/antstanley/mason/pull/48) [`3237320`](https://github.com/antstanley/mason/commit/323732065c6d502e0205d1f75c0a7153e1571e72) Thanks [@antstanley](https://github.com/antstanley)! - masonry lays one keyed list in feed order: column changes keep every brick's node, state and focus, re-lays are a single pass, and tab order follows the feed
+
 ## 0.6.3
 
 ### Patch Changes
