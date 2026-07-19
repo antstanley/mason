@@ -1,0 +1,5 @@
+# pinned so every build (local, CI, deploy) uses the same rustc as the
+# workspace rust-version. bump this and workspace.package.rust-version together.
+[toolchain]
+channel = "1.97.0"
+targets = ["wasm32-unknown-unknown"]
