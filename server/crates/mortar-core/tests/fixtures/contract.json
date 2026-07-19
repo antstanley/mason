@@ -138,6 +138,13 @@
         "blur": {
           "label": "!warn"
         },
+        "captions": [
+          {
+            "label": "english",
+            "lang": "en",
+            "src": "https://cdn.example.com/full.vtt"
+          }
+        ],
         "createdAt": "2026-01-02T03:04:05.000Z",
         "durationMs": 5400000,
         "id": "at://did:plc:mason/place.stream.livestream/full",
@@ -314,6 +321,13 @@
           "blur": {
             "label": "!warn"
           },
+          "captions": [
+            {
+              "label": "english",
+              "lang": "en",
+              "src": "https://cdn.example.com/full.vtt"
+            }
+          ],
           "createdAt": "2026-01-02T03:04:05.000Z",
           "durationMs": 5400000,
           "id": "at://did:plc:mason/place.stream.livestream/full",

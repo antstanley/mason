@@ -57,6 +57,7 @@
 				poster={brick.poster}
 				aspectRatio={ratio}
 				live={brick.live}
+				captions={brick.captions ?? []}
 			/>
 			<button
 				type="button"

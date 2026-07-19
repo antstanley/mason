@@ -690,6 +690,7 @@ mod tests {
             viewer_count: Some(2),
             duration_ms: None,
             activity: None,
+            captions: Vec::new(),
             blur: None,
         })
     }
@@ -905,6 +906,7 @@ mod tests {
             viewer_count: Some(4),
             duration_ms: None,
             activity: None,
+            captions: Vec::new(),
             blur: None,
         });
         i.admit(&ancient, now);

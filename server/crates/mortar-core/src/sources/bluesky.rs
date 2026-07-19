@@ -391,6 +391,9 @@ fn post_to_brick(post: PostView) -> Option<Brick> {
             viewer_count: None,
             duration_ms: None,
             activity: None,
+            // Bluesky's app.bsky.embed.video#view exposes no caption tracks;
+            // captions stay empty until upstream carries them
+            captions: Vec::new(),
             blur: None,
         })),
         embed => {

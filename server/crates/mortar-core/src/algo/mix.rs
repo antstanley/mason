@@ -245,6 +245,7 @@ mod tests {
             viewer_count: None,
             duration_ms: None,
             activity: None,
+            captions: Vec::new(),
             blur: None,
         })
     }

@@ -29,8 +29,8 @@ use mortar_core::error::AppError;
 use mortar_core::feed::FeedIntent;
 use mortar_core::mode::Mode;
 use mortar_core::model::{
-    AspectRatio, Author, BlogBrick, Blur, Brick, ExternalEmbed, FeedResponse, ImageEmbed,
-    PostBrick, Publication, VideoBrick, VideoSource,
+    AspectRatio, Author, BlogBrick, Blur, Brick, CaptionTrack, ExternalEmbed, FeedResponse,
+    ImageEmbed, PostBrick, Publication, VideoBrick, VideoSource,
 };
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
@@ -168,6 +168,13 @@ fn bricks() -> Vec<(Brick, &'static str, Value)> {
         viewer_count: Some(42),
         duration_ms: Some(5_400_000),
         activity: Some("music".into()),
+        // no upstream carries captions yet, but the full instance pins
+        // CaptionTrack's wire shape so it cannot drift unnoticed
+        captions: vec![CaptionTrack {
+            src: "https://cdn.example.com/full.vtt".into(),
+            lang: "en".into(),
+            label: "english".into(),
+        }],
         blur: Some(Blur {
             label: "!warn".into(),
         }),
@@ -187,6 +194,8 @@ fn bricks() -> Vec<(Brick, &'static str, Value)> {
         viewer_count: None,
         duration_ms: None,
         activity: None,
+        // empty on purpose: the bare instance pins skip-when-empty absence
+        captions: Vec::new(),
         blur: None,
     });
 

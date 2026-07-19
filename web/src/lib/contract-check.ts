@@ -30,6 +30,7 @@ import type {
   BlogBrick,
   Blur,
   Brick,
+  CaptionTrack,
   ErrorEnvelope,
   FeedMode,
   FeedResponse,
@@ -110,6 +111,9 @@ export type PublicationFieldsMatch = Assert<
 >;
 export type VideoFieldsMatch = Assert<
   Equal<keyof typeof contract.bricks.video.full, keyof VideoBrick>
+>;
+export type CaptionTrackFieldsMatch = Assert<
+  Equal<keyof (typeof contract.bricks.video.full.captions)[number], keyof CaptionTrack>
 >;
 export type FeedResponseFieldsMatch = Assert<
   Equal<keyof typeof contract.pages.preview, keyof FeedResponse>
