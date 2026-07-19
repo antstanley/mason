@@ -105,7 +105,11 @@ pub fn author_key(brick: &Brick) -> &str {
 
 fn engagement(brick: &Brick) -> f64 {
     match brick {
-        Brick::Post(b) => (b.like_count + 2 * b.repost_count) as f64,
+        // saturating: the counts are upstream JSON, and a hostile pair near
+        // u64::MAX would overflow the plain sum
+        Brick::Post(b) => b
+            .like_count
+            .saturating_add(b.repost_count.saturating_mul(2)) as f64,
         // a live stream's audience is its engagement, and it is the only kind
         // whose signal is being generated as you look at it
         Brick::Video(b) if b.live => b.viewer_count.unwrap_or(0) as f64,
