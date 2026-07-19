@@ -262,6 +262,12 @@ pub async fn get_or_build(
     // first-paint threshold: enough bricks pooled, or deadline
     let deadline = Instant::now() + FIRST_PAINT_DEADLINE;
     loop {
+        // registered BEFORE the state check: Notify only wakes futures that
+        // exist (and are enabled) when it fires, so a notify slipping in
+        // between the lock release and the await would otherwise be lost and
+        // stall first paint until the deadline
+        let mut notified = std::pin::pin!(snapshot.progress.notified());
+        notified.as_mut().enable();
         {
             let inner = snapshot.inner.lock().await;
             if !inner.warming || inner.distinct_authors() >= FIRST_PAINT_AUTHORS {
@@ -272,7 +278,7 @@ pub async fn get_or_build(
         if remaining.is_zero() {
             break;
         }
-        let _ = platform::timeout(remaining, snapshot.progress.notified()).await;
+        let _ = platform::timeout(remaining, notified).await;
     }
 
     snapshot
@@ -579,6 +585,11 @@ pub async fn get_page(
     let mix_deadline = snapshot.created + MIX_DEADLINE;
     loop {
         let awaiting_mix;
+        // registered before the state check, same as get_or_build: a brick
+        // admitted between the lock release and the await must still wake
+        // this page, or it serves short after a full deadline of nothing
+        let mut notified = std::pin::pin!(snapshot.progress.notified());
+        notified.as_mut().enable();
         {
             let mut guard = snapshot.inner.lock().await;
             let inner = &mut *guard;
@@ -637,17 +648,30 @@ pub async fn get_page(
             if awaiting_mix {
                 continue; // waited long enough for the rare kinds; lay anyway
             }
-            // serve a short page rather than hang; scroll retries
-            let guard = snapshot.inner.lock().await;
-            let end = (offset + size).min(guard.wall.len());
-            let items = guard
+            // serve a short page rather than hang; scroll retries. One last
+            // lay first: bricks that arrived during the wait belong on it
+            let mut guard = snapshot.inner.lock().await;
+            let inner = &mut *guard;
+            let wanted = offset + size;
+            if inner.wall.len() < wanted && !inner.pool.is_empty() {
+                let missing = wanted - inner.wall.len();
+                mix::lay(
+                    &mut inner.pool,
+                    &mut inner.wall,
+                    missing,
+                    snapshot.seed,
+                    Utc::now(),
+                );
+            }
+            let end = wanted.min(inner.wall.len());
+            let items = inner
                 .wall
                 .get(offset.min(end)..end)
                 .map(<[Brick]>::to_vec)
                 .unwrap_or_default();
-            return (items, guard.warming || !guard.pool.is_empty());
+            return (items, inner.warming || !inner.pool.is_empty());
         }
-        let _ = platform::timeout(remaining, snapshot.progress.notified()).await;
+        let _ = platform::timeout(remaining, notified).await;
     }
 }
 
