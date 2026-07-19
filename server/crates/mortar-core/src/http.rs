@@ -6,10 +6,19 @@ use governor::state::{InMemoryState, NotKeyed};
 use governor::{Quota, RateLimiter};
 use serde::de::DeserializeOwned;
 
-/// Shared HTTP client with a global token bucket for the AppView and
-/// 429/5xx retry with backoff. Built before any source; every upstream
-/// call goes through here.
+/// Shared HTTP surface with a global token bucket for the AppView and 429/5xx
+/// retry with backoff. Built before any source; every upstream call goes
+/// through here.
+///
+/// The rate limiter and the retry loop are transport-agnostic and shared. Only
+/// the one-shot GET underneath is split by target: native drives reqwest
+/// (hyper/rustls), the browser drives gloo-net (a thin wrapper over the fetch
+/// the service worker already has). The browser owns the user agent, TLS, gzip
+/// and timeouts, so the wasm build carries no HTTP stack of its own.
 pub struct Http {
+    // gloo-net's fetch wrapper is a set of free functions, so the browser build
+    // holds no client object.
+    #[cfg(not(target_arch = "wasm32"))]
     client: reqwest::Client,
     /// Public AppView limits are undocumented; sustain ~10 rps with a burst
     /// deep enough that one cold snapshot fan-out clears quickly.
@@ -19,7 +28,7 @@ pub struct Http {
 #[derive(Debug, thiserror::Error)]
 pub enum HttpError {
     #[error("request failed: {0}")]
-    Transport(#[from] reqwest::Error),
+    Transport(String),
     #[error("upstream returned {0}")]
     Status(u16),
     #[error("retries exhausted")]
@@ -35,21 +44,6 @@ pub enum Bucket {
     Unmetered,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn make_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .user_agent("mason-mortar/0.1 (atproto discovery wall; https://github.com)")
-        .timeout(Duration::from_secs(10))
-        .build()
-        .expect("reqwest client builds")
-}
-
-/// The browser owns the user agent, TLS, and timeouts on wasm.
-#[cfg(target_arch = "wasm32")]
-fn make_client() -> reqwest::Client {
-    reqwest::Client::new()
-}
-
 impl Default for Http {
     fn default() -> Self {
         Self::new()
@@ -59,7 +53,12 @@ impl Default for Http {
 impl Http {
     pub fn new() -> Self {
         Self {
-            client: make_client(),
+            #[cfg(not(target_arch = "wasm32"))]
+            client: reqwest::Client::builder()
+                .user_agent("mason-mortar/0.1 (atproto discovery wall; https://github.com)")
+                .timeout(Duration::from_secs(10))
+                .build()
+                .expect("reqwest client builds"),
             // 10/s sustained is Bluesky's public ceiling (3000 per 5 minutes)
             // and stays. The BURST is what governs how fast a cold wall fills:
             // a snapshot asks for one author feed per cohort member, and at a
@@ -84,33 +83,98 @@ impl Http {
             if matches!(bucket, Bucket::Appview) {
                 self.appview_bucket.until_ready().await;
             }
-            let response = match self.client.get(url).send().await {
+            let response = match self.send(url).await {
                 Ok(r) => r,
                 Err(e) if attempt < 2 => {
                     tracing::debug!("transport error on {url}: {e}, retrying");
                     crate::platform::sleep(backoff(attempt, None)).await;
                     continue;
                 }
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(e),
             };
 
             let status = response.status();
-            if status.is_success() {
-                return Ok(response.json().await?);
+            if (200..300).contains(&status) {
+                return response.json().await;
             }
-            if status.as_u16() == 429 || status.is_server_error() {
-                let retry_after = response
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.parse::<u64>().ok());
+            if status == 429 || status >= 500 {
+                let retry_after = response.retry_after();
                 tracing::debug!("{status} from {url}, backing off (attempt {attempt})");
                 crate::platform::sleep(backoff(attempt, retry_after)).await;
                 continue;
             }
-            return Err(HttpError::Status(status.as_u16()));
+            return Err(HttpError::Status(status));
         }
         Err(HttpError::RetriesExhausted)
+    }
+
+    /// One GET, no retry, no rate limit. reqwest on native.
+    #[cfg(not(target_arch = "wasm32"))]
+    async fn send(&self, url: &str) -> Result<RawResponse, HttpError> {
+        self.client
+            .get(url)
+            .send()
+            .await
+            .map(RawResponse)
+            .map_err(|e| HttpError::Transport(e.to_string()))
+    }
+
+    /// One GET, no retry, no rate limit. The browser's fetch, via gloo-net.
+    #[cfg(target_arch = "wasm32")]
+    async fn send(&self, url: &str) -> Result<RawResponse, HttpError> {
+        gloo_net::http::Request::get(url)
+            .send()
+            .await
+            .map(RawResponse)
+            .map_err(|e| HttpError::Transport(e.to_string()))
+    }
+}
+
+/// A response, reduced to the three things the retry loop reads: the status,
+/// the retry-after header, and the JSON body. One newtype per transport, so the
+/// loop above never names a transport type.
+#[cfg(not(target_arch = "wasm32"))]
+struct RawResponse(reqwest::Response);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl RawResponse {
+    fn status(&self) -> u16 {
+        self.0.status().as_u16()
+    }
+    fn retry_after(&self) -> Option<u64> {
+        self.0
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok())
+    }
+    async fn json<T: DeserializeOwned>(self) -> Result<T, HttpError> {
+        self.0
+            .json()
+            .await
+            .map_err(|e| HttpError::Transport(e.to_string()))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+struct RawResponse(gloo_net::http::Response);
+
+#[cfg(target_arch = "wasm32")]
+impl RawResponse {
+    fn status(&self) -> u16 {
+        self.0.status()
+    }
+    fn retry_after(&self) -> Option<u64> {
+        self.0
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.parse().ok())
+    }
+    async fn json<T: DeserializeOwned>(self) -> Result<T, HttpError> {
+        self.0
+            .json()
+            .await
+            .map_err(|e| HttpError::Transport(e.to_string()))
     }
 }
 

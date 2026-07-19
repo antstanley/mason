@@ -11,7 +11,6 @@ thiserror.workspace = true
 chrono.workspace = true
 futures.workspace = true
 tracing.workspace = true
-reqwest = { version = "0.12", features = ["json"], default-features = false }
 governor = "0.10"
 rand = "0.9"
 rand_chacha = "0.9"
@@ -27,6 +26,11 @@ tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures = "0.4"
 gloo-timers = { version = "0.4", features = ["futures"] }
+# The browser build talks to the network through the SW's own fetch, so it needs
+# no HTTP stack of its own: gloo-net is a thin wrapper over fetch. reqwest on
+# wasm was only ever that wrapper too, but it dragged the url crate's idna/ICU
+# tables in with it; gloo-net does not.
+gloo-net = { version = "0.6", default-features = false, features = ["http", "json"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
