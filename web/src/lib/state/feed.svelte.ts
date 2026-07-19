@@ -147,7 +147,11 @@ class FeedState {
       // the owner asked to be seen only by signed-in visitors; mason is a
       // logged-out reader, so this wall stays sealed
       this.error = "login-required";
-    } else if (e instanceof FeedError && e.status === 404) {
+    } else if (e instanceof FeedError && e.code === "actor_not_found") {
+      // only mortar's own actor-not-found envelope means the handle is bad. In
+      // local mode a request that escapes the service worker hits the static
+      // host and 404s with a non-JSON error doc (code "unknown"), which must not
+      // be mistaken for a missing handle.
       this.error = "handle-not-found";
     } else {
       this.error = "feed-unavailable";
