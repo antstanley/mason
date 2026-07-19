@@ -70,3 +70,26 @@ jobs:
 
       - name: Guard dashes
         run: just guard-dashes
+
+  # the browser build's Rust paths (gloo transport, timer seam, wasm throttle)
+  # executed for real: wasm-bindgen tests in headless chrome, which the ubuntu
+  # runner image ships with a matching chromedriver
+  wasm-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Rust toolchain (wasm32)
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: "1.97.0"
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: server
+      - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        with:
+          tool: just,wasm-pack@0.15.0
+
+      - name: Test (wasm-bindgen-test, headless chrome)
+        run: just test-wasm

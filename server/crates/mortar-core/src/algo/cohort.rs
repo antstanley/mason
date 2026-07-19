@@ -104,7 +104,7 @@ pub async fn record_activity(state: &Arc<AppState>, activity_key: &str, mut yiel
         .await;
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
 

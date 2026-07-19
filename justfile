@@ -35,6 +35,11 @@ test:
     cd server && cargo nextest run
     cd web && pnpm check:ci
 
+# run the wasm-only Rust paths (transport, timers, throttle) for real in a
+# headless browser; wasm-pack fetches a matching chromedriver if none is found
+test-wasm:
+    cd server && wasm-pack test --headless --chrome crates/mortar-core
+
 lint:
     cd web && pnpm oxlint src
     cd web && pnpm knip

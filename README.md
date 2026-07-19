@@ -67,6 +67,7 @@ just dev          # LOCAL mode: wasm SW + vite on :5173; no server
 just build        # fully static site in web/build/
 just dev-server   # server mode: native mortar :8787 + SPA against it
 just test         # cargo nextest + typecheck
+just test-wasm    # the wasm-only Rust paths, in headless chrome
 just lint         # oxlint + knip + clippy
 just guard-autoplay   # the video rule, enforced
 just clean        # reclaim the cargo target dir (~3GB)
