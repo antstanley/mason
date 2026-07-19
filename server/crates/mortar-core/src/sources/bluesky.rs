@@ -107,15 +107,6 @@ fn warned_for_logged_out(labels: &[Label]) -> bool {
     labels.iter().any(|l| WARN_LABELS.contains(&l.val.as_str()))
 }
 
-pub async fn resolve_handle(http: &Http, base: &str, handle: &str) -> Result<String, HttpError> {
-    #[derive(Deserialize)]
-    struct Resolved {
-        did: String,
-    }
-    let url = format!("{base}/xrpc/com.atproto.identity.resolveHandle?handle={handle}");
-    Ok(http.get_json::<Resolved>(&url, Bucket::Appview).await?.did)
-}
-
 /// A profile view, reduced to what a cold wall load needs from it.
 pub struct Profile {
     /// The account's DID. Carrying it here is what lets a handle load skip a
@@ -771,22 +762,22 @@ mod tests {
     async fn retries_on_429_then_succeeds() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/xrpc/com.atproto.identity.resolveHandle"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
             .respond_with(ResponseTemplate::new(429).insert_header("retry-after", "0"))
             .up_to_n_times(1)
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path("/xrpc/com.atproto.identity.resolveHandle"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
             .respond_with(
                 ResponseTemplate::new(200).set_body_json(serde_json::json!({"did": "did:plc:aa"})),
             )
             .mount(&server)
             .await;
 
-        let did = resolve_handle(&Http::new(), &server.uri(), "a.test")
+        let profile = get_profile(&Http::new(), &server.uri(), "a.test")
             .await
             .unwrap();
-        assert_eq!(did, "did:plc:aa");
+        assert_eq!(profile.did, "did:plc:aa");
     }
 }
