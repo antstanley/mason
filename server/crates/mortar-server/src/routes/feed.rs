@@ -29,7 +29,9 @@ impl IntoResponse for ErrorResponse {
     fn into_response(self) -> Response {
         let (status, _) = self.0.status_and_code();
         let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-        (status, Json(self.0.body())).into_response()
+        // the same ErrorEnvelope the wasm build throws, minus the in-band
+        // status: here the response line carries it
+        (status, Json(self.0.envelope())).into_response()
     }
 }
 

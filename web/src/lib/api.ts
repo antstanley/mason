@@ -1,5 +1,5 @@
 import { browser } from "$app/environment";
-import type { FeedResponse } from "./types";
+import type { ErrorEnvelope, FeedResponse } from "./types";
 
 /** Empty → local mode: same-origin fetch, intercepted by the wasm service
  *  worker. Set → server mode: direct CORS call to that mortar instance.
@@ -48,7 +48,9 @@ export async function fetchFeed(
   if (intent) params.set("intent", intent);
   const res = await fetch(`${BASE}/api/feed?${params}`);
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    // in both modes the body is mortar's ErrorEnvelope; a non-JSON body (a
+    // static host's error doc, say) is not mortar speaking and stays "unknown"
+    const body = (await res.json().catch(() => null)) as Partial<ErrorEnvelope> | null;
     throw new FeedError(body?.error ?? "unknown", res.status);
   }
   return (await res.json()) as FeedResponse;
