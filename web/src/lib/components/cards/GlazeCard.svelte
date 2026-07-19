@@ -13,6 +13,7 @@
 	// the post while a drag scrolls the strip, and the arrows / ALT button / panel
 	// never trip the navigation. Touch has no hover, so there the pill and caption
 	// stay shown. Under prefers-reduced-motion nothing slides.
+	import { tick } from 'svelte';
 	import type { PostBrick } from '$lib/types';
 	import { clientUrl } from '$lib/state/client.svelte';
 	import BrickShell from '../BrickShell.svelte';
@@ -34,6 +35,33 @@
 	);
 
 	let showAlt = $state(false);
+	// the ALT overlay behaves like a small dialog: opening it moves focus onto the
+	// close control, Escape or the ✕ closes it and hands focus back to the trigger,
+	// and the covered carousel is inert while it is up.
+	const altPanelId = $props.id();
+	let altTrigger = $state<HTMLButtonElement | null>(null);
+	let altClose = $state<HTMLButtonElement | null>(null);
+
+	function openAlt() {
+		showAlt = true;
+		void tick().then(() => altClose?.focus());
+	}
+	function closeAlt() {
+		// focus the trigger synchronously, before Svelte unmounts the panel and
+		// focus-within drops (which would hide the trigger and swallow the focus)
+		showAlt = false;
+		altTrigger?.focus();
+	}
+
+	$effect(() => {
+		if (!showAlt) return;
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') closeAlt();
+		};
+		document.addEventListener('keydown', onKey);
+		return () => document.removeEventListener('keydown', onKey);
+	});
+
 	// touch has no hover, so a corner button taps the pill + caption into view
 	// there; on a device that can hover this stays false and hover drives it
 	let revealed = $state(false);
@@ -101,7 +129,10 @@
 
 <BrickShell accent="post">
 	<div class="relative">
-		{#if kind === 'carousel'}
+		<!-- the picture and its paging controls: inert while the ALT panel covers
+		     the card, so focus and pointer stay on the panel, not the buried strip -->
+		<div inert={showAlt}>
+			{#if kind === 'carousel'}
 			<Sensitive blur={brick.blur}>
 				<div
 					bind:this={strip}
@@ -194,6 +225,8 @@
 			</a>
 		{/if}
 
+		</div>
+
 		<!-- author pill on top, frosted caption underneath. At rest both are hidden
 		     for a clean image (especially the grid). On hover the pill fades in and
 		     stays put while the caption slides up underneath it. On touch, where
@@ -254,9 +287,13 @@
 						</p>
 						{#if alts.length}
 							<button
+								bind:this={altTrigger}
 								type="button"
-								onclick={() => (showAlt = true)}
+								onclick={openAlt}
 								aria-label="Show image description"
+								aria-expanded={showAlt}
+								aria-controls={altPanelId}
+								tabindex={showAlt ? -1 : undefined}
 								class="pointer-events-auto mt-0.5 shrink-0 cursor-pointer rounded-md bg-ink/10 px-1.5 py-0.5 text-[0.65rem] font-bold tracking-wide text-ink/80 transition-colors hover:bg-ink/20 dark:bg-chalk/15 dark:text-chalk/80 dark:hover:bg-chalk/25"
 							>
 								ALT
@@ -271,13 +308,18 @@
 		     image description(s) under it, numbered when there is more than one -->
 		{#if showAlt && alts.length}
 			<div
+				id={altPanelId}
+				role="dialog"
+				aria-modal="true"
+				aria-label="image description"
 				class="pointer-events-auto absolute inset-0 flex flex-col gap-3 overflow-auto bg-chalk/85 p-4 backdrop-blur-md dark:bg-kiln/85"
 			>
 				<div class="flex items-start justify-between gap-2">
 					<AuthorChip author={brick.author} avatarClass="size-8" />
 					<button
+						bind:this={altClose}
 						type="button"
-						onclick={() => (showAlt = false)}
+						onclick={closeAlt}
 						aria-label="Hide image description"
 						class="shrink-0 cursor-pointer rounded-full bg-ink/10 px-2 py-1 text-sm font-bold text-ink/80 transition-colors hover:bg-ink/20 dark:bg-chalk/15 dark:text-chalk/80 dark:hover:bg-chalk/25"
 					>
