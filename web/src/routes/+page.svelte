@@ -25,7 +25,11 @@
 
 {#if actor}
 	<main id="wall" class="pb-8">
-		<h1 class="sr-only">@{actor}'s wall on mason</h1>
+		<!-- when the wall cannot load, FeedGrid raises the failure as the page's
+		     single h1, so the sr-only wall title steps aside to avoid a second one -->
+		{#if !(feed.error && feed.items.length === 0)}
+			<h1 class="sr-only">@{actor}'s wall on mason</h1>
+		{/if}
 		<FeedGrid />
 	</main>
 {:else}

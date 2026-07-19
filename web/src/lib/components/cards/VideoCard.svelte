@@ -20,6 +20,11 @@
 		brick.aspectRatio ? `${brick.aspectRatio.width} / ${brick.aspectRatio.height}` : '16 / 9'
 	);
 	const sourceName = $derived(brick.source === 'streamplace' ? 'Streamplace' : 'Bluesky');
+	const label = $derived(
+		brick.live
+			? `live video: ${brick.title || sourceName + ' stream'}`
+			: `video: ${brick.title || sourceName + ' video'}`
+	);
 
 	// Hours and minutes; a stream runs long enough that seconds are noise.
 	// Not every archived video is a long one though: clips of a few seconds
@@ -42,7 +47,7 @@
 	});
 </script>
 
-<BrickShell accent="video">
+<BrickShell accent="video" {label}>
 	<Sensitive blur={brick.blur}>
 		<div class="relative">
 			{#if playRequested}

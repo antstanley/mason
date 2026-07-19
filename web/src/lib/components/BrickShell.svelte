@@ -4,10 +4,14 @@
 	let {
 		accent,
 		href,
+		label,
 		children
 	}: {
 		accent: 'post' | 'blog' | 'video';
 		href?: string;
+		// names the brick's <article> for screen readers, so every card carries a
+		// consistent accessible name instead of only blogs carrying a heading
+		label?: string;
 		children: Snippet;
 	} = $props();
 
@@ -21,6 +25,7 @@
 </script>
 
 <article
+	aria-label={label}
 	class="group overflow-hidden rounded-card border-2 bg-chalk shadow-brick transition-all duration-200 motion-safe:hover:-translate-y-1 motion-safe:hover:rotate-[0.6deg] hover:shadow-brick-lift dark:bg-kiln {accentClass}"
 >
 	{#if href}

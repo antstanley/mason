@@ -29,6 +29,7 @@
 	const count = $derived(images.length);
 	const kind = $derived(count >= 4 ? 'carousel' : count >= 2 ? 'grid' : 'single');
 	const first = $derived(images[0] ?? null);
+	const label = $derived(`post by ${brick.author.displayName ?? brick.author.handle}`);
 	// descriptions to surface, tagged with their 1-based image number
 	const alts = $derived(
 		images.map((im, i) => ({ n: i + 1, text: (im.alt ?? '').trim() })).filter((a) => a.text)
@@ -127,7 +128,7 @@
 	}
 </script>
 
-<BrickShell accent="post">
+<BrickShell accent="post" {label}>
 	<div class="relative">
 		<!-- the picture and its paging controls: inert while the ALT panel covers
 		     the card, so focus and pointer stay on the panel, not the buried strip -->
