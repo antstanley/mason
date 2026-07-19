@@ -138,7 +138,7 @@
 					type="button"
 					onclick={() => slide(-1)}
 					aria-label="Previous image"
-					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/55 text-lg font-bold text-chalk backdrop-blur-sm transition-colors hover:bg-ink/70"
+					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/70 text-lg font-bold text-chalk backdrop-blur-sm transition-colors hover:bg-ink/80"
 				>
 					<span aria-hidden="true">‹</span>
 				</button>
@@ -146,14 +146,14 @@
 					type="button"
 					onclick={() => slide(1)}
 					aria-label="Next image"
-					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/55 text-lg font-bold text-chalk backdrop-blur-sm transition-colors hover:bg-ink/70"
+					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/70 text-lg font-bold text-chalk backdrop-blur-sm transition-colors hover:bg-ink/80"
 				>
 					<span aria-hidden="true">›</span>
 				</button>
 			</div>
 			<div
 				aria-hidden="true"
-				class="pointer-events-none absolute top-2 right-2 rounded-full bg-ink/55 px-2 py-0.5 text-xs font-semibold text-chalk backdrop-blur-sm"
+				class="pointer-events-none absolute top-2 right-2 rounded-full bg-ink/70 px-2 py-0.5 text-xs font-semibold text-chalk backdrop-blur-sm"
 			>
 				{index + 1}/{count}
 			</div>
@@ -217,7 +217,7 @@
 					onclick={() => (revealed = !revealed)}
 					aria-label={revealed ? 'Hide post details' : 'Show post details'}
 					aria-expanded={revealed}
-					class="pointer-events-auto m-3 hidden size-9 shrink-0 place-items-center rounded-lg bg-ink/15 text-chalk backdrop-blur-sm [@media(hover:none)]:grid"
+					class="pointer-events-auto m-3 hidden size-9 shrink-0 place-items-center rounded-lg bg-ink/55 text-chalk backdrop-blur-sm [@media(hover:none)]:grid"
 				>
 					<!-- lucide chevrons-up / chevrons-down -->
 					<svg
@@ -247,7 +247,7 @@
 						: ''}"
 				>
 					<div
-						class="flex w-full items-start gap-2 border-t border-chalk/25 bg-chalk/55 p-3 backdrop-blur-md dark:border-kiln/30 dark:bg-kiln/50"
+						class="flex w-full items-start gap-2 border-t border-chalk/25 bg-chalk/85 p-3 backdrop-blur-md dark:border-kiln/30 dark:bg-kiln/85"
 					>
 						<p class="line-clamp-2 flex-1 text-[0.9rem] leading-snug [@media(hover:hover)]:line-clamp-4">
 							{brick.text}
