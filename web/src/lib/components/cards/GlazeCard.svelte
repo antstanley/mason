@@ -170,17 +170,42 @@
 					type="button"
 					onclick={() => slide(-1)}
 					aria-label="Previous image"
-					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/70 text-lg font-bold text-chalk backdrop-blur-sm transition-colors hover:bg-ink/80 [@media(hover:none)]:size-11"
+					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/70 text-chalk backdrop-blur-sm transition-colors hover:bg-ink/80 [@media(hover:none)]:size-11"
 				>
-					<span aria-hidden="true">‹</span>
+					<!-- lucide chevron-left; glyph chevrons render unevenly across
+					     platforms, so directional icons are inline svg -->
+					<svg
+						viewBox="0 0 24 24"
+						class="size-5"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="m15 18-6-6 6-6" />
+					</svg>
 				</button>
 				<button
 					type="button"
 					onclick={() => slide(1)}
 					aria-label="Next image"
-					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/70 text-lg font-bold text-chalk backdrop-blur-sm transition-colors hover:bg-ink/80 [@media(hover:none)]:size-11"
+					class="pointer-events-auto grid size-9 cursor-pointer place-items-center rounded-full bg-ink/70 text-chalk backdrop-blur-sm transition-colors hover:bg-ink/80 [@media(hover:none)]:size-11"
 				>
-					<span aria-hidden="true">›</span>
+					<!-- lucide chevron-right -->
+					<svg
+						viewBox="0 0 24 24"
+						class="size-5"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<path d="m9 18 6-6-6-6" />
+					</svg>
 				</button>
 			</div>
 			<div
@@ -253,11 +278,25 @@
 					aria-expanded={revealed}
 					class="pointer-events-auto m-3 hidden size-11 shrink-0 place-items-center rounded-lg bg-ink/55 text-chalk backdrop-blur-sm [@media(hover:none)]:grid"
 				>
-					<!-- the strip arrows' glyph family, doubled up and turned to point
-					     up (reveal) or down (tuck away) -->
-					<span aria-hidden="true" class="rotate-90 text-xl leading-none font-bold">
-						{revealed ? '»' : '«'}
-					</span>
+					<!-- lucide chevrons-up / chevrons-down -->
+					<svg
+						viewBox="0 0 24 24"
+						class="size-6"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						{#if revealed}
+							<path d="m7 6 5 5 5-5" />
+							<path d="m7 13 5 5 5-5" />
+						{:else}
+							<path d="m17 11-5-5-5 5" />
+							<path d="m17 18-5-5-5 5" />
+						{/if}
+					</svg>
 				</button>
 			</div>
 			{#if brick.text || alts.length}
