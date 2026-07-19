@@ -1,5 +1,15 @@
 # mason
 
+## 0.7.0
+
+### Minor Changes
+
+- [#57](https://github.com/antstanley/mason/pull/57) [`fd4700a`](https://github.com/antstanley/mason/commit/fd4700a630949206f21450b72ee213fa425631fc) Thanks [@antstanley](https://github.com/antstanley)! - the wall extends itself: when the scroll runs the pool low, mortar fans out to the next hundred authors it has never asked, in waves, until the whole follow graph is spent. endless scroll now quarries the entire graph instead of ending at the first cohort, and the wall only says it is done when there is genuinely nobody left to ask.
+
+### Patch Changes
+
+- [#55](https://github.com/antstanley/mason/pull/55) [`dd676fb`](https://github.com/antstanley/mason/commit/dd676fbf898c164747cddbf7b6807618d61f557f) Thanks [@antstanley](https://github.com/antstanley)! - the wall now fits in a pocket: the bottom-bar controls grew visible labels and thumb-sized targets and hold a single line on any phone, and the client picker says where posts open instead of hiding behind a glyph. empty walls explain themselves ("this wall has no bricks yet") and a paused feed offers "try for more" instead of silence. bricks with zero likes and reposts stop bragging about it, card titles breathe a little more, column widths no longer animate on reflow, and the glaze caption toggle closes as readily as it opens.
+
 ## 0.6.4
 
 ### Patch Changes
