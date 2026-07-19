@@ -10,7 +10,7 @@ use crate::fixtures;
 use crate::http::HttpError;
 use crate::mode::Mode;
 use crate::model::{Brick, FeedResponse};
-use crate::sources::bluesky;
+use crate::sources::fetch;
 use crate::state::AppState;
 
 pub const PAGE_SIZE: usize = 24;
@@ -149,7 +149,7 @@ async fn resolve_and_gate(state: &Arc<AppState>, actor: &str) -> Result<String, 
         if let Some(opted_out) = state.caches.profiles.get(&did).await {
             return gate(actor, did, opted_out);
         }
-        return match bluesky::get_profile(&state.http, &state.config.appview_base, &did).await {
+        return match fetch::get_profile(state, &did).await {
             Ok(profile) => {
                 state
                     .caches
@@ -168,7 +168,7 @@ async fn resolve_and_gate(state: &Arc<AppState>, actor: &str) -> Result<String, 
 
     // Cold handle: one getProfile resolves the DID and reads the opt-out. This
     // call is load-bearing, so its failure fails the wall closed.
-    match bluesky::get_profile(&state.http, &state.config.appview_base, actor).await {
+    match fetch::get_profile(state, actor).await {
         Ok(profile) => {
             state
                 .caches
