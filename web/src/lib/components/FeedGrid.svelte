@@ -120,6 +120,31 @@
 		return () => observer.disconnect();
 	});
 
+	// One polite live region for the whole wall, so a screen-reader reader hears
+	// its async state instead of watching bricks appear in silence: laying while
+	// it warms or paginates, the size of each fresh batch, a stall, and the end.
+	// lastCount is the committed wall we measure the next batch against; it is
+	// reset while warming so a reflow's churn never reads as new bricks.
+	let wallStatus = $state('');
+	let lastCount = 0;
+	$effect(() => {
+		const n = feed.items.length;
+		const paginating = pumping || feed.loading;
+		if (feed.initialLoad || feed.warming) {
+			wallStatus = 'laying bricks';
+		} else if (feed.error && n > 0) {
+			wallStatus = 'more bricks did not arrive';
+		} else if (feed.done && !feed.error) {
+			wallStatus = 'that is every brick';
+		} else if (n > lastCount) {
+			const added = n - lastCount;
+			wallStatus = added === 1 ? '1 new brick' : `${added} new bricks`;
+		} else if (paginating) {
+			wallStatus = 'laying bricks';
+		}
+		lastCount = n;
+	});
+
 	// While the first screen is still reflowing, the first sign the reader wants
 	// to engage — a scroll, a wheel, a drag — freezes it: the wall must stop
 	// moving the instant they reach for it. It also freezes on its own when the
@@ -153,93 +178,98 @@
 	{/if}
 {/snippet}
 
-{#if feed.initialLoad}
-	<SkeletonGrid count={12} />
-{:else if feed.error && feed.items.length === 0}
-	{@const sealed = feed.error === 'login-required'}
-	{@const notFound = feed.error === 'handle-not-found'}
-	<div class="mx-auto max-w-md py-20 text-center">
-		<p class="text-5xl" aria-hidden="true">{sealed ? '🧱🔒' : '🧱💥'}</p>
-		<h1 class="font-display mt-4 text-2xl font-bold">
-			{#if notFound}no wall for that handle{:else if sealed}this wall is sealed{:else}the wall wouldn't
-				load{/if}
-		</h1>
-		<p class="mt-2 opacity-75">
-			{#if notFound}handles look like name.bsky.social. check the spelling, or try someone else:{:else if sealed}this
-				waller asked to be seen by signed-in visitors only. mason reads walls logged out, so this
-				one stays bricked up. try another wall:{:else}mason could not reach the network. check your
-				connection and try again.{/if}
-		</p>
-		{#if notFound || sealed}
-			<form onsubmit={retrySubmit} class="mt-6 flex gap-2">
-				<label class="sr-only" for="retry-handle">Your Bluesky handle</label>
-				<input
-					id="retry-handle"
-					bind:this={retryInput}
-					bind:value={retryValue}
-					type="text"
-					autocapitalize="none"
-					autocorrect="off"
-					spellcheck="false"
-					class="min-w-0 flex-1 rounded-full border-2 border-ink/20 bg-chalk px-5 py-3 font-semibold transition-colors dark:border-chalk/20 dark:bg-kiln"
-				/>
+<!-- aria-busy tells assistive tech the wall is still being laid on first paint;
+     the live region below narrates every later transition -->
+<div aria-busy={feed.initialLoad}>
+	<p class="sr-only" aria-live="polite">{wallStatus}</p>
+	{#if feed.initialLoad}
+		<SkeletonGrid count={12} />
+	{:else if feed.error && feed.items.length === 0}
+		{@const sealed = feed.error === 'login-required'}
+		{@const notFound = feed.error === 'handle-not-found'}
+		<div class="mx-auto max-w-md py-20 text-center">
+			<p class="text-5xl" aria-hidden="true">{sealed ? '🧱🔒' : '🧱💥'}</p>
+			<h1 class="font-display mt-4 text-2xl font-bold">
+				{#if notFound}no wall for that handle{:else if sealed}this wall is sealed{:else}the wall wouldn't
+					load{/if}
+			</h1>
+			<p class="mt-2 opacity-75">
+				{#if notFound}handles look like name.bsky.social. check the spelling, or try someone else:{:else if sealed}this
+					waller asked to be seen by signed-in visitors only. mason reads walls logged out, so this
+					one stays bricked up. try another wall:{:else}mason could not reach the network. check your
+					connection and try again.{/if}
+			</p>
+			{#if notFound || sealed}
+				<form onsubmit={retrySubmit} class="mt-6 flex gap-2">
+					<label class="sr-only" for="retry-handle">Your Bluesky handle</label>
+					<input
+						id="retry-handle"
+						bind:this={retryInput}
+						bind:value={retryValue}
+						type="text"
+						autocapitalize="none"
+						autocorrect="off"
+						spellcheck="false"
+						class="min-w-0 flex-1 rounded-full border-2 border-ink/20 bg-chalk px-5 py-3 font-semibold transition-colors dark:border-chalk/20 dark:bg-kiln"
+					/>
+					<button
+						type="submit"
+						class="shrink-0 cursor-pointer rounded-full bg-pop-pink-deep px-5 py-3 font-display font-bold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95"
+					>
+						retry
+					</button>
+				</form>
+			{:else}
 				<button
-					type="submit"
-					class="shrink-0 cursor-pointer rounded-full bg-pop-pink-deep px-5 py-3 font-display font-bold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95"
+					type="button"
+					onclick={() => feed.reset(currentActor, currentMode)}
+					class="mt-6 cursor-pointer rounded-full bg-pop-pink-deep px-6 py-3 font-display font-bold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95"
 				>
-					retry
+					try again
 				</button>
-			</form>
-		{:else}
-			<button
-				type="button"
-				onclick={() => feed.reset(currentActor, currentMode)}
-				class="mt-6 cursor-pointer rounded-full bg-pop-pink-deep px-6 py-3 font-display font-bold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95"
-			>
-				try again
-			</button>
-		{/if}
-		<p class="mt-6 text-sm">
-			<a
-				href="/?actor=demo"
-				class="inline-flex min-h-11 items-center px-2 font-semibold text-brick-post-ink hover:underline dark:text-brick-post"
-			>
-				or wander the demo wall
-			</a>
-		</p>
-	</div>
-{:else}
-	{#if layout.id === 'masonry'}
-		<Masonry items={feed.items} {brick} warming={feed.warming} />
-	{:else if layout.id === 'glaze'}
-		<Bento items={feed.items} {brick} filler />
+			{/if}
+			<p class="mt-6 text-sm">
+				<a
+					href="/?actor=demo"
+					class="inline-flex min-h-11 items-center px-2 font-semibold text-brick-post-ink hover:underline dark:text-brick-post"
+				>
+					or wander the demo wall
+				</a>
+			</p>
+		</div>
 	{:else}
-		<Bento items={feed.items} {brick} />
+		{#if layout.id === 'masonry'}
+			<Masonry items={feed.items} {brick} warming={feed.warming} />
+		{:else if layout.id === 'glaze'}
+			<Bento items={feed.items} {brick} filler />
+		{:else}
+			<Bento items={feed.items} {brick} />
+		{/if}
+		<div bind:this={sentinel} class="h-1"></div>
+		{#if feed.error && feed.items.length > 0}
+			<div role="status" class="flex justify-center py-10">
+				<button
+					type="button"
+					onclick={() => void pump()}
+					class="cursor-pointer rounded-full border-2 border-brick-blog/60 bg-chalk px-6 py-3 font-display font-bold shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95 dark:bg-kiln"
+				>
+					more bricks did not arrive. tap to retry
+				</button>
+			</div>
+		{:else if feed.warming || feed.loading || pumping}
+			<!-- warming: the first screen is still reflowing, so a skeleton tail says
+			     more is on the way. pumping, not just loading: between attempts the
+			     pump is briefly idle while the snapshot warms, and letting the
+			     skeletons blink out would read as a wall that had given up rather than
+			     one still being laid -->
+			<div class="pt-5">
+				<SkeletonGrid count={4} />
+			</div>
+		{/if}
+		{#if feed.done && !feed.error}
+			<p class="py-16 text-center font-display text-lg font-bold opacity-70">
+				that is every brick. the wall is finished.
+			</p>
+		{/if}
 	{/if}
-	<div bind:this={sentinel} class="h-1"></div>
-	{#if feed.error && feed.items.length > 0}
-		<div class="flex justify-center py-10">
-			<button
-				type="button"
-				onclick={() => void pump()}
-				class="cursor-pointer rounded-full border-2 border-brick-blog/60 bg-chalk px-6 py-3 font-display font-bold shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95 dark:bg-kiln"
-			>
-				more bricks did not arrive. tap to retry
-			</button>
-		</div>
-	{:else if feed.warming || feed.loading || pumping}
-		<!-- warming: the first screen is still reflowing, so a skeleton tail says
-		     more is on the way. pumping, not just loading: between attempts the
-		     pump is briefly idle while the snapshot warms, and letting the
-		     skeletons blink out would read as a wall that had given up rather than
-		     one still being laid -->
-		<div class="pt-5">
-			<SkeletonGrid count={4} />
-		</div>
-	{/if}
-	{#if feed.done && !feed.error}
-		<p class="py-16 text-center font-display text-lg font-bold opacity-70">
-			that is every brick. the wall is finished.
-		</p>
-	{/if}
-{/if}
+</div>
