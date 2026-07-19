@@ -12,7 +12,9 @@ use tokio::sync::Mutex;
 use crate::algo::snapshot::Snapshot;
 use crate::model::Brick;
 use crate::platform::Instant;
-// yield types come through the sources seam, never a source submodule directly
+// yield types (and the source-specific TTLs) come through the sources seam,
+// never a source submodule directly
+use crate::sources::fetch::{STD_DOCS_NEGATIVE_TTL, STREAMS_NEGATIVE_TTL};
 use crate::sources::{AuthorYield, Follow, LiveStream, StdDocs};
 
 pub struct TtlCache<K, V> {
@@ -151,11 +153,6 @@ impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
 
 const HOUR: Duration = Duration::from_secs(3600);
 
-pub const STD_DOCS_POSITIVE_TTL: Duration = Duration::from_secs(900);
-pub const STD_DOCS_NEGATIVE_TTL: Duration = Duration::from_secs(24 * 3600);
-
-pub const STREAMS_POSITIVE_TTL: Duration = Duration::from_secs(1800);
-pub const STREAMS_NEGATIVE_TTL: Duration = Duration::from_secs(24 * 3600);
 /// Long enough to serve a whole snapshot's fan-out from one call, short enough
 /// that "live" stays true.
 pub const LIVE_TTL: Duration = Duration::from_secs(60);

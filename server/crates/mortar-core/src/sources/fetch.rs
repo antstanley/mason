@@ -11,13 +11,11 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::stream::{self, StreamExt};
 
 use super::{bluesky, pds, standardsite, streamplace};
-use crate::cache::{
-    STD_DOCS_NEGATIVE_TTL, STD_DOCS_POSITIVE_TTL, STREAMS_NEGATIVE_TTL, STREAMS_POSITIVE_TTL,
-};
 use crate::error::AppError;
 use crate::http::HttpError;
 use crate::model::{Author, Brick};
@@ -38,6 +36,14 @@ const FOLLOW_PAGES_EAGER: usize = 1;
 /// The cap on the whole graph, chased in the background. The cohort sampler
 /// has never needed more than this.
 const FOLLOW_PAGES_MAX: usize = 20;
+
+// Source-specific TTLs, owned by the seam that picks between them; the core
+// cache reuses the negatives as its defaults.
+pub const STD_DOCS_POSITIVE_TTL: Duration = Duration::from_secs(900);
+pub const STD_DOCS_NEGATIVE_TTL: Duration = Duration::from_secs(24 * 3600);
+
+pub const STREAMS_POSITIVE_TTL: Duration = Duration::from_secs(1800);
+pub const STREAMS_NEGATIVE_TTL: Duration = Duration::from_secs(24 * 3600);
 
 /// Fetch a profile view for `actor`, which may be a handle or a DID. A thin
 /// pass-through: the caller (the feed gate) owns the caching, because what it
