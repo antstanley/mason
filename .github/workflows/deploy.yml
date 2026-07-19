@@ -20,6 +20,12 @@ on:
         type: boolean
         default: false
 
+# serialize deploys: a manual dispatch must queue behind a release-triggered
+# deploy, never interleave S3 uploads and CloudFront invalidations with it
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 permissions:
   id-token: write # GitHub OIDC → blogwright deploy role, no stored keys
   contents: read
