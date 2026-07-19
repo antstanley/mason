@@ -1,5 +1,62 @@
 # mason
 
+## 0.6.2
+
+### Patch Changes
+
+- [#24](https://github.com/antstanley/mason/pull/24) [`17284a8`](https://github.com/antstanley/mason/commit/17284a8204d46c235a85d31d11b74bff96cfa89b) Thanks [@antstanley](https://github.com/antstanley)! - perf: a cold wall paints sooner. Five changes to the opening of a wall, none of
+  which move a brick once it is laid:
+
+  - one `getProfile` now resolves the handle AND reads the owner's logged-out
+    opt-out, folding the two sequential AppView calls that gated every cold load
+    into one round trip.
+  - the first wall waits for a single follow-graph page (100 follows, already more
+    than the cohort samples) instead of three, so the fan-out starts two round
+    trips sooner. The rest of the graph is still chased in the background.
+  - the first page's wait-for-a-better-mix deadline is now anchored to when the
+    snapshot was created, so the first-paint wait counts against it rather than
+    stacking on top of it: the opening wait is bounded, not doubled.
+  - the landing page warms the engine while you are still at the form — a
+    remembered handle warms that wall's caches, and with no handle the demo wall
+    at least compiles the wasm off the critical path.
+  - the roughly-first-screen bricks load their images eagerly and at high fetch
+    priority; the rest of the wall stays lazy.
+
+- [#23](https://github.com/antstanley/mason/pull/23) [`287f40c`](https://github.com/antstanley/mason/commit/287f40c63af83f3f0aade963d4a7552d3cf8e931) Thanks [@antstanley](https://github.com/antstanley)! - feat: glaze cards get a reveal control on touch. Where there is no hover to lift
+  the author pill and caption, a small transparent double-chevron button now taps
+  them up (and back down) — it rides on the author pill's line, sitting at the
+  bottom-right at rest and rising with the pill when the caption lifts. On hover
+  devices nothing changes; the pill and caption still reveal on hover.
+
+- [#25](https://github.com/antstanley/mason/pull/25) [`e9399c7`](https://github.com/antstanley/mason/commit/e9399c7bea9655ae6095273f8618b666dc4abef8) Thanks [@antstanley](https://github.com/antstanley)! - feat: the wall reflows as it fills, then freezes when you reach for it. Instead
+  of waiting for a full first page and dropping it in one block, a cold wall now
+  paints the moment the first bricks arrive and re-mixes the first screen as blogs,
+  videos and live streams land behind the posts. The instant you scroll (or the
+  wall settles, or a few seconds pass) the arrangement locks and normal scrolling
+  takes over; from there a brick never moves. The mixer is pure, so each reflow is
+  a real improvement rather than a reshuffle, and pages after the first are laid
+  once and immutable exactly as before. Server mode and the demo wall keep working
+  unchanged.
+
+- [#21](https://github.com/antstanley/mason/pull/21) [`82ea0d0`](https://github.com/antstanley/mason/commit/82ea0d0340ad704dfa72a8e3bce9ff903fc2ebc4) Thanks [@antstanley](https://github.com/antstanley)! - fix: the menu bar stays on one line now that Glaze is a third layout, and the
+  layout slider's thumb hugs each option. The segments size to their own content
+  and the thumb measures the selected label and matches its width and position, so
+  a short label like Glaze no longer leaves dead space inside the white highlight.
+  On mobile the slider is icon-only and the client picker drops to just its icon
+  (sized to match the layout icons; its label and chevron return at the sm
+  breakpoint), keeping the bar to one row.
+
+- [#26](https://github.com/antstanley/mason/pull/26) [`f1b3255`](https://github.com/antstanley/mason/commit/f1b3255f4e22a09ae9dda372f7ddbd6c0f82036b) Thanks [@antstanley](https://github.com/antstanley)! - perf: the browser engine is 103 KB smaller. The wasm build talked to the network
+  through reqwest, which on wasm is only a thin wrapper over the browser's own
+  fetch — but it dragged the `url` crate's IDNA/ICU Unicode tables in with it, none
+  of which mason needs (every request URL is a plain ASCII atproto endpoint). The
+  browser build now uses gloo-net instead, a direct fetch wrapper with no such
+  tail. reqwest stays on the native server unchanged. The shared rate limiter and
+  429/5xx retry loop are untouched; only the one-shot GET underneath is split by
+  target. The shipped wasm drops from 389 KB to 286 KB gzipped (270 KB off the
+  raw binary), so a cold start downloads and compiles less on the very path that
+  gates first paint.
+
 ## 0.6.1
 
 ### Patch Changes
