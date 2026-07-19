@@ -852,8 +852,12 @@ async fn streams_cached(state: &Arc<AppState>, pds: &str, author: &Author) -> Ar
         {
             Ok(bricks) => Arc::new(bricks),
             Err(e) => {
+                // a transient PDS failure is not "this author never streams";
+                // caching it would silence them for a day. Skip the insert so
+                // the next snapshot simply asks again. A genuine empty repo
+                // comes back Ok(empty) and takes the negative TTL below.
                 tracing::debug!("streamplace videos for {} failed: {e}", author.did);
-                Arc::new(Vec::new())
+                return Arc::new(Vec::new());
             }
         };
     // the same shape as blogs: the few who stream get rechecked within the
@@ -929,8 +933,11 @@ async fn std_docs_cached(state: &Arc<AppState>, pds: &str, author: &Author) -> A
             suppressed_posts: result.suppressed_posts,
         }),
         Err(e) => {
+            // same as streams: a transient failure must not be remembered for
+            // a day as "this author publishes nothing". Skip the insert; only
+            // a successful empty listing earns the negative TTL.
             tracing::debug!("standard.site fetch for {} failed: {e}", author.did);
-            Arc::new(StdDocs::default())
+            return Arc::new(StdDocs::default());
         }
     };
     // publishers get rechecked soon; the silent majority is cached for a day
