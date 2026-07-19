@@ -233,3 +233,90 @@ fn backoff(attempt: u32, retry_after_secs: Option<u64>) -> Duration {
         None => Duration::from_millis(500 * 2u64.pow(attempt)),
     }
 }
+
+// The browser half of the transport, exercised for real in a headless browser
+// via `just test-wasm`. No network: Response objects are constructed with
+// web_sys, so these stay deterministic and fast.
+#[cfg(all(test, target_arch = "wasm32"))]
+mod wasm_tests {
+    use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    /// Build a RawResponse straight from the Fetch API, no server involved.
+    fn response(status: u16, headers: &[(&str, &str)], body: &str) -> RawResponse {
+        let init = web_sys::ResponseInit::new();
+        init.set_status(status);
+        let hdrs = web_sys::Headers::new().expect("headers construct");
+        for (name, value) in headers {
+            hdrs.set(name, value).expect("header sets");
+        }
+        init.set_headers(&hdrs);
+        let raw = web_sys::Response::new_with_opt_str_and_init(Some(body), &init)
+            .expect("response constructs");
+        RawResponse(gloo_net::http::Response::from(raw))
+    }
+
+    #[wasm_bindgen_test]
+    fn status_is_read_through_gloo() {
+        assert_eq!(response(429, &[], "").status(), 429);
+        assert_eq!(response(503, &[], "").status(), 503);
+    }
+
+    #[wasm_bindgen_test]
+    fn retry_after_parses_numeric_seconds() {
+        let resp = response(429, &[("retry-after", "7")], "");
+        assert_eq!(resp.retry_after(), Some(7));
+    }
+
+    #[wasm_bindgen_test]
+    fn retry_after_http_date_form_is_ignored() {
+        // the wasm parser only takes delta-seconds; an HTTP-date must fall
+        // back to None (and so to the default exponential backoff), not panic
+        let resp = response(429, &[("retry-after", "Wed, 21 Oct 2015 07:28:00 GMT")], "");
+        assert_eq!(resp.retry_after(), None);
+    }
+
+    #[wasm_bindgen_test]
+    fn retry_after_missing_is_none() {
+        assert_eq!(response(500, &[], "").retry_after(), None);
+    }
+
+    #[wasm_bindgen_test]
+    async fn json_deserializes_the_body() {
+        let resp = response(200, &[], r#"{"bricks": 3}"#);
+        let value: serde_json::Value = resp.json().await.expect("json parses");
+        assert_eq!(value["bricks"], 3);
+    }
+
+    #[wasm_bindgen_test]
+    async fn json_surfaces_a_transport_error_on_garbage() {
+        let resp = response(200, &[], "not json");
+        let result: Result<serde_json::Value, HttpError> = resp.json().await;
+        assert!(matches!(result, Err(HttpError::Transport(_))));
+    }
+
+    #[wasm_bindgen_test]
+    async fn throttle_lets_the_burst_through_then_waits_for_the_drip() {
+        let http = Http::new();
+        // the whole 100-token burst should clear without meaningful waiting
+        let start = crate::platform::Instant::now();
+        for _ in 0..100 {
+            http.await_appview_slot().await;
+        }
+        let burst = start.elapsed();
+        assert!(burst < Duration::from_secs(2), "burst took {burst:?}");
+        // token 101 finds governor denying; the check-then-sleep loop must
+        // wait out the drip (10/s, so ~100ms) and then make progress
+        let start = crate::platform::Instant::now();
+        http.await_appview_slot().await;
+        let waited = start.elapsed();
+        assert!(
+            waited >= Duration::from_millis(30),
+            "no throttle wait: {waited:?}"
+        );
+        assert!(
+            waited < Duration::from_secs(3),
+            "throttle never progressed: {waited:?}"
+        );
+    }
+}

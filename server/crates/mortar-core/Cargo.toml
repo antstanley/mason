@@ -33,6 +33,18 @@ gloo-timers = { version = "0.4", features = ["futures"] }
 gloo-net = { version = "0.6", default-features = false, features = ["http", "json"] }
 
 [dev-dependencies]
+pretty_assertions = "1"
+
+# the native suite drives tokio and wiremock; neither compiles for wasm32, so
+# they stay off the browser test build (whose test modules are gated the same
+# way, cfg(all(test, not(target_arch = "wasm32"))))
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 wiremock = "0.6"
-pretty_assertions = "1"
+
+# the wasm test lane: wasm-bindgen-test runs #[wasm_bindgen_test] fns in a
+# headless browser (just test-wasm); web-sys constructs Response objects so the
+# transport tests never touch the network
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+web-sys = { version = "0.3", features = ["Headers", "Response", "ResponseInit"] }

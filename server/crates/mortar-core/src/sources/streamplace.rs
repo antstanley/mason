@@ -348,7 +348,7 @@ impl BlobRef {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use wiremock::matchers::{method, path, query_param};

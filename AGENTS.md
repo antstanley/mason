@@ -27,6 +27,7 @@ just dev          # local mode: builds wasm, runs vite on :5173
 just dev-server   # server mode: native mortar :8787 + SPA against it
 just build        # static site → web/build/ (rebuilds wasm first)
 just test         # cargo nextest + tsc typecheck
+just test-wasm    # wasm-bindgen tests in headless chrome
 just lint         # oxlint + knip + clippy
 just fmt          # oxfmt + cargo fmt
 just guard-autoplay   # enforces the no-autoplay rule

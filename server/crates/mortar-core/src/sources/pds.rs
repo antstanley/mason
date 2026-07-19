@@ -175,7 +175,7 @@ pub fn blob_url(pds: &str, did: &str, cid: &str) -> String {
     format!("{pds}/xrpc/com.atproto.sync.getBlob?did={did}&cid={cid}")
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
     use wiremock::matchers::{method, path};
