@@ -42,7 +42,7 @@ Authors are identified by DID (`did:plc:…` or `did:web:…`). Handles are disp
 data and are resolved to a DID once, then cached; they are never a key.
 
 Cursors carry no identity of their own: they are an opaque base64url encoding of
-`{snapshot, seed, offset}`.
+`{seed, offset}`.
 
 ### Wire primitives
 
@@ -175,15 +175,17 @@ State it owns:
 
 ### Cursor
 
-The `CursorPayload` is `{snapshot: String, seed: u64, offset: usize}`,
-JSON-serialised and base64url (no padding) encoded into the opaque `Cursor`
-string the client sees. It is attacker-writable, so every consumer treats it
-defensively: a garbage or tampered cursor decodes to `None` and falls back to a
-fresh wall, and the offset is added with `checked_add` / `saturating_add`.
+The `CursorPayload` is `{seed: u64, offset: usize}`, JSON-serialised and
+base64url (no padding) encoded into the opaque `Cursor` string the client sees.
+It is attacker-writable, so every consumer treats it defensively: a garbage or
+tampered cursor decodes to `None` and falls back to a fresh wall, and the offset
+is added with `checked_add` / `saturating_add`.
 
 `seed` is the load-bearing field. It drives the cohort shuffle and the mixer's
 jitter, so a snapshot evicted mid-scroll rebuilds into a closely-matching wall
-from the same seed and the still-warm per-author caches.
+from the same seed and the still-warm per-author caches. The snapshot id itself
+is not carried: `handle_feed` derives it from the resolved DID, the seed and the
+mode, which are all it has ever used.
 
 ---
 
@@ -213,7 +215,7 @@ from the same seed and the still-warm per-author caches.
        │     └── bskyPostRef ──suppresses──▶ Post (by AT-URI)
        │
        ▼
-    Snapshot (pool ──laid──▶ wall) ──paged by──▶ Cursor{snapshot, seed, offset}
+    Snapshot (pool ──laid──▶ wall) ──paged by──▶ Cursor{seed, offset}
        │
        └── one per (Mode, viewer DID, seed)
 ```

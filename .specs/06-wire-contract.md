@@ -28,7 +28,7 @@ GET /api/feed?actor=<handle|did>[&cursor=<opaque>][&mode=glaze][&intent=preview|
 | Parameter | Required | Values | Meaning |
 |---|---|---|---|
 | `actor` | yes | a Bluesky handle, a DID, or the literal `demo` | Whose wall to lay |
-| `cursor` | no | opaque base64url | Where to continue; absent starts a fresh wall |
+| `cursor` | no | opaque base64url of `{seed, offset}` | Where to continue; absent starts a fresh wall |
 | `mode` | no | `glaze` | The image wall; anything else, including absent, is the full wall |
 | `intent` | no | `preview`, `freeze` | The warm-then-commit first screen; absent is a normal committed page |
 
@@ -43,7 +43,7 @@ Server mode also serves `GET /api/health`.
 ```jsonc
 {
   "items": [ /* Brick[] */ ],
-  "cursor": "eyJzbmFwc2hvdCI6…",  // null when the wall has no more bricks
+  "cursor": "eyJzZWVkIjo…",       // null when the wall has no more bricks
   "warming": true                  // ONLY on a preview response; absent otherwise
 }
 ```
@@ -256,9 +256,6 @@ web/src/service-worker.ts                      the local-mode responder
 
 **Open questions**
 
-- *`Cursor.snapshot` is written and never read.* `handle_feed` recomputes the
-  snapshot id from DID, seed and mode, so the field is dead weight on every
-  cursor. Open: drop it at the next wire change, or start validating against it?
 - *`warming` on non-preview responses.* It is always absent today. If a future
   client wants warming state on a committed page, that is a wire change; nothing
   needs it yet.

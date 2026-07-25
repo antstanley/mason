@@ -37,13 +37,21 @@ Start at [00-overview.md](00-overview.md).
 A change spec proposes a delta to the canonical pages above. Its body describes
 code that does **not** yet exist, which is exactly why it is a separate document:
 the canonical pages keep describing the current branch until the change lands.
-Lifecycle is `Proposed` → `Accepted` → `Implemented` → `Merged`; a merged spec
-moves to [`changes/merged/`](changes/merged/) and is kept as dated history.
+Lifecycle is `Proposed` → `Accepted` → `Implemented` → `Merged`. The middle two
+states are for a change that is agreed before it is built, or built before its
+spec is folded back in; a change proposed and shipped together goes straight to
+`Merged`, which is the terminal state and the only one that matters afterwards.
+A merged spec moves to [`changes/merged/`](changes/merged/) and is kept as dated
+history, including any claim it turned out to get wrong, annotated in place.
 
 | Pending change spec | Status | Proposes |
 |---|---|---|
-| [2026-07-25-drop_snapshot_from_cursor.md](changes/2026-07-25-drop_snapshot_from_cursor.md) | Proposed | Remove the `snapshot` field the cursor carries and never reads |
 | [2026-07-25-tighten_typescript_and_add_a_prepush_gate.md](changes/2026-07-25-tighten_typescript_and_add_a_prepush_gate.md) | Proposed | `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and a local pre-push gate |
+
+| Merged change spec | Merged | Shipped |
+|---|---|---|
+| [2026-07-25-honest_native_user_agent.md](changes/merged/2026-07-25-honest_native_user_agent.md) | 2026-07-25 | A native user agent derived from the crate version, with a real contact URL |
+| [2026-07-25-drop_snapshot_from_cursor.md](changes/merged/2026-07-25-drop_snapshot_from_cursor.md) | 2026-07-25 | Removed the `snapshot` field the cursor carried and never read |
 
 ## Related documents
 

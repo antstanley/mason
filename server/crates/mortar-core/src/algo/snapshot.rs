@@ -3,10 +3,10 @@
 //! authors have answered), filled to completion by a background task, and
 //! paged immutably; bricks already served never move.
 //!
-//! The cursor carries (snapshot id, seed, offset). If a snapshot is evicted
-//! mid-scroll (cache TTL natively; instance death in the service worker),
-//! the same seed rebuilds a closely-matching wall; continuity is
-//! best-effort, determinism of jitter is exact.
+//! The cursor carries (seed, offset). If a snapshot is evicted mid-scroll
+//! (cache TTL natively; instance death in the service worker), the same seed
+//! rebuilds a closely-matching wall; continuity is best-effort, determinism
+//! of jitter is exact.
 //!
 //! Every acquisition of the snapshot's inner mutex lives in this file: the
 //! fill (`super::fill`) and the cohort sampler (`super::cohort`) mutate the

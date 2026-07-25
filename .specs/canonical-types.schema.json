@@ -315,15 +315,11 @@
     },
 
     "CursorPayload": {
-      "description": "What a decoded cursor carries. Engine-internal: the client never inspects it.",
+      "description": "What a decoded cursor carries. Engine-internal: the client never inspects it. mortar emits exactly these two properties and no others, but it ACCEPTS more, which is why this is the one def in the schema that does not close additionalProperties: the decoder ignores unknown keys, so a cursor issued before the snapshot field was dropped still decodes to its seed and offset and a reader mid-scroll across that deploy keeps their place. Do not translate this def into a strict deserializer. Adding serde's deny_unknown_fields to Cursor would drop every in-flight reader onto a fresh wall, and the test named a_cursor_carrying_the_removed_snapshot_key_still_decodes_to_its_seed_and_offset is the only thing in the suite that catches it.",
       "type": "object",
-      "required": ["snapshot", "seed", "offset"],
-      "additionalProperties": false,
+      "required": ["seed", "offset"],
+      "additionalProperties": true,
       "properties": {
-        "snapshot": {
-          "description": "The snapshot cache key, <mode-tag>-<16 hex>. Written on every cursor and currently never read back: handle_feed recomputes the id from DID, seed and mode.",
-          "type": "string"
-        },
         "seed": {
           "description": "The seed for the cohort shuffle and the mixer's jitter. Carrying it is what lets an evicted snapshot rebuild deterministically mid-scroll.",
           "type": "integer",
