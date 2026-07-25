@@ -38,13 +38,12 @@ A change spec proposes a delta to the canonical pages above. Its body describes
 code that does **not** yet exist, which is exactly why it is a separate document:
 the canonical pages keep describing the current branch until the change lands.
 Lifecycle is `Proposed` → `Accepted` → `Implemented` → `Merged`; a merged spec
-moves to [`changes/merged/`](changes/) and is kept as dated history.
+moves to [`changes/merged/`](changes/merged/) and is kept as dated history.
 
 | Pending change spec | Status | Proposes |
 |---|---|---|
 | [2026-07-25-drop_snapshot_from_cursor.md](changes/2026-07-25-drop_snapshot_from_cursor.md) | Proposed | Remove the `snapshot` field the cursor carries and never reads |
 | [2026-07-25-tighten_typescript_and_add_a_prepush_gate.md](changes/2026-07-25-tighten_typescript_and_add_a_prepush_gate.md) | Proposed | `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and a local pre-push gate |
-| [2026-07-25-honest_native_user_agent.md](changes/2026-07-25-honest_native_user_agent.md) | Proposed | Derive the native user agent from the crate version; give it a real contact URL |
 
 ## Related documents
 

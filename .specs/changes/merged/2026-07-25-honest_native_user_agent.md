@@ -1,6 +1,6 @@
 # Change: Give the native mortar an honest user agent
 
-**Status:** Proposed · **Date:** 2026-07-25 · **Owner:** Ant Stanley · **Target:** Repo-wide
+**Status:** Merged · **Date:** 2026-07-25 · **Merged:** 2026-07-25 · **Owner:** Ant Stanley · **Target:** Repo-wide
 
 `mortar-server` identifies itself to every upstream as
 `mason-mortar/0.1 (atproto discovery wall; https://github.com)`. The workspace is
@@ -22,7 +22,7 @@ purpose, which is the only purpose it has.
 
 The version drift is also a small correctness failure in a repo that treats
 single-versioning as a rule.
-[`10-build-release-deploy.md`](../10-build-release-deploy.md) states that root
+[`10-build-release-deploy.md`](../../10-build-release-deploy.md) states that root
 `package.json` propagates the version everywhere it appears; this string is the
 one place that claim is untrue, and it is untrue silently, because a literal in a
 builder chain looks nothing like a version declaration.
@@ -36,8 +36,8 @@ browser's own user agent and cannot override it, which is by design.
 
 | Canonical page | Nature of change |
 |---|---|
-| [`.specs/04-sources-and-moderation.md`](../04-sources-and-moderation.md) | HTTP policy gains a user-agent row; the Open question resolves |
-| [`.specs/10-build-release-deploy.md`](../10-build-release-deploy.md) | Versioning: the propagation list gains the crate-derived case |
+| [`.specs/04-sources-and-moderation.md`](../../04-sources-and-moderation.md) | HTTP policy gains a user-agent row; the Open question resolves |
+| [`.specs/10-build-release-deploy.md`](../../10-build-release-deploy.md) | Versioning: the propagation list gains the crate-derived case |
 
 No canonical type changes.
 
@@ -85,6 +85,15 @@ One line of code and one decision that is not mine to make.
        concat!("mason/", env!("CARGO_PKG_VERSION"), " (+", MASON_CONTACT, ")")
      where MASON_CONTACT is a const in http.rs. `env!` is compile-time, so this
      stays a &'static str and the builder chain is unchanged.
+
+     CORRECTED ON MERGE, do not copy the line above: `concat!` accepts literals
+     only, and a `const` is a path expression that never expands to one, so that
+     shape does not compile. `env!` works because it is a built-in macro that
+     expands to a literal before `concat!` sees it. What shipped makes the whole
+     string one named const instead, so the URL still appears exactly once. The
+     const is also `#[cfg(not(target_arch = "wasm32"))]`, because its only use
+     site is the native arm of `Http::new` and an ungated const is dead code in
+     the wasm lane.
 
 2. Pick the contact URL. The candidates are the repo
    (https://github.com/antstanley/mason) or the deployed site
@@ -134,6 +143,8 @@ the literal. The compile-time derivation is what makes it correct.
 
 - *Which contact URL?* The repo or the deployed site. The implementation notes
   recommend the repo; the owner's call.
+  **Resolved on merge:** the repo, `https://github.com/antstanley/mason`. It is
+  where an operator can open an issue, and it does not change if the site moves.
 - *Does the string want to name the build mode?* An operator seeing
   `mason/0.7.0` cannot tell it apart from a browser-mode reader, but browser-mode
   readers do not send it at all, so every request carrying this string is a native
