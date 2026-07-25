@@ -185,6 +185,12 @@ and then `scripts/sync-version.mjs`, which propagates the number to:
 - `server/Cargo.toml` (`[workspace.package] version`, inherited by every crate)
 - `server/Cargo.lock` (tracked, and `cargo build --locked` fails on a stale one)
 
+The list is short on purpose. Anything that can read the version at compile time
+should, rather than join it: the native user agent reads
+`env!("CARGO_PKG_VERSION")` and so needs no propagation step, which is why it
+cannot drift the way the literal it replaced did. Adding a fourth regex to
+`sync-version.mjs` is the last resort, not the pattern.
+
 The lockfile is patched by regex rather than by running cargo, so the release job
 needs no Rust toolchain. Before changesets, the repo held three versions that all
 disagreed: `web/package.json` at 0.0.1, the Cargo workspace at 0.1.0, and a

@@ -6,6 +6,19 @@ use governor::state::{InMemoryState, NotKeyed};
 use governor::{Quota, RateLimiter};
 use serde::de::DeserializeOwned;
 
+/// What mason tells every upstream it is. The version comes from the crate at
+/// compile time, so it cannot drift from the workspace the way a literal did,
+/// and the contact URL is there because mason reads public endpoints
+/// unauthenticated: this string is the only channel an operator has to reach
+/// whoever is generating the traffic. Native only. The browser build sends the
+/// browser's own user agent and cannot override it, which is correct.
+#[cfg(not(target_arch = "wasm32"))]
+const USER_AGENT: &str = concat!(
+    "mason/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/antstanley/mason)"
+);
+
 /// Shared HTTP surface with a global token bucket for the AppView and 429/5xx
 /// retry with backoff. Built before any source; every upstream call goes
 /// through here.
@@ -63,7 +76,7 @@ impl Http {
             // so native and wasm share one policy; reqwest carries no timeout of
             // its own, or the two would stack.
             client: reqwest::Client::builder()
-                .user_agent("mason-mortar/0.1 (atproto discovery wall; https://github.com)")
+                .user_agent(USER_AGENT)
                 .build()
                 .expect("reqwest client builds"),
             // 10/s sustained is Bluesky's public ceiling (3000 per 5 minutes)

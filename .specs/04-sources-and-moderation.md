@@ -62,6 +62,7 @@ and connection limits.
 | Retryable | Transport errors, 429, and 5xx |
 | Backoff | `Retry-After` seconds capped at 30, else `500 ms × 2^attempt` |
 | Request ceiling | 10 s per attempt, applied in shared code so both transports share one policy |
+| User agent (native only) | `mason/<crate version> (+https://github.com/antstanley/mason)`, derived from `env!("CARGO_PKG_VERSION")` |
 
 Two details are load-bearing. A retryable status on the *final* attempt returns
 the real status rather than a generic `RetriesExhausted`, because no further
@@ -74,6 +75,12 @@ still `check()`, so a burst is never let through unthrottled.
 The burst of 100 is sized so a whole 100-author cohort goes out at once. At a
 burst of 40 the remaining sixty queued behind the drip, the pool grew at ten
 bricks a second, and a reader could out-scroll their own wall.
+
+The browser build sends the browser's own user agent and cannot override it,
+which is correct: in local mode the request genuinely is the reader's browser
+making it. The native string carries a contact URL because mason reads public
+endpoints unauthenticated, and the user agent is the only channel an upstream
+operator has to reach whoever is generating the traffic.
 
 ---
 
@@ -316,6 +323,9 @@ server/crates/mortar-core/src/sources/
 - *One HTTP surface, two transports.* **Shared limiter and retry, split
   one-shot GET.** `reqwest` on wasm was only a fetch wrapper anyway, and it
   dragged the `url` crate's IDNA and ICU tables in with it; `gloo-net` does not.
+- *User agent derived, not written.* **`env!("CARGO_PKG_VERSION")`.** A literal
+  version string is a version declaration nothing propagates to, and it drifted
+  by six minor releases before anyone noticed.
 - *Hidden accounts filtered at the cohort.* **Before any content is fetched.** It
   is the only point where all four sources are covered at once.
 - *`nudity` is not hidden.* **Bluesky shows it to logged-out viewers.** mason
@@ -339,12 +349,6 @@ server/crates/mortar-core/src/sources/
 
 **Open questions**
 
-- *The native user agent is stale.* `mortar-server` identifies itself as
-  `mason-mortar/0.1` while the workspace is at 0.7.0, and the string is a literal
-  rather than `env!("CARGO_PKG_VERSION")`, so `sync-version.mjs` does not reach
-  it. It also carries a placeholder contact URL (`https://github.com`). The wasm
-  build sends the browser's own user agent and is unaffected. Open: wire it to the
-  crate version and give it a real contact URL?
 - *Author-feed depth.* The full wall reads the last 30 posts per author with no
   paging. A very chatty author's older-but-better brick is unreachable. Open: is
   depth worth a second round trip per author, given the per-author admission cap
