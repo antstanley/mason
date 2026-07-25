@@ -27,6 +27,13 @@ the user finds something they would never have seen in their timeline; a
 blog post from a quiet follow, a trailer a friend linked, a deep cut from
 the exploration cohort.
 
+There is a second way to look at the same graph: **glaze**, an image-only
+wall of the pictures the people you follow have posted, laid dense so the
+pictures touch. It reaches back a month rather than three days, because a
+gallery is not a timeline. It is one option in the layout picker, not a
+separate product, and picking it changes the algorithm as well as the
+packing.
+
 ## Positioning
 
 The atmosphere, browsable; the first place the whole open social ecosystem
@@ -59,7 +66,10 @@ chrome. Voice is lowercase, brick-punning, and brief.
    texture, weight, and motion physics; not as literal illustrations or
    mascots.
 4. **Unhurried by design.** No mechanics that manufacture urgency. Endless
-   scroll should feel like wandering a gallery, not feeding a machine.
+   scroll should feel like wandering a gallery, not feeding a machine. A
+   cold wall fills in front of you rather than holding you on skeletons: the
+   first screen reflows as bricks arrive, and stops the instant you reach
+   for it.
 5. **A wall is a gift.** Shared `?actor=` links are the growth loop; a wall
    viewed through someone else's handle should feel like a made thing worth
    passing on.
