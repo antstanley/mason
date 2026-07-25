@@ -8,7 +8,11 @@
 	import type { Snippet } from 'svelte';
 	import type { Blur } from '$lib/types';
 
-	let { blur, children }: { blur?: Blur; children: Snippet } = $props();
+	// `| undefined` is explicit because exactOptionalPropertyTypes tells apart a
+	// prop left off from one passed as undefined, and every caller forwards an
+	// optional brick field, which is the second case. The wire types keep the
+	// bare `blur?: Blur` on purpose; this boundary accepts both.
+	let { blur, children }: { blur?: Blur | undefined; children: Snippet } = $props();
 
 	let revealed = $state(false);
 </script>

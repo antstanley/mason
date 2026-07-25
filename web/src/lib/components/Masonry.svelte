@@ -75,8 +75,15 @@
 
 	function shortest(colHeights: number[]): number {
 		let best = 0;
-		for (let i = 1; i < colHeights.length; i++) {
-			if (colHeights[i] < colHeights[best]) best = i;
+		// identity for the running minimum, not a height bound: the first column
+		// always wins the first comparison, so an empty wall still answers 0
+		let bestHeight = Infinity;
+		for (const [i, h] of colHeights.entries()) {
+			// strictly less, so ties go to the leftmost column
+			if (h < bestHeight) {
+				best = i;
+				bestHeight = h;
+			}
 		}
 		return best;
 	}
@@ -98,8 +105,16 @@
 				col = shortest(colHeights);
 				assigned.set(item.id, col);
 			}
-			next[item.id] = { col, y: colHeights[col] };
-			colHeights[col] += h + GAP;
+			const y = colHeights[col];
+			// unreachable today: the branch above pins col inside the wall, and
+			// colHeights has exactly colCount entries. It is the checked form of
+			// that invariant. If it ever did fire the brick would stay hidden for
+			// good, not for a pass, since assigned already holds this col and the
+			// recompute above would not fire again for it; that is still better
+			// than placing it at a guessed offset, where it would overlap another.
+			if (y === undefined) continue;
+			next[item.id] = { col, y };
+			colHeights[col] = y + h + GAP;
 		}
 		slots = next;
 		wallHeight = Math.max(0, Math.max(...colHeights) - GAP);
@@ -112,7 +127,11 @@
 		// when the width is unchanged rather than lay the wall out twice
 		let lastWidth = -1;
 		const ro = new ResizeObserver((entries) => {
-			const width = entries[0].contentRect.width;
+			const entry = entries[0];
+			// no entry means no trustworthy width, and a guessed one would lay the
+			// whole wall out wrong; bailing leaves the last good layout standing
+			if (!entry) return;
+			const width = entry.contentRect.width;
 			if (width === lastWidth) return;
 			lastWidth = width;
 			const n = colsForWidth(width);

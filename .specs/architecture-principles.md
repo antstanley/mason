@@ -235,9 +235,13 @@ class of concerns and sharpens the ones that remain.
 
 Two of these carry a caveat worth stating here rather than in a comment:
 
-- **TypeScript 7.** `svelte-check` crashes on TS 7 (its programmatic API
-  stabilises in TS 7.1, around October 2026), so the typecheck is plain
-  `tsc --noEmit`. Do not swap `check` back to `svelte-check` yet.
+- **TypeScript 7, and it does not reach a component.** `svelte-check` crashes on
+  TS 7 (its programmatic API stabilises in TS 7.1, around October 2026), so the
+  typecheck is plain `tsc --noEmit`, which cannot parse `.svelte` and drops those
+  files silently. `.ts` and `.svelte.ts` are fully checked; component bodies are
+  checked by nothing. See
+  [development-guidelines.md](development-guidelines.md) for what that costs and
+  what covers the gap. Do not swap `check` back to `svelte-check` yet.
 - **Runes are forced.** `vite.config.ts` sets `runes: true` for everything outside
   `node_modules`, so there is no legacy reactivity anywhere in the app.
 

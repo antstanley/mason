@@ -24,7 +24,7 @@ commands and CI gates named here are defined in
 | clippy | pinned channel | `cargo clippy --workspace --all-targets -- -D warnings` |
 | cargo-nextest | latest | The native Rust test runner |
 | wasm-pack | 0.15.0 | Builds `mortar-wasm`, and runs the wasm test lane in headless chrome |
-| TypeScript | 7.x, `strict` | `tsc --noEmit`; not `svelte-check` (see conventions) |
+| TypeScript | 7.x, `strict` plus `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` | `tsc --noEmit`; not `svelte-check` (see conventions) |
 | Node | 22 | Tooling runtime |
 | pnpm | 11.x | Package manager |
 | oxlint | latest | The TS and Svelte linter; not ESLint |
@@ -34,6 +34,7 @@ commands and CI gates named here are defined in
 | Playwright | latest | The service-worker end-to-end smoke, chromium only |
 | changesets | latest | Owns the single repo version |
 | jj (jujutsu) | latest | The version-control front end |
+| `just push` | repo-local | The local gate: fmt-check, lint, the guards and test, then `jj git push` |
 
 Tooling not in use, named so nobody reaches for it: ESLint, Prettier,
 `svelte-check`, `cargo test` (nextest is the runner), npm and yarn.
@@ -219,7 +220,8 @@ This repo is **jj-managed** (jujutsu). Use `jj`, not `git`, even when jj resists
   exactly what jj removes.
 - `jj describe` sets the *why* before a push.
 - Feature work happens on named bookmarks (`jj bookmark create feat/x`); pull
-  requests go out with `jj git push`.
+  requests go out with `just push`, which runs the local gate and then
+  `jj git push` (see Repository hygiene).
 - Resolve conflicts with `jj resolve`, not by editing plain-text markers.
 - `jj abandon`, `jj op restore`, force-fetches and bookmark deletion all need
   explicit confirmation.
@@ -327,9 +329,34 @@ changes need none; a forgotten one can be added in a follow-up PR.
 
 - **No `any`.** Use `unknown` plus narrowing, or a typed parse. A cast needs a
   comment justifying it.
-- **`strict` is on.** The typecheck is `tsc --noEmit`, not `svelte-check`:
-  `svelte-check` crashes on TypeScript 7 (its programmatic API stabilises in
-  TS 7.1, around October 2026). Do not swap it back yet.
+- **`strict` is on, with `noUncheckedIndexedAccess` and
+  `exactOptionalPropertyTypes`.** Indexing an array yields `T | undefined` and
+  must be narrowed; an optional property cannot be satisfied by an explicit
+  `undefined`. The second flag is what makes the wire's optional-versus-nullable
+  distinction (see [06-wire-contract.md](06-wire-contract.md)) enforceable rather
+  than conventional. Narrow with a guard or a `?.`, never with a non-null
+  assertion: a `!` converts a compiler-visible assumption back into an invisible
+  one, which is the opposite of what the flag buys.
+- **Nothing typechecks a `.svelte` component body today, and the flags above do
+  not reach one.** The typecheck is `tsc --noEmit`, and `tsc` does not parse
+  `.svelte`: zero of them enter the program, and it exits 0 on a component
+  containing `const bad: string = 42`. The generated `.svelte-kit` types cover
+  route contracts (`$types`), not component bodies. `svelte-check` is the tool
+  that would close this and it crashes on TypeScript 7; its programmatic API
+  stabilises in TS 7.1, around October 2026. **Do not read a green
+  `pnpm check:ci` as coverage of the components.** What holds the component layer
+  up, measured rather than assumed: oxlint, which parses `.svelte` but checks
+  style not types; the Playwright smoke, which is 28 lines asserting one brick
+  renders; and review. Not vitest, whose two suites are both `.ts` and neither
+  imports a component. Not the vite build, which strips types without checking
+  them. Write component code as though the flags applied, because they will the
+  day `svelte-check` returns, and nothing before then will tell you they did not.
+- **The `.svelte.ts` rune modules ARE checked.** `web/src/lib/state/*.svelte.ts`
+  is ordinary TypeScript to `tsc` and enters the program fully, under both new
+  flags. The unchecked set is `.svelte` component files specifically, not
+  everything with `svelte` in the name. Logic that can live in a rune module
+  rather than a component body gets a compiler for free, which is now a reason
+  to put it there.
 - **Runes only.** `vite.config.ts` forces `runes: true` for everything outside
   `node_modules`. No legacy reactivity, no stores.
 - **Wire types are mirrored once**, in `lib/types.ts`, and guarded by
@@ -390,6 +417,11 @@ Accessibility rules are code rules here, not review notes. See
   structural belongs here.
 - **`AGENTS.md` is the operational cheat sheet**, symlinked as `CLAUDE.md`. It is
   short on purpose; this page is the long form.
+- **`just push` is the local gate.** It runs `just check` (fmt-check, lint, the
+  two guards, test) and then `jj git push`. It is a wrapper recipe, not a hook:
+  jj has no hook system, and `jj git push` does not run the colocated repo's
+  `.git/hooks/pre-push`, so typing `jj git push` directly skips the gate. CI is
+  still the authority and re-runs the same set plus the e2e and wasm lanes.
 - **Generated code is not checked in.** `web/src/lib/mortar-wasm/pkg/` is
   gitignored and rebuilt by `just wasm`; CI builds it before the web checks, and
   the deploy zips it in through `sourceInclude`.
@@ -448,8 +480,10 @@ A change is done when:
 - Negative-space tests cover every new validation or rejection path.
 - Every new bound is a named constant with its units in the name.
 - Every non-obvious line carries a comment saying *why*.
-- `just fmt-check`, `just lint`, `just test`, `just guard-autoplay` and
-  `just guard-dashes` all pass locally.
+- `just check` passes locally. It is `just fmt-check`, `just lint`,
+  `just guard-autoplay`, `just guard-dashes` and `just test`, which is this
+  bullet's list and no longer a second copy of it, and `just push` runs it before
+  the push.
 - If a Rust change touches the engine, `just wasm` has been run and the web app
   still typechecks against it.
 - If the wire changed: `model.rs`, the regenerated `contract.json`, `types.ts`
@@ -469,7 +503,9 @@ A change is done when:
   `wasm-pack`, Node 22 and pnpm available locally.
 - A Chromium is available for the wasm and Playwright lanes; `wasm-pack` fetches
   a matching chromedriver if none is found.
-- CI is the enforcement point for every gate, since no local hook exists.
+- CI is the enforcement point for every gate. `just check` runs the same set
+  locally and `just push` runs it before pushing, but both are recipes somebody
+  invokes rather than hooks that fire, so a push made another way is ungated.
 
 **Decisions**
 
@@ -487,8 +523,13 @@ A change is done when:
   lint and format lanes are fast enough to run on every change without thinking
   about it.
 - *`tsc --noEmit` rather than `svelte-check`.* **`svelte-check` crashes on TS 7.**
-  The programmatic API stabilises in TS 7.1; until then the typecheck covers
-  `.ts` fully and `.svelte` through generated types.
+  The programmatic API stabilises in TS 7.1. Until then the typecheck covers
+  `.ts` fully and `.svelte` **not at all**: `tsc` does not parse the extension
+  and drops those files silently, so a green run says nothing about a component.
+  This page previously claimed the coverage came "through generated types". That
+  was wrong, `svelte-kit sync` generates route `$types` and not component bodies,
+  and the claim cost real work: three agents narrowed a dozen indexing sites
+  believing a compiler had flagged them, when nothing had.
 - *A pinned wire fixture instead of a runtime schema validator.* **Two static
   checks, no runtime cost.** A Valibot or Zod layer would validate the same data
   mortar just produced, on a channel mason owns both ends of; the fixture catches
@@ -500,18 +541,34 @@ A change is done when:
 - *Generated wasm is not checked in.* **Rebuilt by `just wasm`, zipped for
   deploy.** Checking in a binary artefact that changes on every engine edit would
   make every diff unreadable.
+- *A wrapper recipe, not a hook.* **`just push`.** jj has no hooks and does not
+  fire git's, so the only honest local gate is one you invoke; CI stays the
+  authority.
+- *Pre-push, never pre-commit.* **One gate, at the push.** jj makes small commits
+  cheap and frequent; gating each one would make the cheapest operation in the
+  workflow the slowest.
+- *`noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` on.* **The client
+  indexes arrays freely and the wire distinguishes absent from null.** Both flags
+  turn a convention the code already tries to follow into something the compiler
+  enforces. The bulk of what the first one found was not the layout maths it was
+  turned on for: it was `entries[0]` in every `ResizeObserver` and
+  `IntersectionObserver` callback in the app, which is exactly the kind of site
+  a reader skims past because it is obviously fine, and which is obviously fine
+  only until a callback fires with nothing observed.
 
 **Open questions**
 
-- *No pre-push hook exists.* Every gate named here runs in CI and in `just`
-  recipes, and nothing runs them automatically before a push. Open: is a jj-side
-  hook worth adding, given how fast the lint and format lanes are?
+- *No typechecker sees a `.svelte` component body.* The single largest hole in
+  mason's static coverage, and it is unfixable with the current toolchain:
+  `svelte-check` is the only tool that would close it and it crashes on TS 7.
+  About 2 400 lines of component code, including all of the layout geometry, is
+  checked by nothing but oxlint and review. Open until TS 7.1 (around October
+  2026), when `check` should swap back to `svelte-check`; the day it does,
+  expect a real error list, because the components have never been compiled
+  against `strict`, let alone the two flags added since. Worth a scheduled retry
+  rather than waiting to notice.
 - *Conventional Commits are followed but not enforced.* There is no commitlint
   and no CI check on the subject line. Open: enforce, or leave it to review?
-- *`tsconfig.json` sets `strict` but not `noUncheckedIndexedAccess` or
-  `exactOptionalPropertyTypes`.* Both would catch real classes of bug in the
-  layout code, which indexes arrays freely. Open: turn them on and pay the
-  migration, or leave them?
 - *`api.ts` casts the response with `as FeedResponse`.* It is guarded by the
   contract fixture at build time, but a mortar that misbehaved at runtime would
   not be caught. Open: is a narrow runtime shape check on `items` worth it?

@@ -129,7 +129,7 @@
 		if (!sentinel || feed.warming) return;
 		const observer = new IntersectionObserver(
 			(entries) => {
-				if (entries[0].isIntersecting) void pump();
+				if (entries[0]?.isIntersecting) void pump();
 			},
 			{ rootMargin: `${PREFETCH_MARGIN}px` }
 		);

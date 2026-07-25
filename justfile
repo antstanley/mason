@@ -97,6 +97,25 @@ guard-dashes:
         exit 1
     fi
 
+# This is the ONE list of gates; the push wrapper below calls it rather than
+# repeating it, so there is no second copy to drift out of step.
+# test-e2e and test-wasm stay out on purpose: both need a real browser, which
+# takes the run past a minute, and a gate that slow is one people learn to skip
+# around. CI still runs those two lanes, and CI is the authority.
+# Ordered cheapest first, measured rather than guessed: the two greps are ~0.2s
+# each, fmt-check ~1s, lint ~2s (clippy, and minutes on a cold target dir), test
+# ~3.5s. An em dash used to cost a full clippy pass before anything reported it.
+[doc('the local gate: the guards, fmt-check, lint, test. cheapest first')]
+check: guard-dashes guard-autoplay fmt-check lint test
+
+# jj has no hook system, and `jj git push` does not fire the colocated repo's
+# .git/hooks/pre-push either (verified: only a raw `git push` triggers it, and
+# this repo forbids raw git). So nothing can intercept a push here; this recipe
+# IS the gate, by being the shorter and only documented way to push.
+[doc('push through the gate: run `just check`, then jj git push')]
+push *ARGS: check
+    jj git push {{ARGS}}
+
 # deploy to AWS via blogwright (S3 + CloudFront, MicroVM build)
 deploy env='production': wasm
     cd web && pnpm exec blogwright deploy {{env}}
