@@ -79,13 +79,20 @@ guard-autoplay:
 guard-dashes:
     #!/usr/bin/env bash
     set -euo pipefail
+    # A DENYLIST, not an allowlist. This recipe used to name the paths it
+    # scanned, which meant every new tracked directory was silently unguarded
+    # until somebody remembered to add it: .specs/ went a whole spec set
+    # unchecked that way, and the gate's exit 0 was false assurance for it.
+    # Scanning everything and excluding the generated trees cannot fail that way.
+    # -I skips binaries, so a png or a wasm blob holding the byte sequence by
+    # chance is not a finding. Filesystem grep, not jj: a new, unsnapshotted
+    # file must be caught too.
     # build the pattern from bytes so this recipe holds no literal em dash
     dash=$(printf '\xe2\x80\x94')
-    if grep -rl "$dash" \
+    if grep -rlI "$dash" . \
         --exclude-dir=.git --exclude-dir=.jj --exclude-dir=node_modules \
-        --exclude-dir=target --exclude-dir=build \
-        web/src web/vite.config.ts web/knip.json web/package.json web/tsconfig.json \
-        server README.md AGENTS.md PRODUCT.md CHANGELOG.md .changeset justfile; then
+        --exclude-dir=target --exclude-dir=build --exclude-dir=dist \
+        --exclude-dir=.svelte-kit --exclude-dir=pkg --exclude-dir=.impeccable; then
         echo "guard-dashes: found a U+2014 em dash in tracked source" >&2
         exit 1
     fi
