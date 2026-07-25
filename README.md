@@ -69,7 +69,7 @@ next *kind* by need (68/15/9/5/3 target across posts, blogs, Bluesky video,
 archived streams, and live) and the best brick *within* that kind; kinds are
 never compared by raw
 score. Author-diversity window of 8, deterministic seeded jitter, opaque
-`{snapshot, seed, offset}` cursor: endless scroll is stable and duplicate-free,
+`{seed, offset}` cursor: endless scroll is stable and duplicate-free,
 and every refresh is a fresh wall.
 
 Everything is in-memory (hand-rolled TTL caches; wasm-compatible); no

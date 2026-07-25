@@ -151,7 +151,7 @@ in page-sized slices. Laid bricks never move.
 | Walls | `wall` (mixed, default) and `glaze` (Bluesky image posts only) | One `Mode` enum, threaded to the snapshot cache key |
 | Auth | None, in either direction | No sign-in; every upstream read is public |
 | Storage | In-memory TTL caches; IndexedDB persistence for the browser build | No database, no server-side state |
-| Pagination | Opaque base64url cursor carrying `{snapshot, seed, offset}` | Page size 24; laid bricks never move |
+| Pagination | Opaque base64url cursor carrying `{seed, offset}` | Page size 24; laid bricks never move |
 | Moderation | Account and post labels; hidden tier dropped, `!warn` tier blurred | Mirrors what logged-out Bluesky shows |
 | Captions | `CaptionTrack` modelled and rendered; no upstream supplies data | The one declared WCAG exception |
 | Deployment | Static site to S3 + CloudFront via blogwright | PR previews per pull request, production by release |
@@ -208,6 +208,3 @@ in page-sized slices. Laid bricks never move.
   the product currently requires it; it is described as the path for future
   authenticated features. Open: what feature justifies it, and does that feature
   change the wire contract?
-- *Cursor snapshot field.* `Cursor.snapshot` is written on every cursor and never
-  read: `handle_feed` recomputes the snapshot id from DID, seed and mode. Open:
-  drop the field on the next wire change, or start validating against it?

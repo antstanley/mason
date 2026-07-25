@@ -61,11 +61,7 @@ pub async fn handle_feed(
             // a preview's cursor points at the CURRENT screen (not the next
             // page), so the freeze that follows commits from here. Demo warms
             // instantly, so the client freezes on the first poll either way.
-            page.cursor = Some(cursor::encode(&Cursor {
-                snapshot: "fixture".into(),
-                seed: 0,
-                offset,
-            }));
+            page.cursor = Some(cursor::encode(&Cursor { seed: 0, offset }));
         }
         return Ok(page);
     }
@@ -91,11 +87,7 @@ pub async fn handle_feed(
         let (items, warming) = snapshot::preview_page(&snap, PAGE_SIZE).await;
         return Ok(FeedResponse {
             items,
-            cursor: Some(cursor::encode(&Cursor {
-                snapshot: snap.id.clone(),
-                seed,
-                offset: 0,
-            })),
+            cursor: Some(cursor::encode(&Cursor { seed, offset: 0 })),
             warming: Some(warming),
         });
     }
@@ -109,7 +101,6 @@ pub async fn handle_feed(
     let (items, has_more) = snapshot::get_page(state, &snap, offset, PAGE_SIZE, wait_for_mix).await;
     let next = has_more.then(|| {
         cursor::encode(&Cursor {
-            snapshot: snap.id.clone(),
             seed,
             // saturating: the offset came off an attacker-writable cursor
             offset: offset.saturating_add(items.len()),
@@ -209,7 +200,6 @@ fn demo_page(offset: usize, mode: Mode) -> FeedResponse {
     let next_offset = offset.saturating_add(items.len());
     let cursor = (next_offset < pool.len()).then(|| {
         cursor::encode(&Cursor {
-            snapshot: "fixture".into(),
             seed: 0,
             offset: next_offset,
         })

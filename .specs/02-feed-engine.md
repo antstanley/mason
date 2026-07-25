@@ -85,7 +85,7 @@ handle_feed(actor, cursor, mode, intent)
   │
   ├─ get_or_build(did, seed, mode)          // blocks for first paint
   ├─ get_page(offset, PAGE_SIZE, wait_for_mix = intent == Normal)
-  └─ return {items, cursor: has_more ? encode{snapshot, seed, offset + items.len()} : null}
+  └─ return {items, cursor: has_more ? encode{seed, offset + items.len()} : null}
 ```
 
 A preview's cursor points at the **current** screen (offset 0), not the next

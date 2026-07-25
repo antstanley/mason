@@ -1,6 +1,6 @@
 # Change: Drop the dead `snapshot` field from the cursor
 
-**Status:** Proposed · **Date:** 2026-07-25 · **Owner:** Ant Stanley · **Target:** Repo-wide
+**Status:** Merged · **Date:** 2026-07-25 · **Merged:** 2026-07-25 · **Owner:** Ant Stanley · **Target:** Repo-wide
 
 `Cursor` carries three fields and mortar reads two of them. `snapshot` is written
 on every cursor mason has ever issued and is never consulted: `handle_feed`
@@ -28,10 +28,10 @@ current code is correct; the field is what makes it look otherwise.
 
 | Canonical page | Nature of change |
 |---|---|
-| [`.specs/01-domain-model.md`](../01-domain-model.md) | The `Cursor` entity loses a field |
-| [`.specs/06-wire-contract.md`](../06-wire-contract.md) | Resolve the open question; describe the two-field payload |
-| [`.specs/02-feed-engine.md`](../02-feed-engine.md) | The request-flow diagram's cursor encoding |
-| [`.specs/canonical-types.schema.json`](../canonical-types.schema.json) | `CursorPayload` drops `snapshot` |
+| [`.specs/01-domain-model.md`](../../01-domain-model.md) | The `Cursor` entity loses a field |
+| [`.specs/06-wire-contract.md`](../../06-wire-contract.md) | Resolve the open question; describe the two-field payload |
+| [`.specs/02-feed-engine.md`](../../02-feed-engine.md) | The request-flow diagram's cursor encoding |
+| [`.specs/canonical-types.schema.json`](../../canonical-types.schema.json) | `CursorPayload` drops `snapshot` |
 
 ---
 
@@ -66,6 +66,11 @@ current code is correct; the field is what makes it look otherwise.
 
 > Replace the two `encode{snapshot, seed, offset}` occurrences in the flow diagram
 > with `encode{seed, offset}`.
+
+CORRECTED ON MERGE: there was only ever one such occurrence, on the committed
+line of the flow diagram. The preview branch writes its cursor as
+`cursor(offset 0)` and names no fields, and the decode line already read
+`Some{seed, offset}`, which was wrong before this change and is right after it.
 
 ---
 
@@ -166,9 +171,15 @@ a stray `snapshot` key and asserts it yields the seed and offset.
   rejected after a mode or seed derivation change) to guard against a threat that
   does not exist: a forged snapshot id cannot make the engine serve another
   viewer's wall, because the DID comes from `actor`, not from the cursor.
-- *No wire version bump.* **The cursor is opaque and both directions degrade to a
-  fresh wall.** A version field would be new state to carry in order to protect a
-  token whose failure mode is already benign.
+- *No wire version bump.* **The cursor is opaque and neither direction is worse
+  than a fresh wall.** A version field would be new state to carry in order to
+  protect a token whose failure mode is already benign.
+  **Measured on merge**, and it is better than this decision assumed. Only one
+  direction degrades at all. An old cursor on a new build does not degrade: serde
+  ignores the stray key and returns `Ok`, so a reader mid-scroll across the deploy
+  keeps their exact seed and offset. A new cursor on an old build fails with
+  ``missing field `snapshot` ``, which `.ok()?` turns into `None`, and the reader
+  gets a fresh wall from offset zero. Neither path can produce a 500.
 
 **Open questions**
 
@@ -176,3 +187,8 @@ a stray `snapshot` key and asserts it yields the seed and offset.
   the demo page's cursor is `{seed: 0, offset}`. The seed is unused for fixtures.
   Open: leave it for uniformity, or is a separate demo cursor shape worth the
   branch?
+  **Resolved on merge:** leave it. Both demo sites keep `{seed: 0, offset}`, so
+  `demo` pages through exactly the same encode/decode path as a real actor and
+  the demo wall keeps testing the code the real wall runs. A demo-only cursor
+  shape would be a second branch in `handle_feed` to save eight bytes on a
+  fixture page.
