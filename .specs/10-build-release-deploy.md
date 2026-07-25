@@ -58,6 +58,8 @@ Every command in the repo goes through `just`.
 | `just fmt` / `just fmt-check` | `oxfmt` and `cargo fmt` |
 | `just guard-autoplay` | The video rule, enforced |
 | `just guard-dashes` | No U+2014 em dash in tracked source, docs or config |
+| `just check` | The local gate: `fmt-check`, `lint`, both guards, `test` |
+| `just push [args]` | `just check`, then `jj git push` with those args |
 | `just deploy [env]` | blogwright deploy (rebuilds wasm first) |
 | `just bootstrap [env]` / `just bootstrap-preview <domain>` | One-time infrastructure creation |
 | `just clean` | `cargo clean`; the target directory grows to about 3 GB |
@@ -99,6 +101,38 @@ can check is a convention that erodes:
 Both use a filesystem grep rather than `git grep`, so new unsnapshotted files in
 this jj-managed repo are seen too. `guard-dashes` additionally passes `-I` so a
 binary that happens to hold the byte sequence is not a finding.
+
+### Local gates
+
+`just check` runs `just guard-dashes`, `just guard-autoplay`, `just fmt-check`,
+`just lint` and `just test`, in that order. It is the same set CI runs, so a red
+pull request from a formatting slip is not a thing that has to happen. The recipe
+is dependencies-only: `just` runs the five before an empty body, so there is
+exactly one list of gates and no second copy to drift out of step with it.
+
+The order is cheapest first, and it is measured rather than asserted: the two
+greps are about 0.2 s each, `fmt-check` about 1 s, `lint` about 2 s warm (it is
+clippy, so minutes on a cold `target/`), `test` about 3.5 s. An earlier ordering
+put the greps behind `lint`, which meant an em dash in a comment cost a full
+clippy pass before anything reported it.
+
+`just push` depends on `check` and then runs `jj git push`, which makes the
+ordinary way to push the gated way. It is a **wrapper recipe, not a hook**. jj
+has no hook system, and `jj git push` does not fire the colocated repo's
+`.git/hooks/pre-push` either, so nothing here can intercept a push. What makes
+the gate hard to skip is position rather than enforcement: `just push` is shorter
+than `jj git push` and is the only push path these pages and `AGENTS.md`
+recommend. A bare `jj git push` still works and skips the gate; these pages name
+it only to say that, and to name what it costs (a red pull request rather than a
+bad merge, since CI is the authority).
+
+`test-e2e` and `test-wasm` stay out of `check` deliberately. Both need a real
+browser, which takes the run past a minute, and a gate that slow is one people
+learn to work around.
+
+CI remains the authority. It re-runs the same set plus `just test-e2e` and the
+wasm lane, and it is what a merge is gated on, so a push that went around the
+local gate costs a red pull request rather than a bad merge.
 
 ---
 
@@ -282,7 +316,9 @@ Day-2 operations are `blogwright status`, `history`, `logs <hash>` and
 ## Version control
 
 The repo is **jj-managed** (jujutsu), not raw git. Use `jj`, not `git`, even when
-jj resists. Work lands via pull requests off `main`, which is branch-protected.
+jj resists. Work lands via pull requests off `main`, which is branch-protected,
+and goes out with `just push` rather than a bare `jj git push`, so the local gate
+runs first (see Local gates above).
 
 ---
 
@@ -326,6 +362,9 @@ web/vitest.config.ts        merged with the app's vite config
   build that silently repairs the lock ships an unpinned dependency graph.
 - *Guards are greps in CI.* **Autoplay and em dashes.** Both are rules a reviewer
   will eventually miss.
+- *The local gate is a recipe you invoke.* **`just push`, not a hook.** jj has no
+  hook system and does not fire git's, so an enforced local gate is not on the
+  menu here; a shorter, documented push path that runs `just check` first is.
 - *One version, changesets-owned.* **Root `package.json` propagates everywhere.**
   Three disagreeing versions is the state this replaced.
 - *`createGithubReleases: false`.* **`release.mjs` cuts the release.** The action

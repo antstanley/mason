@@ -42,6 +42,8 @@ just lint         # oxlint + knip + clippy
 just fmt          # oxfmt + cargo fmt (just fmt-check to verify only)
 just guard-autoplay   # enforces the no-autoplay rule
 just guard-dashes     # enforces the no-em-dash rule
+just check        # the local gate: fmt-check + lint + both guards + test
+just push         # just check, then jj git push. THE way to push.
 just clean        # cargo clean; target dir grows to ~3GB
 ```
 
@@ -62,11 +64,13 @@ fixture wall.
   `just guard-dashes` greps the tracked tree and fails if one appears.
 - **Videos never autoplay.** `just guard-autoplay` greps `web/src` for the word
   and fails if present; it is an accessibility stance, not a preference.
-- **TypeScript 7.** `svelte-check` crashes on TS 7 (programmatic API stabilizes
-  in TS 7.1, ~Oct 2026); typecheck is plain `tsc --noEmit`. Do not swap
-  `check` back to `svelte-check` yet.
+- **TypeScript 7, and it does not see your component.** `tsc` cannot parse
+  `.svelte`, so zero of them enter the program and a green typecheck says
+  nothing about a component body. `svelte-check` would close that and crashes
+  on TS 7 (programmatic API stabilizes in TS 7.1, ~Oct 2026). Do not swap
+  `check` back to `svelte-check` yet, and do not read a green run as coverage.
 - **Formatting is oxfmt, linting is oxlint, dead-code is knip**, not prettier /
-  eslint. Run `just fmt` and `just lint` before finishing.
+  eslint. Run `just check` before finishing, and `just push` to push.
 - `mortar-core` must stay `wasm32`-compatible: everything in-memory, hand-rolled
   TTL caches, no database, no threads. The `sources/` boundary is the v2 seam.
 

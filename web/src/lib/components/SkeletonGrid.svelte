@@ -12,7 +12,11 @@
 	$effect(() => {
 		if (!container) return;
 		const observer = new ResizeObserver((entries) => {
-			cols = colsForWidth(entries[0].contentRect.width);
+			// nothing measured, so nothing to resolve into: a guessed width here is
+			// exactly the mismatch this file exists to avoid
+			const entry = entries[0];
+			if (!entry) return;
+			cols = colsForWidth(entry.contentRect.width);
 		});
 		observer.observe(container);
 		return () => observer.disconnect();

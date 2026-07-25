@@ -44,14 +44,14 @@ spec is folded back in; a change proposed and shipped together goes straight to
 A merged spec moves to [`changes/merged/`](changes/merged/) and is kept as dated
 history, including any claim it turned out to get wrong, annotated in place.
 
-| Pending change spec | Status | Proposes |
-|---|---|---|
-| [2026-07-25-tighten_typescript_and_add_a_prepush_gate.md](changes/2026-07-25-tighten_typescript_and_add_a_prepush_gate.md) | Proposed | `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and a local pre-push gate |
+No change spec is pending. Every one proposed so far has been merged into the
+pages above and moved to [`changes/merged/`](changes/merged/).
 
 | Merged change spec | Merged | Shipped |
 |---|---|---|
 | [2026-07-25-honest_native_user_agent.md](changes/merged/2026-07-25-honest_native_user_agent.md) | 2026-07-25 | A native user agent derived from the crate version, with a real contact URL |
 | [2026-07-25-drop_snapshot_from_cursor.md](changes/merged/2026-07-25-drop_snapshot_from_cursor.md) | 2026-07-25 | Removed the `snapshot` field the cursor carried and never read |
+| [2026-07-25-tighten_typescript_and_add_a_prepush_gate.md](changes/merged/2026-07-25-tighten_typescript_and_add_a_prepush_gate.md) | 2026-07-25 | `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and `just push` as the local gate |
 
 ## Related documents
 

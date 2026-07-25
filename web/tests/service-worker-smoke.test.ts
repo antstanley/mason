@@ -19,8 +19,11 @@ test("the demo wall round-trips /api/feed through the wasm service worker", asyn
 		return { status: res.status, body: (await res.json()) as { items?: unknown[] } };
 	});
 	expect(roundTrip.status).toBe(200);
-	expect(Array.isArray(roundTrip.body.items)).toBe(true);
-	expect(roundTrip.body.items!.length).toBeGreaterThan(0);
+	// narrowed, not asserted: this file IS typechecked, so the `items!` this
+	// replaced was a live counterexample to the rule the guidelines now state
+	const { items } = roundTrip.body;
+	expect(Array.isArray(items)).toBe(true);
+	expect(items?.length ?? 0).toBeGreaterThan(0);
 
 	// and the app itself renders those bricks on the wall (warm can take up to
 	// the 8s ceiling before the first screen commits)

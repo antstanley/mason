@@ -267,10 +267,17 @@ whose bricks are fixtures compiled into the wasm and need no network at all.
 |---|---|---|
 | `web/src/**/*.test.ts` | vitest, node environment | `FeedState` transitions, `api.ts` request shaping and error mapping |
 | `web/tests/*.test.ts` | Playwright, chromium | The real static build: the worker intercepts `/api/feed` and lays the demo wall |
-| `pnpm check:ci` | `tsc --noEmit` | Types, including the wire drift guard |
+| `pnpm check:ci` | `tsc --noEmit` | Types in `.ts` and `.svelte.ts`, including the wire drift guard. **Not `.svelte` component bodies** |
 
 vitest rides the app's own vite config through `mergeConfig`, so `.svelte.ts`
 rune modules compile in tests exactly as they do in the build.
+
+**No lane in this table typechecks a component.** `tsc` cannot parse `.svelte`
+and drops those files silently, so a green run says nothing about one; the vite
+build strips their types without checking them; and both vitest suites are `.ts`
+that import no component. This is stated here as well as in
+[development-guidelines.md](development-guidelines.md) because this is the page
+somebody working on a component reaches for first.
 
 ---
 

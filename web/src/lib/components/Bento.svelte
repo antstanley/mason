@@ -37,11 +37,15 @@
 	$effect(() => {
 		if (!container) return;
 		const observer = new ResizeObserver((entries) => {
+			// a callback with nothing observed measured nothing; keep the column
+			// count the last real measurement gave us rather than guess a width
+			const entry = entries[0];
+			if (!entry) return;
 			// measure the border box, not the content box: the filler's p-3 padding
 			// must not shrink the measured width, or glaze drops a column at the
 			// same viewport where bento and masonry keep it
-			const box = entries[0].borderBoxSize?.at(0)?.inlineSize;
-			cols = colsForWidth(box ?? entries[0].contentRect.width);
+			const box = entry.borderBoxSize?.at(0)?.inlineSize;
+			cols = colsForWidth(box ?? entry.contentRect.width);
 		});
 		observer.observe(container);
 		return () => observer.disconnect();

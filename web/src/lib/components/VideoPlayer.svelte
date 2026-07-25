@@ -72,7 +72,11 @@
 		// a brick that leaves the wall goes quiet; no off-screen audio
 		const io = new IntersectionObserver(
 			(entries) => {
-				if (!entries[0].isIntersecting && !el.paused) el.pause();
+				// the rule is about an observation that happened: no entry means the
+				// video was never seen to leave, so it must keep playing
+				const entry = entries[0];
+				if (!entry) return;
+				if (!entry.isIntersecting && !el.paused) el.pause();
 			},
 			{ threshold: 0 }
 		);
