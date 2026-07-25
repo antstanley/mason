@@ -88,12 +88,17 @@ can check is a convention that erodes:
 
 - **`guard-autoplay`** fails on any `autoplay` or `autostartload` in `web/src`,
   and on any `.play(` outside `VideoPlayer.svelte`.
-- **`guard-dashes`** fails on a U+2014 em dash anywhere in tracked source, docs or
-  config. The recipe builds the pattern from bytes so it holds no literal em dash
-  itself.
+- **`guard-dashes`** fails on a U+2014 em dash anywhere in the tree. The recipe
+  builds the pattern from bytes so it holds no literal em dash itself, and it
+  works by **denylist**: it scans everything and excludes the generated trees
+  (`target`, `node_modules`, `build`, `dist`, `.svelte-kit`, the wasm `pkg`).
+  An allowlist of scanned paths is the shape this recipe used to have, and it
+  fails silently: a new tracked directory is simply never read, and the gate
+  keeps exiting 0 over it. `.specs/` went a whole spec set unchecked that way.
 
 Both use a filesystem grep rather than `git grep`, so new unsnapshotted files in
-this jj-managed repo are seen too.
+this jj-managed repo are seen too. `guard-dashes` additionally passes `-I` so a
+binary that happens to hold the byte sequence is not a finding.
 
 ---
 
