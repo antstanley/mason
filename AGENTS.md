@@ -2,7 +2,10 @@
 
 Guidance for AI agents working in **mason**, an atproto discovery app. One wall,
 every brick. Read `README.md` for the full architecture and `PRODUCT.md` for
-product intent; this file is the operational cheat sheet.
+product intent; this file is the operational cheat sheet. `.specs/` holds the
+canonical design spec, and it is the long form of everything below: start at
+`.specs/README.md`, and read `.specs/development-guidelines.md` before writing
+code.
 
 ## Layout
 
@@ -20,17 +23,25 @@ directly to the AppView, plc.directory, each PDS, and stream.place. **Server
 mode**: set `PUBLIC_MASON_SERVER_URL` in `web/.env` and the SPA calls a native
 mortar over CORS.
 
+Two walls, one engine. The default mixes every kind; `?mode=glaze` is the image
+wall, Bluesky media posts only, and the layout picker's glaze option asks for it.
+The first screen warms rather than blocking: the client polls `intent=preview`
+and reflows, then commits once with `intent=freeze` (or the moment the reader
+scrolls). See `.specs/02-feed-engine.md`.
+
 ## Commands (via `just`)
 
 ```sh
 just dev          # local mode: builds wasm, runs vite on :5173
 just dev-server   # server mode: native mortar :8787 + SPA against it
 just build        # static site → web/build/ (rebuilds wasm first)
-just test         # cargo nextest + tsc typecheck
+just test         # cargo nextest + tsc typecheck + vitest
+just test-e2e     # service-worker smoke: the static build driven in chromium
 just test-wasm    # wasm-bindgen tests in headless chrome
 just lint         # oxlint + knip + clippy
-just fmt          # oxfmt + cargo fmt
+just fmt          # oxfmt + cargo fmt (just fmt-check to verify only)
 just guard-autoplay   # enforces the no-autoplay rule
+just guard-dashes     # enforces the no-em-dash rule
 just clean        # cargo clean; target dir grows to ~3GB
 ```
 
@@ -47,7 +58,8 @@ fixture wall.
   `Brick`; the Svelte renderers in `web/src/lib/components/cards/` are
   `*Card.svelte`. The two vocabularies are deliberate, not drift: a brick is
   the model, a card is the rendered brick.
-- **No em dashes.** Anywhere: UI copy, code comments, commits.
+- **No em dashes.** Anywhere: UI copy, code comments, commits, specs.
+  `just guard-dashes` greps the tracked tree and fails if one appears.
 - **Videos never autoplay.** `just guard-autoplay` greps `web/src` for the word
   and fails if present; it is an accessibility stance, not a preference.
 - **TypeScript 7.** `svelte-check` crashes on TS 7 (programmatic API stabilizes

@@ -14,6 +14,12 @@ follows.
 A friend who is live right now opens the wall. It is the only brick with a
 deadline, so it is the only one that jumps the queue.
 
+Two walls, one engine. The default mixes every kind; **glaze** is the image
+wall, Bluesky media posts only, laid dense and grouted, reached from the layout
+picker. Picking it is a layout choice and an algorithm choice at once: it asks
+mortar for `?mode=glaze`, which reads each author's media deep and keeps a month
+of their pictures rather than three days of their posts.
+
 ## Two build modes, one Rust engine
 
 ```
@@ -42,6 +48,12 @@ exploration) → fan out under a global rate limiter with a first-paint
 threshold (respond once bricks from 12 distinct authors have arrived, or 3 s)
 → keep filling in the background. A ~6 s mix deadline bounds the whole opening
 wait, so a cold wall never waits longer than that for its first screen.
+
+The first screen warms rather than blocking. The browser polls mortar every
+350 ms for the best wall it can lay from the pool so far and reflows in place, so
+a cold wall fills in front of you instead of sitting on skeletons. It commits the
+moment the pool settles, the reader scrolls, or an 8 s ceiling hits, and from
+there the wall never moves: bricks are laid once and paged immutably.
 
 The wall extends itself. When scrolling drains the unlaid pool below two
 pages' worth, mortar fans out to the next 100 authors this wall has never
@@ -72,14 +84,20 @@ deterministically.
 just dev          # LOCAL mode: wasm SW + vite on :5173; no server
 just build        # fully static site in web/build/
 just dev-server   # server mode: native mortar :8787 + SPA against it
-just test         # cargo nextest + typecheck
+just test         # cargo nextest + typecheck + vitest
+just test-e2e     # the service-worker smoke: the static build, driven in chromium
 just test-wasm    # the wasm-only Rust paths, in headless chrome
 just lint         # oxlint + knip + clippy
 just guard-autoplay   # the video rule, enforced
+just guard-dashes     # the em-dash rule, enforced
 just clean        # reclaim the cargo target dir (~3GB)
 ```
 
 Try actor `demo` for an offline fixture wall.
+
+The canonical design spec lives in [`.specs/`](.specs/README.md): the domain
+model, the feed engine, the sources seam, the wire contract, the client, and the
+development guidelines. This README is the front door; that is the long form.
 
 ## Releases
 

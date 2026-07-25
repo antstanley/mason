@@ -1,0 +1,378 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mason.iamstan.dev/schemas/canonical-types.schema.json",
+  "title": "mason canonical types",
+  "description": "The authoritative shapes mason puts on the wire, mirroring mortar's serde output (server/crates/mortar-core/src/model.rs, error.rs, algo/cursor.rs). Field naming is camelCase throughout. Null and absent are distinct and load-bearing: a field that is always present but may be empty is nullable; a field mortar skips when empty is optional. The exact bytes are pinned by server/crates/mortar-core/tests/fixtures/contract.json and checked from both sides. See .specs/06-wire-contract.md.",
+
+  "$defs": {
+    "Did": {
+      "description": "An atproto decentralised identifier. mason reads did:plc and did:web.",
+      "type": "string",
+      "pattern": "^did:(plc|web):[A-Za-z0-9._:%-]+$"
+    },
+
+    "Handle": {
+      "description": "A Bluesky handle, lowercased. Display data and a request parameter; never a key.",
+      "type": "string",
+      "minLength": 1
+    },
+
+    "AtUri": {
+      "description": "An AT-URI, at://<did>/<collection>/<rkey>. Every brick id is one, copied verbatim from upstream.",
+      "type": "string",
+      "pattern": "^at://did:(plc|web):[A-Za-z0-9._:%-]+/[A-Za-z0-9.]+/[A-Za-z0-9._~-]+$"
+    },
+
+    "Timestamp": {
+      "description": "An RFC3339 timestamp. Author-supplied and therefore untrusted: an unparseable value, or one more than 600 seconds in the future, is treated as stale and never admitted.",
+      "type": "string"
+    },
+
+    "HttpUrl": {
+      "description": "A URL safe to place in an anchor. Only http and https survive sources::util::is_http_url; a rejected URL becomes an empty string rather than being dropped.",
+      "type": "string",
+      "pattern": "^(https?://.+)?$"
+    },
+
+    "AspectRatio": {
+      "description": "Intrinsic dimensions, used to reserve space before an image or video loads.",
+      "type": "object",
+      "required": ["width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "integer", "minimum": 0 },
+        "height": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "Author": {
+      "description": "The author of a brick, denormalised onto every brick because the wire carries nothing else.",
+      "type": "object",
+      "required": ["did", "handle", "displayName", "avatar"],
+      "additionalProperties": false,
+      "properties": {
+        "did": { "$ref": "#/$defs/Did" },
+        "handle": { "$ref": "#/$defs/Handle" },
+        "displayName": { "type": ["string", "null"] },
+        "avatar": { "type": ["string", "null"] }
+      }
+    },
+
+    "Blur": {
+      "description": "Present only when a soft-warn label covers a brick's media behind a reveal. Anything in the hidden tier is dropped upstream, so a blurred brick can always be revealed.",
+      "type": "object",
+      "required": ["label"],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "description": "The label that triggered the cover.",
+          "type": "string",
+          "examples": ["!warn"]
+        }
+      }
+    },
+
+    "ImageEmbed": {
+      "description": "One image on a post brick. src is the AppView's thumb URL.",
+      "type": "object",
+      "required": ["src", "alt", "aspectRatio"],
+      "additionalProperties": false,
+      "properties": {
+        "src": { "type": "string" },
+        "alt": { "type": "string" },
+        "aspectRatio": {
+          "oneOf": [{ "$ref": "#/$defs/AspectRatio" }, { "type": "null" }]
+        }
+      }
+    },
+
+    "ExternalEmbed": {
+      "description": "A link preview carried by a post, rendered inside the card.",
+      "type": "object",
+      "required": ["uri", "title", "description", "thumb"],
+      "additionalProperties": false,
+      "properties": {
+        "uri": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "thumb": { "type": ["string", "null"] }
+      }
+    },
+
+    "Publication": {
+      "description": "The site.standard.publication a blog document belongs to. icon is modelled but never populated: the publication record read asks only for name and url.",
+      "type": "object",
+      "required": ["name", "url", "icon"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "url": { "$ref": "#/$defs/HttpUrl" },
+        "icon": { "type": ["string", "null"] }
+      }
+    },
+
+    "CaptionTrack": {
+      "description": "A WebVTT caption track. Modelled end to end and rendered by the player, but no upstream carries caption data today, so the list is empty on every brick.",
+      "type": "object",
+      "required": ["src", "lang", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "src": { "type": "string" },
+        "lang": {
+          "description": "A BCP 47 language tag.",
+          "type": "string",
+          "examples": ["en", "pt-BR"]
+        },
+        "label": { "type": "string" }
+      }
+    },
+
+    "PostBrick": {
+      "description": "A Bluesky post that is not a native video.",
+      "type": "object",
+      "required": [
+        "kind",
+        "id",
+        "url",
+        "author",
+        "text",
+        "createdAt",
+        "likeCount",
+        "repostCount",
+        "images",
+        "external"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "post" },
+        "id": { "$ref": "#/$defs/AtUri" },
+        "url": {
+          "description": "The post on bsky.app. Rewritten client-side to the reader's chosen atmosphere client.",
+          "type": "string"
+        },
+        "author": { "$ref": "#/$defs/Author" },
+        "text": { "type": "string" },
+        "createdAt": { "$ref": "#/$defs/Timestamp" },
+        "likeCount": { "type": "integer", "minimum": 0 },
+        "repostCount": { "type": "integer", "minimum": 0 },
+        "images": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ImageEmbed" }
+        },
+        "external": {
+          "oneOf": [{ "$ref": "#/$defs/ExternalEmbed" }, { "type": "null" }]
+        },
+        "blur": {
+          "description": "Absent, not null, when there is nothing to cover.",
+          "$ref": "#/$defs/Blur"
+        }
+      }
+    },
+
+    "BlogBrick": {
+      "description": "A site.standard.document from an author's own repo. Metadata and a link out only: the lexicon's content union is platform-specific and is never parsed.",
+      "type": "object",
+      "required": [
+        "kind",
+        "id",
+        "url",
+        "author",
+        "title",
+        "description",
+        "coverImage",
+        "publication",
+        "tags",
+        "publishedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "blog" },
+        "id": { "$ref": "#/$defs/AtUri" },
+        "url": {
+          "description": "The publication URL joined with the document path. Empty when the result is not an http(s) URL.",
+          "$ref": "#/$defs/HttpUrl"
+        },
+        "author": { "$ref": "#/$defs/Author" },
+        "title": { "type": "string" },
+        "description": { "type": ["string", "null"] },
+        "coverImage": {
+          "description": "A blob URL on the author's PDS.",
+          "type": ["string", "null"]
+        },
+        "publication": { "$ref": "#/$defs/Publication" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "publishedAt": { "$ref": "#/$defs/Timestamp" }
+      }
+    },
+
+    "VideoSource": {
+      "description": "Which network a video brick came from.",
+      "enum": ["bluesky", "streamplace"]
+    },
+
+    "VideoBrick": {
+      "description": "Three things share this shape, distinguished by source and live: a Bluesky clip, an archived Streamplace stream, and a stream happening right now. All three are HLS, so one player handles them.",
+      "type": "object",
+      "required": [
+        "kind",
+        "id",
+        "url",
+        "author",
+        "title",
+        "poster",
+        "playlist",
+        "aspectRatio",
+        "source",
+        "createdAt",
+        "likeCount",
+        "live",
+        "viewerCount",
+        "durationMs",
+        "activity"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "video" },
+        "id": { "$ref": "#/$defs/AtUri" },
+        "url": {
+          "description": "Where a viewer goes to watch at the source: bsky.app, or a stream.place watch page.",
+          "type": "string"
+        },
+        "author": { "$ref": "#/$defs/Author" },
+        "title": { "type": "string" },
+        "poster": { "type": ["string", "null"] },
+        "playlist": {
+          "description": "An HLS m3u8 URL.",
+          "type": "string"
+        },
+        "aspectRatio": {
+          "oneOf": [{ "$ref": "#/$defs/AspectRatio" }, { "type": "null" }]
+        },
+        "source": { "$ref": "#/$defs/VideoSource" },
+        "createdAt": { "$ref": "#/$defs/Timestamp" },
+        "likeCount": { "type": "integer", "minimum": 0 },
+        "live": {
+          "description": "Streamplace only: this stream is happening right now. The only brick exempt from the age window, and the only one that jumps the mixer's kind lottery.",
+          "type": "boolean"
+        },
+        "viewerCount": {
+          "description": "Live only. It is also the engagement signal for a live brick.",
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "durationMs": {
+          "description": "Archived streams only.",
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "activity": {
+          "description": "What the streamer says they are doing.",
+          "type": ["string", "null"]
+        },
+        "captions": {
+          "description": "Absent, not empty, today: mortar skips serialising an empty list.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/CaptionTrack" }
+        },
+        "blur": {
+          "description": "Only ever set on native Bluesky videos.",
+          "$ref": "#/$defs/Blur"
+        }
+      }
+    },
+
+    "Brick": {
+      "description": "One card on the wall. An internally-tagged union on kind, so the client receives a discriminated union.",
+      "oneOf": [
+        { "$ref": "#/$defs/PostBrick" },
+        { "$ref": "#/$defs/BlogBrick" },
+        { "$ref": "#/$defs/VideoBrick" }
+      ]
+    },
+
+    "FeedResponse": {
+      "description": "One page of the wall. The response body of GET /api/feed in both build modes.",
+      "type": "object",
+      "required": ["items", "cursor"],
+      "additionalProperties": false,
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/$defs/Brick" } },
+        "cursor": {
+          "description": "Null when the wall has no more bricks: the fill is over, no extension wave is in flight, and the follow graph is spent.",
+          "oneOf": [{ "$ref": "#/$defs/Cursor" }, { "type": "null" }]
+        },
+        "warming": {
+          "description": "Present only on a preview response: whether more bricks are still arriving. The client polls and reflows the first screen while this is true, then freezes it.",
+          "type": "boolean"
+        }
+      }
+    },
+
+    "Cursor": {
+      "description": "The opaque pagination cursor as it appears on the wire: base64url with no padding, wrapping the JSON of CursorPayload. Attacker-writable, so a value that fails to decode yields a fresh wall rather than an error.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+
+    "CursorPayload": {
+      "description": "What a decoded cursor carries. Engine-internal: the client never inspects it.",
+      "type": "object",
+      "required": ["snapshot", "seed", "offset"],
+      "additionalProperties": false,
+      "properties": {
+        "snapshot": {
+          "description": "The snapshot cache key, <mode-tag>-<16 hex>. Written on every cursor and currently never read back: handle_feed recomputes the id from DID, seed and mode.",
+          "type": "string"
+        },
+        "seed": {
+          "description": "The seed for the cohort shuffle and the mixer's jitter. Carrying it is what lets an evicted snapshot rebuild deterministically mid-scroll.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "offset": {
+          "description": "The next item offset within the snapshot's wall.",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+
+    "FeedMode": {
+      "description": "The named walls a feed request can ask for via ?mode=. Absent, or anything unrecognised, is the default full wall.",
+      "enum": ["glaze"]
+    },
+
+    "FeedIntent": {
+      "description": "A feed request's role in the warm-then-commit first screen, via ?intent=. Absent is a normal committed page.",
+      "enum": ["preview", "freeze"]
+    },
+
+    "MortarErrorCode": {
+      "description": "The machine codes mortar itself emits. The web classifies on these, so they are wire contract rather than cosmetics. The web adds its own out-of-band codes (\"wasm\", \"unknown\") for failures that never reached mortar, which is why ErrorEnvelope.error stays a plain string.",
+      "enum": ["bad_request", "actor_not_found", "login_required", "upstream"]
+    },
+
+    "ErrorEnvelope": {
+      "description": "The one error shape mortar emits in both build modes. The native server sends it as a JSON body with the status on the response line; the wasm build throws it as a JSON string with the status in-band, because at that point there is no HTTP layer to carry it.",
+      "type": "object",
+      "required": ["error", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "description": "A machine code. Usually a MortarErrorCode; the web may also produce \"wasm\" or \"unknown\".",
+          "type": "string"
+        },
+        "message": {
+          "description": "Human-readable detail. Display only, never matched on.",
+          "type": "string"
+        },
+        "status": {
+          "description": "Present only on the wasm channel.",
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        }
+      }
+    }
+  }
+}
