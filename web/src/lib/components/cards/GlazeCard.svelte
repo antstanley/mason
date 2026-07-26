@@ -135,7 +135,7 @@
 		     the card, so focus and pointer stay on the panel, not the buried strip -->
 		<div inert={showAlt}>
 			{#if kind === 'carousel'}
-			<Sensitive blur={brick.blur}>
+			<Sensitive id={brick.id} blur={brick.blur}>
 				<div
 					bind:this={strip}
 					onscroll={onScroll}
@@ -198,7 +198,7 @@
 				rel="noopener noreferrer"
 				class="block focus-visible:outline-offset-[-3px]"
 			>
-				<Sensitive blur={brick.blur}>
+				<Sensitive id={brick.id} blur={brick.blur}>
 					{#if kind === 'single' && first}
 						<img
 							src={first.src}

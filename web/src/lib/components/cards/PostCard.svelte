@@ -16,7 +16,7 @@
 
 <BrickShell accent="post" href={clientUrl(brick.url)} {label}>
 	{#if img}
-		<Sensitive blur={brick.blur}>
+		<Sensitive id={brick.id} blur={brick.blur}>
 			<img
 				src={img.src}
 				alt={img.alt}

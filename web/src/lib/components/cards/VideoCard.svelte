@@ -49,7 +49,7 @@
 </script>
 
 <BrickShell accent="video" {label}>
-	<Sensitive blur={brick.blur}>
+	<Sensitive id={brick.id} blur={brick.blur}>
 		<div class="relative">
 			{#if playRequested}
 			<VideoPlayer
