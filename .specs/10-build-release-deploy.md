@@ -59,7 +59,8 @@ Every command in the repo goes through `just`.
 | `just guard-autoplay` | The video rule, enforced |
 | `just guard-dashes` | No U+2014 em dash in tracked source, docs or config |
 | `just guard-toolchain` | The pinned channel satisfies the MSRV `server/Cargo.toml` declares |
-| `just check` | The local gate: the three guards, `fmt-check`, `lint`, `test` |
+| `just guard-wasm` | `mortar-core` and `mortar-wasm` still compile for `wasm32-unknown-unknown` |
+| `just check` | The local gate: the four guards, `fmt-check`, `lint`, `test` |
 | `just push [args]` | `just check`, then `jj git push` with those args |
 | `just deploy [env]` | blogwright deploy (rebuilds wasm first) |
 | `just bootstrap [env]` / `just bootstrap-preview <domain>` | One-time infrastructure creation |
@@ -86,7 +87,7 @@ every source test points at a wiremock server rather than the network.
 
 ### Guards
 
-Three rules are enforced mechanically rather than by review, because a convention
+Four rules are enforced mechanically rather than by review, because a convention
 nobody can check is a convention that erodes:
 
 - **`guard-autoplay`** fails on any `autoplay` or `autostartload` in `web/src`,
@@ -102,23 +103,34 @@ nobody can check is a convention that erodes:
   from `server/Cargo.toml` and fails when they disagree. CI parsing the channel
   removes one half of the toolchain drift; this removes the other, where
   `rust-version` promises support for a compiler nobody builds with.
+- **`guard-wasm`** compiles `mortar-core` and `mortar-wasm` for
+  `wasm32-unknown-unknown`. It is the only gate that can see the repo's
+  organising constraint (see
+  [architecture-principles.md](architecture-principles.md)): `lint` and `test`
+  both run on the host, so a dependency that builds natively and dies on wasm32
+  passes everything else. `rand` 0.10 did exactly that, clearing clippy at
+  `-D warnings` and all 97 tests with the browser build broken. It runs
+  `cargo check`, not `just wasm`: the question is whether it compiles, and
+  wasm-pack costs 30 seconds to answer the same thing.
 
-The first two use a filesystem grep rather than `git grep`, so new unsnapshotted files in
-this jj-managed repo are seen too. `guard-dashes` additionally passes `-I` so a
-binary that happens to hold the byte sequence is not a finding.
+The two greps use a filesystem walk rather than `git grep`, so new unsnapshotted
+files in this jj-managed repo are seen too. `guard-dashes` additionally passes
+`-I` so a binary that happens to hold the byte sequence is not a finding.
 
 ### Local gates
 
 `just check` runs `just guard-dashes`, `just guard-autoplay`,
-`just guard-toolchain`, `just fmt-check`, `just lint` and `just test`, in that
-order. It is the same set CI runs, so a red pull request from a formatting slip
+`just guard-toolchain`, `just fmt-check`, `just guard-wasm`, `just lint` and
+`just test`, in that order. It is the same set CI runs, so a red pull request from a formatting slip
 is not a thing that has to happen. The recipe
-is dependencies-only: `just` runs the six before an empty body, so there is
+is dependencies-only: `just` runs the seven before an empty body, so there is
 exactly one list of gates and no second copy to drift out of step with it.
 
 The order is cheapest first, and it is measured rather than asserted: the two
-greps are about 0.2 s each, `fmt-check` about 1 s, `lint` about 2 s warm (it is
-clippy, so minutes on a cold `target/`), `test` about 3.5 s. An earlier ordering
+greps are about 0.2 s each, `fmt-check` about 1 s, `guard-wasm` about 1.4 s warm,
+`lint` about 2 s warm (it is clippy, so minutes on a cold `target/`), `test`
+about 3.5 s. `guard-wasm` sits ahead of `lint` because both compile and clippy
+is the heavier of the two from cold. An earlier ordering
 put the greps behind `lint`, which meant an em dash in a comment cost a full
 clippy pass before anything reported it.
 

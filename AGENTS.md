@@ -43,7 +43,8 @@ just fmt          # oxfmt + cargo fmt (just fmt-check to verify only)
 just guard-autoplay   # enforces the no-autoplay rule
 just guard-dashes     # enforces the no-em-dash rule
 just guard-toolchain  # the pinned rust channel satisfies the declared MSRV
-just check        # the local gate: fmt-check + lint + both guards + test
+just guard-wasm       # mortar still compiles for wasm32, the default build mode
+just check        # the local gate: the four guards + fmt-check + lint + test
 just push         # just check, then jj git push. THE way to push.
 just clean        # cargo clean; target dir grows to ~3GB
 ```
@@ -74,6 +75,9 @@ fixture wall.
   eslint. Run `just check` before finishing, and `just push` to push.
 - `mortar-core` must stay `wasm32`-compatible: everything in-memory, hand-rolled
   TTL caches, no database, no threads. The `sources/` boundary is the v2 seam.
+  `just guard-wasm` enforces it, and it is the ONLY gate that can: `lint` and
+  `test` run on the host, so a dependency that builds natively and dies on
+  wasm32 passes both. That is not hypothetical, `rand` 0.10 did it.
 
 ## Version control
 

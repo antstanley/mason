@@ -61,6 +61,7 @@ fmt-check:
 # the video rule: no autoplay attributes and no programmatic play() outside the
 # one sanctioned, click-gated player. filesystem grep (not git grep) so new,
 # unsnapshotted files in this jj repo are seen too.
+[doc('the video rule: no autoplay attribute, no .play() outside the player')]
 guard-autoplay:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -76,6 +77,7 @@ guard-autoplay:
     fi
 
 # no em dashes anywhere in tracked source, docs, or config (U+2014)
+[doc('no U+2014 em dash anywhere in the tree')]
 guard-dashes:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -97,12 +99,30 @@ guard-dashes:
         exit 1
     fi
 
+# The organising constraint, enforced: mortar-core must compile for wasm32,
+# because the DEFAULT build mode is the wasm one. Nothing else in `check` can
+# see this. `lint` and `test` both run on the host target, so a dependency that
+# builds natively and dies on wasm32 passes every other gate: rand 0.10 did
+# exactly that, cleared clippy and 97 tests, and would have shipped a broken
+# browser build if a wasm32 target build had not been run by hand.
+#
+# `cargo check`, not `just wasm`: this needs to answer "does it compile", not
+# "produce a bundle", and wasm-pack costs 30s to say the same thing. --all-targets
+# picks up the #[cfg(target_arch = "wasm32")] test modules too, which matters
+# while test-wasm cannot run locally. Warm this is about a second; cold it is
+# comparable to clippy, which is the gate beside it.
+[doc('mortar still compiles for wasm32, the default build mode')]
+guard-wasm:
+    cd server && cargo check -p mortar-core -p mortar-wasm \
+        --target wasm32-unknown-unknown --all-targets
+
 # rust-toolchain.toml is the one place the channel is pinned, and CI parses it
 # rather than repeating it. What a parse cannot check is the OTHER version:
 # [workspace.package] rust-version declares the MSRV at minor granularity, and
 # nothing stops it drifting a minor behind the channel and quietly promising
 # support for a compiler nobody builds with. This asserts the channel satisfies
 # the MSRV it claims.
+[doc('the pinned rust channel satisfies the MSRV Cargo.toml declares')]
 guard-toolchain:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -124,10 +144,12 @@ guard-toolchain:
 # takes the run past a minute, and a gate that slow is one people learn to skip
 # around. CI still runs those two lanes, and CI is the authority.
 # Ordered cheapest first, measured rather than guessed: the two greps are ~0.2s
-# each, fmt-check ~1s, lint ~2s (clippy, and minutes on a cold target dir), test
-# ~3.5s. An em dash used to cost a full clippy pass before anything reported it.
+# each, fmt-check ~1s, guard-wasm ~1.4s, lint ~2s (clippy, and minutes on a cold
+# target dir), test ~3.5s. The whole gate is ~8s warm. An em dash used to cost a
+# full clippy pass before anything reported it. guard-wasm sits ahead of lint
+# because both compile and clippy is the heavier of the two from cold.
 [doc('the local gate: the guards, fmt-check, lint, test. cheapest first')]
-check: guard-dashes guard-autoplay guard-toolchain fmt-check lint test
+check: guard-dashes guard-autoplay guard-toolchain fmt-check guard-wasm lint test
 
 # jj has no hook system, and `jj git push` does not fire the colocated repo's
 # .git/hooks/pre-push either (verified: only a raw `git push` triggers it, and

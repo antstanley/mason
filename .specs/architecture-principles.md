@@ -38,8 +38,12 @@ features pull `getrandom`, which refuses to compile for
 needs OS entropy: the only RNG it builds is `ChaCha8Rng::seed_from_u64`, seeded
 from the cursor. Turning the default features off drops `getrandom` and the
 wasm build is clean again. **Do not restore them**; the failure is a hard
-compile error in the default build mode, and `just check` will not catch it,
-because `lint` and `test` both run on the host target only.
+compile error in the default build mode.
+
+That near-miss is why `just guard-wasm` exists. `lint` and `test` both run on
+the host target, so with `rand`'s default features restored, clippy at
+`-D warnings` passes and all 97 tests pass while the browser build is broken.
+Only a wasm32 target build sees it, and `check` now runs one.
 
 `reqwest` is worth naming specifically. It does build for wasm, but only as a
 fetch wrapper, and it drags the `url` crate's IDNA and ICU tables in with it.
