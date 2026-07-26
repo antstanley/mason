@@ -1,0 +1,60 @@
+name: Rust toolchain
+description: >-
+  Install the toolchain pinned in rust-toolchain.toml plus the wasm32 target,
+  install wasm-pack at the version pinned below, and restore the cargo cache.
+  The rustc channel is PARSED from rust-toolchain.toml rather than written here,
+  so the repo holds exactly one Rust pin. wasm-pack is pinned here because this
+  is the only place that installs it. Both used to be copied into five workflow
+  steps, the rustc one under a comment claiming it came from the toml.
+
+inputs:
+  components:
+    description: >-
+      Extra rustup components, comma separated. Name them only in the jobs that
+      run those gates, so a deploy does not pay to install clippy.
+    required: false
+    default: ""
+  tools:
+    description: >-
+      Extra tools for taiki-e/install-action, comma separated (just, nextest).
+      wasm-pack is always installed and must not be listed here.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve the pinned versions
+      id: pin
+      shell: bash
+      run: |
+        set -euo pipefail
+        # rust-toolchain.toml is the one place the channel is written; this is
+        # the one place it is read by CI.
+        channel=$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' rust-toolchain.toml)
+        if [ -z "$channel" ]; then
+          echo "no channel found in rust-toolchain.toml" >&2
+          exit 1
+        fi
+        # the wasm-pack pin lives here, in the only step that installs it
+        tools="wasm-pack@0.15.0"
+        if [ -n "${{ inputs.tools }}" ]; then
+          tools="${{ inputs.tools }},$tools"
+        fi
+        echo "channel=$channel" >> "$GITHUB_OUTPUT"
+        echo "tools=$tools" >> "$GITHUB_OUTPUT"
+        echo "rust $channel · tools $tools"
+
+    - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+      with:
+        toolchain: ${{ steps.pin.outputs.channel }}
+        targets: wasm32-unknown-unknown
+        components: ${{ inputs.components }}
+
+    - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      with:
+        workspaces: server
+
+    - uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+      with:
+        tool: ${{ steps.pin.outputs.tools }}

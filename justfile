@@ -97,6 +97,27 @@ guard-dashes:
         exit 1
     fi
 
+# rust-toolchain.toml is the one place the channel is pinned, and CI parses it
+# rather than repeating it. What a parse cannot check is the OTHER version:
+# [workspace.package] rust-version declares the MSRV at minor granularity, and
+# nothing stops it drifting a minor behind the channel and quietly promising
+# support for a compiler nobody builds with. This asserts the channel satisfies
+# the MSRV it claims.
+guard-toolchain:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    channel=$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' rust-toolchain.toml)
+    msrv=$(sed -n 's/^rust-version[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' server/Cargo.toml)
+    if [ -z "$channel" ] || [ -z "$msrv" ]; then
+        echo "guard-toolchain: could not read channel ($channel) or rust-version ($msrv)" >&2
+        exit 1
+    fi
+    # compare on major.minor; the channel may carry a patch the MSRV does not
+    if [ "${channel%.*}" != "$msrv" ] && [ "$channel" != "$msrv" ]; then
+        echo "guard-toolchain: rust-toolchain.toml pins $channel but server/Cargo.toml declares MSRV $msrv" >&2
+        exit 1
+    fi
+
 # This is the ONE list of gates; the push wrapper below calls it rather than
 # repeating it, so there is no second copy to drift out of step.
 # test-e2e and test-wasm stay out on purpose: both need a real browser, which
@@ -106,7 +127,7 @@ guard-dashes:
 # each, fmt-check ~1s, lint ~2s (clippy, and minutes on a cold target dir), test
 # ~3.5s. An em dash used to cost a full clippy pass before anything reported it.
 [doc('the local gate: the guards, fmt-check, lint, test. cheapest first')]
-check: guard-dashes guard-autoplay fmt-check lint test
+check: guard-dashes guard-autoplay guard-toolchain fmt-check lint test
 
 # jj has no hook system, and `jj git push` does not fire the colocated repo's
 # .git/hooks/pre-push either (verified: only a raw `git push` triggers it, and

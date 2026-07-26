@@ -42,6 +42,7 @@ just lint         # oxlint + knip + clippy
 just fmt          # oxfmt + cargo fmt (just fmt-check to verify only)
 just guard-autoplay   # enforces the no-autoplay rule
 just guard-dashes     # enforces the no-em-dash rule
+just guard-toolchain  # the pinned rust channel satisfies the declared MSRV
 just check        # the local gate: fmt-check + lint + both guards + test
 just push         # just check, then jj git push. THE way to push.
 just clean        # cargo clean; target dir grows to ~3GB
