@@ -12,8 +12,8 @@ chrono.workspace = true
 futures.workspace = true
 tracing.workspace = true
 governor = "0.10"
-rand = "0.9"
-rand_chacha = "0.9"
+rand = { version = "0.10", default-features = false }
+rand_chacha = { version = "0.10", default-features = false }
 base64 = "0.22"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 web-time = "1"
