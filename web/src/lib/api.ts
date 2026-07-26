@@ -44,8 +44,15 @@ export type FeedIntent = "preview" | "freeze";
  *  typecheck without checking anything. */
 export type FeedTargetKind = "actor" | "feed";
 
+/** Which wall to lay: somebody's follow graph, or a feed generator. A union of
+ *  two one-key objects rather than a `{kind, value}` pair, because the keys ARE
+ *  the query parameters mortar reads, so a target can be written to the query
+ *  string without a second table mapping kinds to names. Mirrors
+ *  `FeedTarget` in server/crates/mortar-core/src/feed.rs. */
+export type FeedTarget = { actor: string } | { feed: string };
+
 export async function fetchFeed(
-  actor: string,
+  target: FeedTarget,
   cursor?: string | null,
   mode?: FeedMode,
   intent?: FeedIntent,
@@ -53,7 +60,13 @@ export async function fetchFeed(
   if (localMode && browser && "serviceWorker" in navigator) {
     await swControlsPage();
   }
-  const params = new URLSearchParams({ actor });
+  // exactly one of the two is written, spelled out rather than spread, so a
+  // widened object carrying both cannot put both on the wire. `feed` is tested
+  // first for the same reason mortar prefers it: the two name different walls,
+  // and the front and the engine have to pick the same one.
+  const params = new URLSearchParams(
+    "feed" in target ? { feed: target.feed } : { actor: target.actor },
+  );
   if (cursor) params.set("cursor", cursor);
   if (mode) params.set("mode", mode);
   if (intent) params.set("intent", intent);
@@ -73,7 +86,11 @@ export async function fetchFeed(
  *  compiles and the persisted caches import ahead of time, and for a real
  *  handle the follow graph and author feeds land in their (did-keyed, seed
  *  independent) caches too, so the wall the reader actually opens reuses them
- *  and skips the network fan-out. A no-op in server mode; best-effort always. */
+ *  and skips the network fan-out. A no-op in server mode; best-effort always.
+ *
+ *  Actor-only, and that is the whole of the decision: what warming lands is a
+ *  follow graph and its author feeds, and a feed generator has neither. A feed
+ *  wall simply does not call this. */
 export async function warmFeed(actor: string, mode?: FeedMode): Promise<void> {
   if (!localMode || !browser || !("serviceWorker" in navigator)) return;
   try {

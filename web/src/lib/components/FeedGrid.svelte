@@ -2,6 +2,7 @@
 	import { tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import type { FeedTarget } from '$lib/api';
 	import { feed } from '$lib/state/feed.svelte';
 	import { cleanHandle, lastHandle } from '$lib/state/handle.svelte';
 	import type { Brick } from '$lib/types';
@@ -25,6 +26,14 @@
 	let retryValue = $state('');
 
 	const currentActor = $derived(page.url.searchParams.get('actor') ?? '');
+	const currentFeed = $derived(page.url.searchParams.get('feed'));
+
+	// which wall the retry button lays again, with the same precedence the page
+	// routes on: feed wins. Reading it here rather than asking FeedState keeps
+	// the URL the single source of truth for which wall is showing.
+	const currentTarget: FeedTarget = $derived(
+		currentFeed ? { feed: currentFeed } : { actor: currentActor }
+	);
 
 	// the dead-end fix: a wall you cannot see stays a door to another one. Both
 	// the mistyped handle and the sealed wall drop the reader into the handle
@@ -52,7 +61,7 @@
 		lastHandle.remember(handle);
 		if (handle === currentActor) {
 			// same handle, fresh attempt; URL wouldn't change, reset directly
-			feed.reset(handle, currentMode);
+			feed.reset({ actor: handle }, currentMode);
 		} else {
 			void goto(`/?actor=${encodeURIComponent(handle)}`);
 		}
@@ -260,7 +269,7 @@
 			{:else}
 				<button
 					type="button"
-					onclick={() => feed.reset(currentActor, currentMode)}
+					onclick={() => feed.reset(currentTarget, currentMode)}
 					class="mt-6 cursor-pointer rounded-full bg-pop-pink-deep px-6 py-3 font-display font-bold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95"
 				>
 					try again

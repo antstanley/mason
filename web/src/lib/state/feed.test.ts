@@ -3,7 +3,7 @@
 // cache. These tests pin its transitions against a mocked fetchFeed; the wire
 // format itself is pinned on the Rust side.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchFeed, FeedError } from "$lib/api";
+import { fetchFeed, FeedError, type FeedTarget } from "$lib/api";
 import { FeedState } from "./feed.svelte";
 import type { Brick, FeedResponse } from "$lib/types";
 
@@ -57,15 +57,20 @@ function deferred<T>() {
 const ids = (feed: FeedState) => feed.items.map((b) => b.id);
 const intents = () => mockFetchFeed.mock.calls.map((c) => c[3]);
 
-/** Wire the mock so any actor's wall settles on its first preview and commits
- *  on the freeze: preview -> [actor-1] cursor `${actor}-p`, freeze -> same
- *  brick, cursor `${actor}-c`. */
+/** How a mocked wall names its bricks. A feed target is marked as one, so a
+ *  test can tell the two sources apart when they are spelled identically, which
+ *  is exactly the collision the session cache key has to survive. */
+const label = (target: FeedTarget) => ("feed" in target ? `feed-${target.feed}` : target.actor);
+
+/** Wire the mock so any wall settles on its first preview and commits on the
+ *  freeze: preview -> [<wall>-1] cursor `<wall>-p`, freeze -> same brick,
+ *  cursor `<wall>-c`. */
 function settleImmediately() {
-  mockFetchFeed.mockImplementation((actor, _cursor, _mode, intent) =>
+  mockFetchFeed.mockImplementation((target, _cursor, _mode, intent) =>
     Promise.resolve(
       intent === "freeze"
-        ? page([`${actor}-1`], `${actor}-c`)
-        : page([`${actor}-1`], `${actor}-p`, false),
+        ? page([`${label(target)}-1`], `${label(target)}-c`)
+        : page([`${label(target)}-1`], `${label(target)}-p`, false),
     ),
   );
 }
@@ -87,7 +92,7 @@ describe("warming", () => {
       .mockResolvedValueOnce(page(["a", "b"], "c2", false)) // preview 2: settled
       .mockResolvedValueOnce(page(["b", "a"], "c3")); // freeze commits
 
-    feed.reset("alice");
+    feed.reset({ actor: "alice" });
     expect(feed.warming).toBe(true);
     expect(feed.initialLoad).toBe(true);
 
@@ -104,9 +109,9 @@ describe("warming", () => {
     // each request carries the cursor of the one before, so poll and freeze
     // stay on the same warming snapshot (same seed) instead of re-rolling
     expect(mockFetchFeed.mock.calls).toEqual([
-      ["alice", null, undefined, "preview"],
-      ["alice", "c1", undefined, "preview"],
-      ["alice", "c2", undefined, "freeze"],
+      [{ actor: "alice" }, null, undefined, "preview"],
+      [{ actor: "alice" }, "c1", undefined, "preview"],
+      [{ actor: "alice" }, "c2", undefined, "freeze"],
     ]);
 
     // frozen means frozen: no poll ever fires again
@@ -116,11 +121,11 @@ describe("warming", () => {
 
   it("freezes at the 8s ceiling even if the wall never settles", async () => {
     const feed = new FeedState();
-    mockFetchFeed.mockImplementation((_actor, _cursor, _mode, intent) =>
+    mockFetchFeed.mockImplementation((_target, _cursor, _mode, intent) =>
       Promise.resolve(intent === "freeze" ? page(["a", "b"], "cz") : page(["a"], "cp", true)),
     );
 
-    feed.reset("alice");
+    feed.reset({ actor: "alice" });
     await vi.advanceTimersByTimeAsync(7500);
     expect(feed.warming).toBe(true); // still under the ceiling, still polling
 
@@ -139,7 +144,7 @@ describe("warming", () => {
   it("a scroll-freeze supersedes the poll loop mid-gap", async () => {
     const feed = new FeedState();
     mockFetchFeed.mockResolvedValueOnce(page(["a"], "c1", true)); // preview 1
-    feed.reset("alice");
+    feed.reset({ actor: "alice" });
     await vi.advanceTimersByTimeAsync(0); // preview 1 lands, loop sleeps 350ms
     expect(feed.warming).toBe(true);
 
@@ -156,7 +161,7 @@ describe("warming", () => {
     expect(ids(feed)).toEqual(["a", "b"]);
     expect(feed.cursor).toBe("c2");
     // the freeze committed the warming snapshot the preview was building
-    expect(mockFetchFeed).toHaveBeenLastCalledWith("alice", "c1", undefined, "freeze");
+    expect(mockFetchFeed).toHaveBeenLastCalledWith({ actor: "alice" }, "c1", undefined, "freeze");
 
     // the sleeping poll wakes, sees a newer generation and bows out silently
     await vi.advanceTimersByTimeAsync(5000);
@@ -166,7 +171,7 @@ describe("warming", () => {
   it("a second freeze is a no-op once the wall is frozen", async () => {
     const feed = new FeedState();
     settleImmediately();
-    feed.reset("alice");
+    feed.reset({ actor: "alice" });
     await vi.advanceTimersByTimeAsync(0);
     expect(feed.warming).toBe(false);
     const calls = mockFetchFeed.mock.calls.length;
@@ -178,15 +183,15 @@ describe("warming", () => {
   it("ignores a stale wall response after a switch (FE-1)", async () => {
     const feed = new FeedState();
     const alicePreview = deferred<FeedResponse>();
-    mockFetchFeed.mockImplementation((actor, _cursor, _mode, intent) => {
-      if (actor === "alice") return alicePreview.promise;
+    mockFetchFeed.mockImplementation((target, _cursor, _mode, intent) => {
+      if (label(target) === "alice") return alicePreview.promise;
       return Promise.resolve(
         intent === "freeze" ? page(["bob-1"], "bob-c") : page(["bob-1"], "bob-p", false),
       );
     });
 
-    feed.reset("alice"); // preview in flight, never resolves yet
-    feed.reset("bob"); // the reader switched walls
+    feed.reset({ actor: "alice" }); // preview in flight, never resolves yet
+    feed.reset({ actor: "bob" }); // the reader switched walls
     await vi.advanceTimersByTimeAsync(0); // bob settles and freezes
     expect(ids(feed)).toEqual(["bob-1"]);
     expect(feed.cursor).toBe("bob-c");
@@ -197,7 +202,7 @@ describe("warming", () => {
     expect(ids(feed)).toEqual(["bob-1"]);
     expect(feed.cursor).toBe("bob-c");
     // and the superseded warm loop never issued an alice freeze
-    expect(mockFetchFeed.mock.calls.filter((c) => c[0] === "alice")).toHaveLength(1);
+    expect(mockFetchFeed.mock.calls.filter((c) => label(c[0]) === "alice")).toHaveLength(1);
   });
 
   it("a failed preview still commits the wall through the freeze", async () => {
@@ -206,7 +211,7 @@ describe("warming", () => {
       .mockRejectedValueOnce(new Error("preview blip"))
       .mockResolvedValueOnce(page(["a"], "c1"));
 
-    feed.reset("alice");
+    feed.reset({ actor: "alice" });
     await vi.advanceTimersByTimeAsync(0);
     expect(feed.error).toBeNull();
     expect(feed.warming).toBe(false);
@@ -223,7 +228,7 @@ describe("error mapping (FE-3)", () => {
   ])("maps a FeedError %s wall to the %s token", async (code, token) => {
     const feed = new FeedState();
     mockFetchFeed.mockRejectedValue(new FeedError(code, 400));
-    feed.reset("alice");
+    feed.reset({ actor: "alice" });
     await vi.advanceTimersByTimeAsync(0);
     expect(feed.error).toBe(token);
     expect(feed.warming).toBe(false);
@@ -235,7 +240,7 @@ describe("error mapping (FE-3)", () => {
   it("maps a non-FeedError failure to feed-unavailable", async () => {
     const feed = new FeedState();
     mockFetchFeed.mockRejectedValue(new TypeError("network down"));
-    feed.reset("alice");
+    feed.reset({ actor: "alice" });
     await vi.advanceTimersByTimeAsync(0);
     expect(feed.error).toBe("feed-unavailable");
   });
@@ -243,7 +248,7 @@ describe("error mapping (FE-3)", () => {
   it("keeps the laid wall when a later page fails", async () => {
     const feed = new FeedState();
     settleImmediately();
-    feed.reset("alice");
+    feed.reset({ actor: "alice" });
     await vi.advanceTimersByTimeAsync(0);
 
     mockFetchFeed.mockRejectedValueOnce(new FeedError("actor_not_found", 404));
@@ -260,7 +265,7 @@ describe("pagination", () => {
     mockFetchFeed
       .mockResolvedValueOnce(page(["a", "b"], "c1", false)) // preview, settled
       .mockResolvedValueOnce(page(["a", "b"], "c2")); // freeze
-    feed.reset("alice");
+    feed.reset({ actor: "alice" });
     await vi.advanceTimersByTimeAsync(0);
 
     mockFetchFeed.mockResolvedValueOnce(page(["b", "c"], null)); // b repeats
@@ -268,13 +273,13 @@ describe("pagination", () => {
     expect(ids(feed)).toEqual(["a", "b", "c"]);
     expect(feed.done).toBe(true); // a null cursor ends the wall
     // a committed page carries no intent at all
-    expect(mockFetchFeed.mock.calls.at(-1)).toEqual(["alice", "c2", undefined]);
+    expect(mockFetchFeed.mock.calls.at(-1)).toEqual([{ actor: "alice" }, "c2", undefined]);
   });
 
   it("does not paginate while the wall is still warming", async () => {
     const feed = new FeedState();
     mockFetchFeed.mockResolvedValue(page(["a"], "c1", true));
-    feed.reset("alice");
+    feed.reset({ actor: "alice" });
     await vi.advanceTimersByTimeAsync(0);
     expect(feed.warming).toBe(true);
 
@@ -287,14 +292,14 @@ describe("session cache (FE-9)", () => {
   it("rehydrates a revisited wall without refetching, seen set intact", async () => {
     const feed = new FeedState();
     settleImmediately();
-    feed.reset("alice");
+    feed.reset({ actor: "alice" });
     await vi.advanceTimersByTimeAsync(0);
-    feed.reset("bob");
+    feed.reset({ actor: "bob" });
     await vi.advanceTimersByTimeAsync(0);
     expect(ids(feed)).toEqual(["bob-1"]);
     const calls = mockFetchFeed.mock.calls.length;
 
-    feed.reset("alice"); // back/forward returns to alice
+    feed.reset({ actor: "alice" }); // back/forward returns to alice
     expect(mockFetchFeed).toHaveBeenCalledTimes(calls); // no refetch at all
     expect(ids(feed)).toEqual(["alice-1"]);
     expect(feed.cursor).toBe("alice-c"); // the frozen cursor, not the preview's
@@ -307,17 +312,46 @@ describe("session cache (FE-9)", () => {
     expect(ids(feed)).toEqual(["alice-1", "alice-2"]);
   });
 
-  it("caches per actor+mode: the same actor in another mode warms afresh", async () => {
+  it("caches per target+mode: the same actor in another mode warms afresh", async () => {
     const feed = new FeedState();
     settleImmediately();
-    feed.reset("alice");
+    feed.reset({ actor: "alice" });
     await vi.advanceTimersByTimeAsync(0);
     const calls = mockFetchFeed.mock.calls.length;
 
-    feed.reset("alice", "glaze"); // same wall, images-only algorithm
+    feed.reset({ actor: "alice" }, "glaze"); // same wall, images-only algorithm
     expect(feed.warming).toBe(true);
     await vi.advanceTimersByTimeAsync(0);
     expect(mockFetchFeed.mock.calls.length).toBeGreaterThan(calls);
     expect(mockFetchFeed.mock.calls.at(-1)?.[2]).toBe("glaze");
+  });
+
+  it("a graph wall and a feed wall never rehydrate into each other", async () => {
+    const feed = new FeedState();
+    settleImmediately();
+    feed.reset({ actor: "alice" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ids(feed)).toEqual(["alice-1"]);
+    const calls = mockFetchFeed.mock.calls.length;
+
+    // deliberately the same string as the actor above. A key built from the
+    // target object would stringify to "[object Object]" and a key built from
+    // its value alone would match "alice": either way this reset would hand
+    // back alice's graph wall instead of laying the feed.
+    feed.reset({ feed: "alice" });
+    expect(feed.warming).toBe(true); // a fresh wall, not a rehydration
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockFetchFeed.mock.calls.length).toBeGreaterThan(calls);
+    expect(mockFetchFeed.mock.calls.at(-1)?.[0]).toEqual({ feed: "alice" });
+    expect(ids(feed)).toEqual(["feed-alice-1"]);
+    const laid = mockFetchFeed.mock.calls.length;
+
+    // and both entries survive: each wall comes back as itself, from the cache
+    feed.reset({ actor: "alice" });
+    expect(mockFetchFeed).toHaveBeenCalledTimes(laid);
+    expect(ids(feed)).toEqual(["alice-1"]);
+    feed.reset({ feed: "alice" });
+    expect(mockFetchFeed).toHaveBeenCalledTimes(laid);
+    expect(ids(feed)).toEqual(["feed-alice-1"]);
   });
 });

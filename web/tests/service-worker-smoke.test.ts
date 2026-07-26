@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import type { FeedResponse } from "$lib/types";
 
 /** What one /api/feed round trip made from the page looks like. Narrowed, not
  *  asserted: this file IS typechecked, so a shape claimed here is a shape the
@@ -21,6 +22,13 @@ async function underServiceWorker(page: Page): Promise<void> {
 	await page.waitForFunction(() => navigator.serviceWorker.controller != null, undefined, {
 		timeout: 30_000,
 	});
+}
+
+/** The header's layout picker, which is the whole chrome's canary: it lives
+ *  inside the one `{#if}` in +layout.svelte that gates the skip link, both
+ *  pickers, the wall switcher and the mobile bottom padding together. */
+function layoutPicker(page: Page) {
+	return page.getByRole("group", { name: "Wall layout" });
 }
 
 /** One raw round trip through the worker, from inside the page. */
@@ -51,6 +59,99 @@ test("the demo wall round-trips /api/feed through the wasm service worker", asyn
 	// and the app itself renders those bricks on the wall (warm can take up to
 	// the 8s ceiling before the first screen commits)
 	await expect(page.locator("#wall article").first()).toBeVisible({ timeout: 30_000 });
+});
+
+// A wall opened as /?feed= is a wall, so it gets the chrome a graph wall gets.
+// `nonsense` is a feed reference that cannot parse, which is what keeps this
+// case entirely offline: mortar answers 400 before a socket is opened, and the
+// wall behind the chrome is the error panel. The chrome is the point. The
+// header, both pickers, the skip link and the mobile bottom padding sit behind
+// ONE `{#if}` in +layout.svelte, no lane typechecks a .svelte file, and a route
+// widened without widening that condition renders a feed wall with no controls
+// at all and no way back.
+test("a feed wall renders the chrome a graph wall gets", async ({ page }) => {
+	await underServiceWorker(page);
+
+	await page.goto("/?feed=nonsense");
+	await expect(layoutPicker(page)).toBeVisible();
+	await expect(page.locator("#wall")).toBeVisible();
+	await expect(page.getByRole("heading", { name: /wouldn't load/ })).toBeVisible();
+	// the failure is the page's single h1 here, and the sr-only wall title steps
+	// aside for it, so what must never appear is the handle-shaped one
+	await expect(page.locator("#wall h1")).toHaveCount(1);
+	await expect(page.locator("#wall h1")).not.toContainText("wall on mason");
+
+	// with both parameters in the URL the feed is the wall laid, which is
+	// mortar's own precedence: read the other way round, the demo actor would
+	// have laid bricks here.
+	await page.goto("/?actor=demo&feed=nonsense");
+	await expect(layoutPicker(page)).toBeVisible();
+	await expect(page.getByRole("heading", { name: /wouldn't load/ })).toBeVisible();
+	await expect(page.locator("#wall article")).toHaveCount(0);
+});
+
+// The one case chromium cannot reach through the real engine: a feed wall that
+// LAYS. mortar answers a feed target from the AppView and from nowhere else, so
+// there is no offline fixture behind `?feed=` the way `demo` is one behind
+// `?actor=`. This block therefore blocks the worker and answers /api/feed from
+// the test itself, which is the only offline way to put a laid feed wall in
+// front of a browser.
+//
+// It is worth the exception because of what only a laid wall renders: the
+// page's single sr-only <h1>, which steps aside whenever the wall failed (the
+// error panel raises its own). Widening the route without widening that heading
+// leaves a screen reader hearing "@'s wall on mason" on the one landmark
+// heading the page has, and no other lane in this repo can see it: tsc does not
+// parse .svelte at all.
+test.describe("a laid feed wall", () => {
+	test.use({ serviceWorkers: "block" });
+
+	const FEED_URI = "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot";
+
+	/** One page of a feed generator, as mortar would answer it. Typed against
+	 *  the wire mirror, so a brick shape that drifted fails the typecheck rather
+	 *  than rendering nothing and failing this test obscurely. */
+	const onePage: FeedResponse = {
+		items: [
+			{
+				kind: "post",
+				id: "at://did:plc:brick/app.bsky.feed.post/one",
+				url: "https://bsky.app/profile/brick.test/post/one",
+				author: {
+					did: "did:plc:brick",
+					handle: "brick.test",
+					displayName: "a brick",
+					avatar: null,
+				},
+				text: "one brick, laid from a feed",
+				createdAt: "2026-07-26T00:00:00Z",
+				likeCount: 0,
+				repostCount: 0,
+				images: [],
+				external: null,
+			},
+		],
+		cursor: null,
+		warming: false,
+	};
+
+	test("lays bricks under a heading of its own", async ({ page }) => {
+		// with no worker to intercept it, /api/feed is an ordinary network
+		// request and the test answers it. Both the preview and the freeze land
+		// here, and each is preceded by api.ts's 2 second wait for a controller
+		// that is never coming, which is why this case is slower than the rest.
+		await page.route("**/api/feed*", (route) => route.fulfill({ json: onePage }));
+
+		await page.goto(`/?feed=${encodeURIComponent(FEED_URI)}`);
+
+		await expect(page.locator("#wall article").first()).toBeVisible({ timeout: 30_000 });
+		await expect(layoutPicker(page)).toBeVisible();
+
+		// read out of the DOM, never assumed
+		const heading = page.locator("#wall h1");
+		await expect(heading).toHaveCount(1);
+		await expect(heading).toHaveText("a bluesky feed, laid on mason");
+	});
 });
 
 // The two ways a request can name no wall at all. Both are 400 `bad_request`,

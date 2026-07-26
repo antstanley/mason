@@ -12,7 +12,20 @@
 
 	let { children } = $props();
 
+	// the two spellings of a wall, and the chrome below is gated on either of
+	// them: a wall opened as /?feed= is still a wall, so it gets the same skip
+	// link, the same pickers and the same bottom padding a graph wall gets.
 	const actor = $derived(page.url.searchParams.get('actor'));
+	const feed = $derived(page.url.searchParams.get('feed'));
+
+	// The document title, derived here rather than written into <title>: svelte
+	// allows only text and expressions inside that element, never a block.
+	// Feed first, because a URL carrying both lays the feed; and since a
+	// generator's own name is not on the wire, a feed wall's tab says what kind
+	// of wall it is rather than pretending to name it.
+	const title = $derived(
+		feed ? 'a feed · mason' : actor ? `@${actor} · mason` : 'mason · one wall, every brick'
+	);
 
 	// Everything under the wrapper below goes inert while an overlay covers the
 	// wall, which is what traps focus inside the overlay: the wrapper rather
@@ -110,7 +123,7 @@
 </script>
 
 <svelte:head>
-	<title>{actor ? `@${actor} · mason` : 'mason · one wall, every brick'}</title>
+	<title>{title}</title>
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link
@@ -121,9 +134,9 @@
 
 <div
 	inert={overlayOpen}
-	class="mx-auto min-h-screen max-w-[1800px] px-4 sm:px-6 {actor ? 'pb-24 md:pb-0' : ''}"
+	class="mx-auto min-h-screen max-w-[1800px] px-4 sm:px-6 {actor || feed ? 'pb-24 md:pb-0' : ''}"
 >
-	{#if actor}
+	{#if actor || feed}
 		<a
 			href="#wall"
 			class="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-full focus:bg-chalk focus:px-4 focus:py-2 focus:font-semibold dark:focus:bg-kiln"
