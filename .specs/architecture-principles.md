@@ -30,6 +30,16 @@ What it rules out, and what stands in each place:
 | `reqwest` on the browser side | `gloo-net`, a thin wrapper over the fetch the worker already has |
 | `governor`'s async wait | A hand-rolled check-then-sleep loop over the same `check()` |
 | `std::net` resolution | Native-only DNS vetting; in the browser the fetch is the browser's |
+| `rand`'s default features | `rand` and `rand_chacha` with `default-features = false` |
+
+`rand` is the newest entry and the sharpest illustration. From 0.10 its default
+features pull `getrandom`, which refuses to compile for
+`wasm32-unknown-unknown` without an explicitly configured backend. mason never
+needs OS entropy: the only RNG it builds is `ChaCha8Rng::seed_from_u64`, seeded
+from the cursor. Turning the default features off drops `getrandom` and the
+wasm build is clean again. **Do not restore them**; the failure is a hard
+compile error in the default build mode, and `just check` will not catch it,
+because `lint` and `test` both run on the host target only.
 
 `reqwest` is worth naming specifically. It does build for wasm, but only as a
 fetch wrapper, and it drags the `url` crate's IDNA and ICU tables in with it.
