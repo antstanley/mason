@@ -202,9 +202,7 @@ pub async fn get_image_feed(http: &Http, base: &str, did: &str) -> Result<Author
     author_feed(http, base, did, "posts_with_media", 100).await
 }
 
-/// Shared author-feed read: fetch one page under `filter`, drop reposts and
-/// anything a logged-out viewer must not see, blur the soft-warn tier, and map
-/// the rest to bricks.
+/// Shared author-feed read: fetch one page under `filter` and map it.
 async fn author_feed(
     http: &Http,
     base: &str,
@@ -217,9 +215,59 @@ async fn author_feed(
         urlencode(did)
     );
     let page: AuthorFeed = http.get_json(&url, Bucket::Appview).await?;
+    Ok(AuthorYield {
+        bricks: map_feed_page(page),
+    })
+}
 
-    let bricks = page
-        .feed
+/// One page of a feed generator, and the cursor for the next one.
+///
+/// A feed generator is somebody else's algorithm, so mason pages it and lays
+/// what comes back, in the order it came back. `getFeed` hydrates its results
+/// into the same `PostView` shape `getAuthorFeed` returns, labels and all,
+/// which is why this read shares `map_feed_page` with both author-feed reads
+/// rather than growing a second copy of the moderation filters: a feed wall is
+/// by definition a wall of strangers, and a second copy is a second place for
+/// the `!warn` tier to be forgotten.
+///
+/// The returned cursor is the whole of mason's position in the feed's order,
+/// and `None` is the end of it. `limit` is the caller's, because the mixed
+/// views ask for a page and the image wall asks for `getFeed`'s ceiling.
+pub async fn get_feed(
+    http: &Http,
+    base: &str,
+    feed_uri: &str,
+    cursor: Option<&str>,
+    limit: u32,
+) -> Result<(AuthorYield, Option<String>), HttpError> {
+    let mut url = format!(
+        "{base}/xrpc/app.bsky.feed.getFeed?feed={}&limit={limit}",
+        urlencode(feed_uri)
+    );
+    if let Some(c) = cursor {
+        url.push_str(&format!("&cursor={}", urlencode(c)));
+    }
+    let mut page: AuthorFeed = http.get_json(&url, Bucket::Appview).await?;
+    // taken before the mapper consumes the page it rode in on
+    let next = page.cursor.take();
+    Ok((
+        AuthorYield {
+            bricks: map_feed_page(page),
+        },
+        next,
+    ))
+}
+
+/// The one mapping path every Bluesky feed read shares: drop reposts (`reason
+/// != null`), drop anything a logged-out viewer must not see, blur the
+/// soft-warn tier, and map the rest to bricks.
+///
+/// It is one function rather than one per read because it is where the whole of
+/// mason's post-level moderation lives. An author feed and a feed generator's
+/// page arrive in the same shape, so there is nothing to branch on and no
+/// reason for a second copy to exist and drift.
+fn map_feed_page(page: AuthorFeed) -> Vec<Brick> {
+    page.feed
         .into_iter()
         .filter(|item| item.reason.is_none())
         // drop anything a logged-out viewer must not see at all: an author who
@@ -242,13 +290,18 @@ async fn author_feed(
             }
             Some(brick)
         })
-        .collect();
-    Ok(AuthorYield { bricks })
+        .collect()
 }
 
 #[derive(Deserialize)]
 struct AuthorFeed {
     feed: Vec<FeedItem>,
+    /// Where the next page starts, when there is one. Both author-feed reads
+    /// take a single page and ignore it; a feed wall pages on nothing else.
+    /// Defaulted because the field is optional upstream, and absent means the
+    /// feed has ended rather than the page having failed to parse.
+    #[serde(default)]
+    cursor: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -671,6 +724,166 @@ mod tests {
             .await
             .unwrap();
         assert!(bricks.is_empty(), "a hard-hidden post is not laid");
+    }
+
+    /// A feed generator's AT-URI, as the reader hands one over.
+    const FEED_URI: &str = "at://did:plc:gen/app.bsky.feed.generator/whats-hot";
+
+    /// The feed generator published the order, so mason lays it in that order
+    /// and hands its cursor back untouched: on a feed wall that cursor is the
+    /// whole of mason's position, there being no snapshot to hold one.
+    #[tokio::test]
+    async fn get_feed_keeps_upstream_order_and_returns_the_cursor() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .and(query_param("feed", FEED_URI))
+            .and(query_param("limit", "24"))
+            .and(query_param("cursor", "page2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "feed": [
+                    post_json("at://did:plc:aa/app.bsky.feed.post/3", serde_json::Value::Null),
+                    post_json("at://did:plc:aa/app.bsky.feed.post/1", serde_json::Value::Null),
+                    post_json("at://did:plc:aa/app.bsky.feed.post/2", serde_json::Value::Null),
+                ],
+                "cursor": "page3"
+            })))
+            .mount(&server)
+            .await;
+
+        let (AuthorYield { bricks, .. }, next) =
+            get_feed(&Http::new(), &server.uri(), FEED_URI, Some("page2"), 24)
+                .await
+                .expect("the feed uri, the limit and the cursor all reach the query");
+        let laid: Vec<&str> = bricks.iter().map(|b| b.id()).collect();
+        assert_eq!(
+            laid,
+            [
+                "at://did:plc:aa/app.bsky.feed.post/3",
+                "at://did:plc:aa/app.bsky.feed.post/1",
+                "at://did:plc:aa/app.bsky.feed.post/2"
+            ],
+            "the feed's own order survives the mapper"
+        );
+        assert_eq!(next.as_deref(), Some("page3"), "and its cursor comes back");
+    }
+
+    /// The end of a feed is upstream sending no cursor, and that is the only
+    /// end condition a feed wall has.
+    #[tokio::test]
+    async fn get_feed_reports_no_cursor_at_the_end() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "feed": [post_json("at://did:plc:aa/app.bsky.feed.post/1", serde_json::Value::Null)]
+            })))
+            .mount(&server)
+            .await;
+
+        let (AuthorYield { bricks, .. }, next) =
+            get_feed(&Http::new(), &server.uri(), FEED_URI, None, 24)
+                .await
+                .unwrap();
+        assert_eq!(bricks.len(), 1, "the last page still lays its bricks");
+        assert!(next.is_none(), "and nothing follows it");
+    }
+
+    /// The shared mapper is the whole point: a feed wall inherits repost
+    /// dropping and the hidden tier without a second copy of either, on a
+    /// surface where every author is a stranger to the reader.
+    #[tokio::test]
+    async fn get_feed_drops_reposts_and_hidden_authors() {
+        let server = MockServer::start().await;
+        let mut repost = post_json(
+            "at://did:plc:bb/app.bsky.feed.post/2",
+            serde_json::Value::Null,
+        );
+        repost["reason"] = serde_json::json!({"$type": "app.bsky.feed.defs#reasonRepost"});
+        let mut opted_out = post_json(
+            "at://did:plc:cc/app.bsky.feed.post/3",
+            serde_json::Value::Null,
+        );
+        opted_out["post"]["author"]["labels"] = serde_json::json!([{"val": "!no-unauthenticated"}]);
+
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "feed": [
+                    post_json("at://did:plc:aa/app.bsky.feed.post/1", serde_json::Value::Null),
+                    repost,
+                    opted_out
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let (AuthorYield { bricks, .. }, _) =
+            get_feed(&Http::new(), &server.uri(), FEED_URI, None, 24)
+                .await
+                .unwrap();
+        assert_eq!(bricks.len(), 1, "only the plain post is laid");
+        assert_eq!(bricks[0].id(), "at://did:plc:aa/app.bsky.feed.post/1");
+    }
+
+    /// And the soft tier too: a `!warn` post is kept behind a reveal rather
+    /// than dropped, exactly as on an author feed.
+    #[tokio::test]
+    async fn get_feed_blurs_warned_posts() {
+        let server = MockServer::start().await;
+        let mut warned = post_json(
+            "at://did:plc:aa/app.bsky.feed.post/1",
+            serde_json::Value::Null,
+        );
+        warned["post"]["labels"] = serde_json::json!([{"val": "!warn"}]);
+
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "feed": [warned] })),
+            )
+            .mount(&server)
+            .await;
+
+        let (AuthorYield { bricks, .. }, _) =
+            get_feed(&Http::new(), &server.uri(), FEED_URI, None, 24)
+                .await
+                .unwrap();
+        assert_eq!(bricks.len(), 1, "a warned post is kept, not dropped");
+        match &bricks[0] {
+            Brick::Post(p) => assert_eq!(
+                p.blur.as_ref().map(|b| b.label.as_str()),
+                Some("!warn"),
+                "its media is covered behind a reveal"
+            ),
+            other => panic!("expected a post brick, got {other:?}"),
+        }
+    }
+
+    /// A feed reference is an untrusted string that reaches an upstream query,
+    /// so it is percent-encoded into one value. `query_param` compares decoded
+    /// values, so a reference carrying `&` matching here (with the limit still
+    /// the one mason asked for) is proof it did not split the query in two and
+    /// rewrite the request.
+    #[tokio::test]
+    async fn get_feed_percent_encodes_the_feed_reference() {
+        let server = MockServer::start().await;
+        let sneaky = "at://did:plc:gen/app.bsky.feed.generator/x&limit=1";
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .and(query_param("feed", sneaky))
+            .and(query_param("limit", "24"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "feed": [post_json("at://did:plc:aa/app.bsky.feed.post/1", serde_json::Value::Null)]
+            })))
+            .mount(&server)
+            .await;
+
+        let (AuthorYield { bricks, .. }, _) =
+            get_feed(&Http::new(), &server.uri(), sneaky, None, 24)
+                .await
+                .expect("the whole reference arrives as one query value");
+        assert_eq!(bricks.len(), 1);
     }
 
     #[tokio::test]
