@@ -256,7 +256,7 @@ async function serveFeed(request: Request): Promise<Response> {
         error: "bad_request" satisfies MortarErrorCode,
         // a hand copy of what FeedTarget::from_query throws, because nothing in
         // the repo compares the two: change them together
-        message: "missing required parameter: actor or feed",
+        message: "bad request: actor or feed",
       } satisfies ErrorEnvelope,
       400,
     );

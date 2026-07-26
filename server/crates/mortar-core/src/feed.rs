@@ -1442,4 +1442,49 @@ mod feed_wall_tests {
             "a malformed reference is rejected before any network call"
         );
     }
+
+    /// `AppError::BadRequest` has two callers and one Display, so the Display
+    /// has to be true of both. It used to read "missing required parameter:
+    /// {0}", which was honest for the first caller and a lie about the second:
+    /// an unparseable `?feed=` was present, and telling the reader it was
+    /// missing points the repair at the wrong end of the request.
+    ///
+    /// Both messages are raised through their real call sites rather than
+    /// constructed here, so the assert covers the payload each caller actually
+    /// passes as well as the shared Display. The `missing` check is the honesty
+    /// claim written down: any reword that reintroduces the old adjective fails
+    /// here rather than shipping.
+    #[tokio::test]
+    async fn a_bad_request_reads_honestly_for_both_of_its_callers() {
+        // caller one: a request naming no wall at all. The parameters really are
+        // absent, and the message names both because either would have answered.
+        let neither = FeedTarget::from_query(None, None)
+            .expect_err("a request naming no wall cannot lay one");
+        assert_eq!(neither.to_string(), "bad request: actor or feed");
+
+        // caller two: a `?feed=` that was present and would not parse. Nothing
+        // is missing, so nothing may say so. Nothing is mounted either, which is
+        // the module's idiom: a read this path must never make fails against an
+        // absent mount rather than reaching the real AppView.
+        let server = MockServer::start().await;
+        let state = state_for(&server);
+        let malformed = handle_feed(
+            &state,
+            FeedTarget::Feed("nonsense"),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect_err("a reference that names no feed cannot lay one");
+        assert_eq!(malformed.to_string(), "bad request: feed");
+
+        for message in [neither.to_string(), malformed.to_string()] {
+            assert!(
+                !message.contains("missing"),
+                "one Display serves both callers, and only one of them is about \
+                 absence, got {message:?}"
+            );
+        }
+    }
 }

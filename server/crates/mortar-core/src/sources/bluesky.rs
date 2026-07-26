@@ -89,7 +89,15 @@ const NO_UNAUTHENTICATED: &str = "!no-unauthenticated";
 /// Bluesky shows it to logged-out viewers, so we do too. Labeler labels (the
 /// default moderation service) and self-labels both land in the same `labels`
 /// array, so this one check covers both.
-const HIDDEN_LABELS: [&str; 5] = [
+///
+/// `pub` because it is wire vocabulary as well as an engine rule. The feed
+/// picker reads a feed generator's own labels client-side, so mason never
+/// advertises a feed it would then refuse to lay, and that puts this list on
+/// both sides of the wire. It is pinned rather than copied: `tests/contract.rs`
+/// generates the fixture's `vocab.hiddenLabels` from this array (an integration
+/// test can only see `pub` items) and `contract-check.ts` compares the
+/// TypeScript list to those keys, in both directions.
+pub const HIDDEN_LABELS: [&str; 5] = [
     "!hide",
     NO_UNAUTHENTICATED,
     "porn",

@@ -5,8 +5,10 @@
 //! TS. This test pins the contract in one committed fixture,
 //! `tests/fixtures/contract.json`: a canonical instance of every `Brick` kind,
 //! the `FeedResponse` shapes, every `AppError` envelope in both build modes,
-//! and the query vocabulary (mode / intent). The web side re-checks the same
-//! file at type level in `web/src/lib/contract-check.ts`, so:
+//! the query vocabulary (mode / intent / target), and the hidden moderation
+//! tier, which the feed picker holds a client-side copy of. The web side
+//! re-checks the same file at type level in `web/src/lib/contract-check.ts`,
+//! so:
 //!
 //! - a Rust-side rename changes the serialization, and this test fails until
 //!   the fixture is regenerated (which then fails tsc until types.ts follows);
@@ -18,20 +20,21 @@
 //! UPDATE_FIXTURE=1 cargo test -p mortar-core --test contract
 //! ```
 //!
-//! Vocabulary (brick kinds, error codes, video sources, query tokens) rides in
-//! the fixture as OBJECT KEYS, not string values: tsc widens JSON string
-//! values to `string`, but object keys stay literal, so `keyof` on the web
-//! side sees the exact tokens.
+//! Vocabulary (brick kinds, error codes, video sources, query tokens, hidden
+//! labels) rides in the fixture as OBJECT KEYS, not string values: tsc widens
+//! JSON string values to `string`, but object keys stay literal, so `keyof` on
+//! the web side sees the exact tokens.
 
 use std::path::Path;
 
 use mortar_core::error::AppError;
-use mortar_core::feed::FeedIntent;
+use mortar_core::feed::{FeedIntent, FeedTarget};
 use mortar_core::mode::Mode;
 use mortar_core::model::{
     AspectRatio, Author, BlogBrick, Blur, Brick, CaptionTrack, ExternalEmbed, FeedResponse,
     ImageEmbed, PostBrick, Publication, VideoBrick, VideoSource,
 };
+use mortar_core::sources::HIDDEN_LABELS;
 use pretty_assertions::assert_eq;
 use serde_json::{Value, json};
 
@@ -236,7 +239,10 @@ const ALL_CODES: [&str; 5] = [
 /// length is checked against `ALL_CODES` in `contract()`, not by the type.
 fn errors() -> Vec<AppError> {
     vec![
-        AppError::BadRequest("actor"),
+        // the payload `FeedTarget::from_query` really raises when a request
+        // names no wall at all, so the fixture pins a message mortar emits
+        // rather than one it could
+        AppError::BadRequest("actor or feed"),
         AppError::ActorNotFound("nobody.example.com".into()),
         AppError::FeedNotFound("at://did:plc:nobody/app.bsky.feed.generator/gone".into()),
         AppError::LoginRequired("sealed.example.com".into()),
@@ -342,28 +348,54 @@ fn contract() -> Value {
     );
 
     // the query vocabulary: `?mode=` names only glaze (anything else is the
-    // default full wall) and `?intent=` names preview and freeze (absent is a
-    // normal committed page). Each token is bound ONCE and used for both the
-    // parser assert and the fixture key, so a one-sided rename cannot stay
-    // green: the parser assert fails on a Rust rename, and the changed key
-    // fails tsc on the web side.
+    // default full wall), `?intent=` names preview and freeze (absent is a
+    // normal committed page), and `target` names the two parameters that pick a
+    // wall source, exactly one of which a request carries. Each token is bound
+    // ONCE and used for both the parser assert and the fixture key, so a
+    // one-sided rename cannot stay green: the parser assert fails on a Rust
+    // rename, and the changed key fails tsc on the web side.
     const GLAZE: &str = "glaze";
     const PREVIEW: &str = "preview";
     const FREEZE: &str = "freeze";
+    const ACTOR: &str = "actor";
+    const FEED: &str = "feed";
     assert_eq!(Mode::from_query(Some(GLAZE)), Mode::Glaze);
     assert_eq!(Mode::from_query(None), Mode::Wall);
     assert_eq!(FeedIntent::from_query(Some(PREVIEW)), FeedIntent::Preview);
     assert_eq!(FeedIntent::from_query(Some(FREEZE)), FeedIntent::Freeze);
     assert_eq!(FeedIntent::from_query(None), FeedIntent::Normal);
+    // `kind()` is asked of a real parse rather than of a hand-built variant, so
+    // the token, the parameter it was read from and the arm it selects are all
+    // one assertion
+    assert_eq!(
+        FeedTarget::from_query(Some("demo"), None)
+            .expect("an actor parses")
+            .kind(),
+        ACTOR
+    );
+    assert_eq!(
+        FeedTarget::from_query(
+            None,
+            Some("at://did:plc:mason/app.bsky.feed.generator/wall")
+        )
+        .expect("a feed parses")
+        .kind(),
+        FEED
+    );
     let mut mode_map = serde_json::Map::new();
     mode_map.insert(GLAZE.to_string(), Value::Bool(true));
     let mut intent_map = serde_json::Map::new();
     for intent in [PREVIEW, FREEZE] {
         intent_map.insert(intent.to_string(), Value::Bool(true));
     }
+    let mut target_map = serde_json::Map::new();
+    for target in [ACTOR, FEED] {
+        target_map.insert(target.to_string(), Value::Bool(true));
+    }
     let query = json!({
         "mode": Value::Object(mode_map),
         "intent": Value::Object(intent_map),
+        "target": Value::Object(target_map),
     });
 
     // enum string values that ride INSIDE bricks, keyed so keyof sees them
@@ -377,6 +409,16 @@ fn contract() -> Value {
         source_map.insert(tag, Value::Bool(true));
     }
 
+    // the hidden moderation tier. It is not a shape mortar serializes, it is a
+    // RULE the web holds a second copy of: the feed picker reads a feed
+    // generator's own labels client-side so mason never lists a feed it would
+    // then refuse to lay. Generated from mortar's own `HIDDEN_LABELS` rather
+    // than retyped here, so this fixture is a pin and not a third copy.
+    let mut hidden_label_map = serde_json::Map::new();
+    for label in HIDDEN_LABELS {
+        hidden_label_map.insert(label.to_string(), Value::Bool(true));
+    }
+
     json!({
         "bricks": Value::Object(brick_map),
         "pages": {
@@ -386,7 +428,10 @@ fn contract() -> Value {
         },
         "errors": Value::Object(error_map),
         "query": query,
-        "vocab": { "videoSource": Value::Object(source_map) },
+        "vocab": {
+            "videoSource": Value::Object(source_map),
+            "hiddenLabels": Value::Object(hidden_label_map),
+        },
     })
 }
 

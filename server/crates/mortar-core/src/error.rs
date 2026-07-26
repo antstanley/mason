@@ -2,7 +2,15 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, thiserror::Error, Clone)]
 pub enum AppError {
-    #[error("missing required parameter: {0}")]
+    /// A query parameter mason will not act on, with the payload naming which
+    /// one. Deliberately NOT "missing required parameter": this variant has two
+    /// callers and only one of them is about absence. A `?feed=` that will not
+    /// parse was present and wrong, so "missing" would be a lie about the
+    /// request the reader actually made. One variant with an honest Display
+    /// rather than two, because the payload is the whole difference and a
+    /// second variant would grow `status_and_code`, `code_key`, `ALL_CODES` and
+    /// both pinned envelopes for one adjective.
+    #[error("bad request: {0}")]
     BadRequest(&'static str),
     #[error("actor not found: {0}")]
     ActorNotFound(String),
@@ -98,8 +106,8 @@ mod tests {
                 // parameters because either one would have answered, and it is
                 // the string web/src/service-worker.ts carries a hand copy of.
                 AppError::BadRequest("actor or feed"),
-                r#"{"error":"bad_request","message":"missing required parameter: actor or feed"}"#,
-                r#"{"error":"bad_request","message":"missing required parameter: actor or feed","status":400}"#,
+                r#"{"error":"bad_request","message":"bad request: actor or feed"}"#,
+                r#"{"error":"bad_request","message":"bad request: actor or feed","status":400}"#,
             ),
             (
                 AppError::ActorNotFound("nobody.example.com".into()),

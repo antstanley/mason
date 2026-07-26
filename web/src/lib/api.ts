@@ -33,6 +33,17 @@ async function swControlsPage(): Promise<void> {
  *  after the first). Pinned by the contract fixture (see contract-check.ts). */
 export type FeedIntent = "preview" | "freeze";
 
+/** Which parameter names the wall a request asks for: whose graph, or which
+ *  feed generator. Exactly one of the two is carried, and mortar decides which
+ *  wins when both arrive. Mirrors FeedTarget::kind in
+ *  server/crates/mortar-core/src/feed.rs; pinned by the contract fixture.
+ *
+ *  A named union rather than a `keyof` over the target object, because `keyof`
+ *  across a union of object types yields the keys they SHARE, which is `never`
+ *  for a `{actor} | {feed}` union. Comparing the fixture keys to that would
+ *  typecheck without checking anything. */
+export type FeedTargetKind = "actor" | "feed";
+
 export async function fetchFeed(
   actor: string,
   cursor?: string | null,

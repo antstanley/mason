@@ -129,6 +129,20 @@ export interface FeedResponse {
  *  server/crates/mortar-core/src/mode.rs; pinned by the contract fixture. */
 export type FeedMode = "glaze";
 
+/** The hidden moderation tier: a subject carrying any of these never reaches
+ *  the wall. Mirrors HIDDEN_LABELS in
+ *  server/crates/mortar-core/src/sources/bluesky.rs; pinned by the contract
+ *  fixture, in both directions, so the two lists cannot drift.
+ *
+ *  It is on the wire only as vocabulary, because the engine applies it and the
+ *  web never sees a hidden brick. The feed picker is the exception and the
+ *  reason this list exists here at all: it reads a feed generator's own labels
+ *  from the AppView, and must not list a feed mason would then refuse to lay.
+ *
+ *  `nudity` is deliberately absent: Bluesky shows it to logged-out viewers, so
+ *  mason does too. */
+export type HiddenLabel = "!hide" | "!no-unauthenticated" | "porn" | "sexual" | "graphic-media";
+
 /** The machine codes mortar itself can emit in an ErrorEnvelope. Mirrors
  *  AppError::status_and_code in server/crates/mortar-core/src/error.rs; pinned
  *  by the contract fixture. The web adds its own out-of-band codes ("wasm",
