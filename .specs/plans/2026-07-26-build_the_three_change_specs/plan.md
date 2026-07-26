@@ -469,11 +469,21 @@ Two further blind spots that are not about `.svelte`:
   reconciliation: the `00-overview.md` goal renumbering across all three, and the
   sentence at `.specs/README.md:47` that says three change specs are pending.
 - *Task 10 walks the whole error-code forcing chain in one commit.* **It is
-  indivisible.** Adding `AppError::FeedNotFound` breaks `variants()` (an
-  `[AppError; 4]`), both pinned envelope arrays, `ALL_CODES` (a `[&str; 4]`),
-  `code_key`'s exhaustive match and the key-set assert in `contract()`, and the
-  regenerated fixture then fails `pnpm check:ci` until `types.ts` follows. Split
-  across commits, the repo is red in between.
+  indivisible.** Adding `AppError::FeedNotFound` breaks `status_and_code`'s
+  exhaustive match, then `code_key`'s exhaustive match in `tests/contract.rs`,
+  whose new arm must index `ALL_CODES` (a `[&str; 4]`, so a constant
+  out-of-bounds index fails the build), and then the key-set assert in
+  `contract()` until `errors()` carries an instance. The regenerated fixture then
+  fails `pnpm check:ci` until `types.ts` follows. Split across commits, the repo
+  is red in between.
+
+  Two links a reader would expect in that chain are **not** in it, which is why
+  task 10 verifies them by reading rather than by a green run. `error.rs`'s own
+  `variants()` is a hand-written `[AppError; 4]` in its test module, and both
+  pinned envelope arrays are consumed through `variants().iter().zip(expected)`;
+  `zip` stops at the shorter side, so a five-entry `variants()` against a
+  four-entry `expected` leaves both tests green with the new variant's wire
+  strings unpinned.
 - *Task 03 lands the component and its mount together.* **knip fails on an
   unmounted component.** `web/knip.json` treats `src/routes/**/+*.{svelte,ts}` as
   the entries, so a `BrickReader.svelte` that nothing renders is an unused file

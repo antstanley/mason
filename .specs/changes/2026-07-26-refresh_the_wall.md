@@ -201,9 +201,9 @@ Add after the `loadMore()` block in the diagram:
 >   `prefers-reduced-motion: reduce` the wall freezes the instant `warming` flips
 >   true, with no scroll event at all, so preview-plus-freeze is the DEFAULT path
 >   for those readers rather than a race.
-> - **`FeedState` still touches no DOM.** Scrolling back to the top of the wall is
->   the control's job, not the state machine's, which is what keeps the vitest
->   lane running the real module in node.
+> - **`FeedState` still touches no DOM**, and neither does the control. Nothing in
+>   a refresh moves the scroll position, which is what keeps the vitest lane
+>   running the real module in node and keeps the refresh from freezing itself.
 
 ### `.specs/07-web-client.md` → Decisions (Add)
 
@@ -222,19 +222,25 @@ Add after the `loadMore()` block in the diagram:
 
 Add a row to the table, and a paragraph:
 
-> | `warming` with items already laid | The wall the reader was reading, reflowing into the refreshed one. No skeletons |
+> | `warming` with items already laid | The wall the reader was reading, reflowing into the refreshed one, with the usual four-card skeleton tail beneath it. Never the twelve-card initial grid, which is `initialLoad` only and a refresh does not set it |
 >
 > ### Refreshing
 >
 > `RefreshWall` sits in the header beside the layout and client pickers: one
 > control, no confirmation, no count.
 >
-> **It asks `feed.refresh()` first and scrolls second.** The other order defeats
-> the reflow it is starting: the wall registers one-shot `wheel`, `touchmove` and
-> `scroll` freeze listeners the moment `warming` becomes true, and `refresh()`
-> sets `warming` synchronously, so a programmatic scroll dispatched before it
-> lands on `freezeOnEngage` and freezes the wall the reader just asked to re-lay.
-> Scrolling after, and only when not already at the top, keeps the two apart.
+> **It does not scroll.** The wall re-lays under the reader, wherever they are.
+> That is not a preference, it is the only version that works: the wall's
+> freeze-on-engage listeners are armed the moment `warming` flips true, and a
+> programmatic scroll is indistinguishable from a reader reaching for the wall.
+> `window.scrollTo` mutates the position synchronously but queues its `scroll`
+> event, and the queued event is delivered *after* the microtask that re-runs the
+> effect and attaches those listeners. So a refresh that also scrolls freezes
+> itself on its own scroll, in either call order, and commits without ever
+> reflowing. Not scrolling removes the coupling rather than timing around it, and
+> it is what the rest of this page already describes: the outgoing wall stays on
+> screen and reflows into the new one, which is a thing the reader has to be
+> looking at to see.
 >
 > It is disabled while the feed is loading or warming, and that is the whole rate
 > limit: one refresh can be in flight, so a double tap cannot start two
@@ -328,12 +334,20 @@ Most of the work is on the web side.
        `FeedParams`, NOT FeedQuery. It gains `refresh: Option<String>`, parsed
        with refresh_from_query beside Mode::from_query at :45.
      server/crates/mortar-wasm/src/lib.rs:88             feed_page gains
-       `refresh: Option<String>`, NOT a bool. wasm-bindgen emits an OPTIONAL d.ts
-       parameter for Option<String> and a REQUIRED one for bool, so a bool breaks
-       the service worker's existing four-argument call at service-worker.ts:260
-       until it is updated in the same commit. Option<String> also keeps the
-       token parse in one place, matching how mode and intent already cross that
-       boundary.
+       `refresh: Option<String>`, NOT a bool, matching how mode and intent
+       already cross that boundary and keeping the token parse in
+       refresh_from_query.
+
+       Do NOT reach for the tempting justification: wasm-bindgen does emit an
+       optional d.ts parameter for Option<String> and a required one for bool,
+       but nothing here would catch the difference. web/src/service-worker.ts is
+       listed in .svelte-kit/tsconfig.json's `exclude`, web/tsconfig.json
+       overrides neither include nor exclude, and `pnpm check:ci` runs only that
+       one project, so the file is in NO tsc program. A bool would leave the
+       four-argument call at service-worker.ts:260 compiling, `undefined` would
+       coerce to false in the boolean slot, and `?refresh=1` would silently never
+       reach mortar with `just check` fully green. Putting the worker in a
+       program is a prerequisite of this spec, not a nicety.
      web/src/service-worker.ts:260                       forward the parameter.
 
 7. Regenerate the wire fixture for the new query vocabulary:
@@ -361,13 +375,22 @@ Most of the work is on the web side.
      later reset does not rehydrate.
 
 10. web/src/lib/components/RefreshWall.svelte    (new)
-     A button that calls feed.refresh() FIRST, then scrolls, and only when not
-     already at the top. The other order defeats itself: FeedGrid registers
-     one-shot wheel/touchmove/scroll freeze listeners whenever feed.warming
-     becomes true (FeedGrid.svelte:181 to :201) and refresh() sets warming
-     synchronously, so a scroll dispatched first freezes the wall the reader
-     just asked to re-lay. Mount it in web/src/routes/+layout.svelte:128
-     (:126 is the control row's opening div, :127 is LayoutPicker).
+     A button that calls feed.refresh() and NOTHING ELSE. Do not scroll.
+
+     FeedGrid.svelte:181 is one $effect whose first statement is
+     `if (!feed.warming) return;`, so on a settled wall no freeze listener is
+     attached at all: the "scroll first and you freeze the wall" hazard an
+     earlier draft of this spec described cannot happen, and the order it
+     recommended instead is the one that breaks. refresh() sets warming
+     synchronously, the effect re-runs on a microtask and attaches the
+     {passive, once} scroll listener at :191, and the scroll event queued by
+     window.scrollTo is delivered after that microtask. freeze()'s guard at
+     feed.svelte.ts:124 only rejects when !warming || loading, and refresh sets
+     neither, so the wall commits on its own programmatic scroll with no reflow.
+     Either call order does this; the coupling is event delivery, not ordering.
+
+     Mount it in web/src/routes/+layout.svelte:128 (:126 is the control row's
+     opening div, :127 is LayoutPicker).
 
 11. just check
     pnpm changeset   (minor: a visible capability)
@@ -467,10 +490,19 @@ count in the bypass sentence agree with the table above it.
   currently has nothing there. It competes with the browser's own overscroll
   refresh and needs a gesture threshold, a rubber band and a reduced-motion path.
   Open.
-- *Whether a refresh should hold the reader's position.* It does not: the wall is
-  a new arrangement from a new seed, so there is no old position to hold. A
-  refresh that appended instead would preserve it, and would need the wall to
-  stop being append-only. Not open so much as decided against, and recorded here
-  because it is the first thing anybody asks.
+- *Whether a refresh should return the reader to the top.* It does not, and the
+  reason is mechanical rather than chosen: a programmatic scroll is
+  indistinguishable from reader engagement to the wall's freeze listeners, and it
+  arrives after they are armed, so any refresh that scrolls commits without
+  reflowing. Making the two distinguishable means new state in `FeedGrid` (a
+  one-shot "ignore the next engage" that `freeze` honours, plus re-arming the
+  listeners it consumed), and no lane in this repo can verify it. Open: is
+  returning to the top worth that machinery, or is re-laying under the reader
+  actually the better behaviour?
+- *Whether the reader's position means anything after a refresh.* The wall is a
+  new arrangement from a new seed, so the brick they were looking at may not be
+  on it. A refresh that appended instead would preserve the position, and would
+  need the wall to stop being append-only. Decided against rather than open, and
+  recorded because it is the first thing anybody asks.
 - *Server mode.* The flag works identically over axum, and as with `intent`
   nothing exercises it there. Open until server mode has a consumer.

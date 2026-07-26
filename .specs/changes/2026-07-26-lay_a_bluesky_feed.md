@@ -673,9 +673,16 @@ than inside it. Nothing in `algo/` changes except the cursor.
      Cursor becomes #[serde(untagged)] enum { Feed { feed: String }, Wall { seed,
      offset } }, Feed FIRST. Order is load-bearing: {seed, offset} cannot match
      Feed, so putting Feed first is unambiguous and keeps every legacy cursor
-     decoding to Wall (there is no deny_unknown_fields; the existing test at :44
-     proves it for the dropped `snapshot` key). Both existing tests must still
-     pass unchanged, including garbage_is_none's {"seed":42} case.
+     decoding to Wall (there is no deny_unknown_fields; the existing test at :46
+     proves it for the dropped `snapshot` key).
+
+     THREE existing tests, not two, and two of them cannot pass literally
+     unchanged: roundtrip (:32) and the legacy stray-key test (:46) both write
+     the struct expression `Cursor { seed: 42, offset: 96 }`, which stops
+     compiling once Cursor is an enum. They keep their inputs and their expected
+     (42, 96) and gain only `Cursor::Wall`. garbage_is_none (:59) is unchanged in
+     full, including its {"seed":42} case, which still decodes to None because
+     both variants require all of their fields.
 
      THREE call sites break, not two. The demo wall is a consumer ahead of both
      real paths: feed.rs:57 reads `decoded.map(|c| c.offset)` and feed.rs:64
@@ -683,8 +690,25 @@ than inside it. Nothing in `algo/` changes except the cursor.
      handed to the demo wall lays from offset 0 rather than panicking.
 
 7. server/crates/mortar-core/src/error.rs:6
-     AppError::FeedNotFound(String) -> (404, "feed_not_found"). Add it to the
-     variant list at :78 so the pinned envelope-string fixture covers it.
+     AppError::FeedNotFound(String) -> (404, "feed_not_found").
+
+     Know which links of the chain actually force, because two of the obvious
+     four do not. status_and_code's match at :38 IS exhaustive and forces an
+     arm. Then tests/contract.rs takes over: code_key's exhaustive match at :251
+     forces an arm, that arm indexes ALL_CODES (:227, an [&str; 4], so a constant
+     out-of-bounds index fails the build), and the key-set assert at :331 fails
+     until errors() at :236 carries an instance. That is what guarantees
+     contract.json covers feed_not_found.
+
+     error.rs's OWN pinned-string tests do not force. variants() at :76 is a
+     hand-written [AppError; 4] in the test module, and both `expected` arrays
+     (:91, :107) are consumed through variants().iter().zip(expected) at :97 and
+     :113. zip stops at the shorter side, so growing variants() to 5 while
+     leaving expected at 4 keeps both tests green with the new variant's wire
+     strings unpinned. Add the instance AND both strings by hand, and verify by
+     reading them rather than by trusting a green cargo nextest. Better: fold
+     variants() and the two arrays into one [(AppError, &str, &str); N] table so
+     the length forces all three together.
 
      While here, BadRequest needs attention. It Displays as "missing required
      parameter: {0}" over a `&'static str` payload, so an unparseable feed

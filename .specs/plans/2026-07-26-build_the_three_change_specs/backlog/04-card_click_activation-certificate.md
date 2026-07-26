@@ -70,7 +70,7 @@ evidence it names.
 - **O4 · Every modified click still reaches the source in a new tab.**
   - *Claim:* cmd-click, ctrl-click, shift-click, alt-click and middle-click open the source from
     every intercepted anchor, and no anchor lost its `href`, `target="_blank"`,
-    `rel="noopener noreferrer"` or `clientUrl` rewrite.
+    or `rel="noopener noreferrer"`, and no `clientUrl` call site lost its wrapper. `BlogCard.svelte:13` is raw `brick.url` by design and is not a regression.
   - *Evidence to collect:* run `grep -rn 'target="_blank"' web/src/lib/components/` and confirm each
     intercepted anchor still carries it with `rel="noopener noreferrer"`. Exercise all five click
     kinds on one anchor of each card type.

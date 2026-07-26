@@ -146,9 +146,12 @@ Add two rows to the table:
 Replace the **Outbound links** bullet with:
 
 > - **Every outbound anchor stays a real link, and the anchor that stands for the
->   brick opens the reader on a plain click.** Anchors keep `target="_blank"`,
->   `rel="noopener noreferrer"` and the `clientUrl` rewrite, so middle-click,
->   cmd-click and "copy link address" all still reach the source. A plain
+>   brick opens the reader on a plain click.** Anchors keep `target="_blank"` and
+>   `rel="noopener noreferrer"`, and the Bluesky ones keep their `clientUrl`
+>   rewrite, so middle-click, cmd-click and "copy link address" all still reach
+>   the source. A blog anchor points at the publication directly and always did:
+>   `clientUrl` rewrites `bsky.app` hostnames and nothing else, so a blog card has
+>   never had one to keep. A plain
 >   unmodified left click is intercepted (`preventDefault`) and opens the brick
 >   reader. Keeping the anchor rather than swapping it for a button is what
 >   preserves the browser's own affordances.
@@ -240,10 +243,14 @@ Replace the **Outbound links** bullet with:
 > - **The reader is a real dialog.** `role="dialog"`, `aria-modal="true"`, an
 >   accessible name from the brick, focus in on open and back to the opening card
 >   on close, Escape and click-away, and `inert` on everything behind it (with the
->   reader mounted outside the inert subtree). Arrow keys step along the wall from
->   inside it, and they cannot collide with the wall's own arrow-key freeze
->   handler: those window listeners exist only while the wall is warming and are
->   torn down by the freeze, which `reader.open` has already performed.
+>   reader mounted outside the inert subtree). Left and right arrows step along
+>   the wall from inside it, and they cannot collide with the wall's own
+>   navigation-key freeze handler because the two key sets are disjoint: that
+>   handler matches the vertical set (`ArrowDown`, `ArrowUp`, `PageDown`,
+>   `PageUp`, `Home`, `End`, space) and never the horizontal one. The disjointness
+>   is what carries this, not the freeze: `feed.freeze()` is async and does not
+>   clear `warming` until its fetch resolves, so the wall's listeners are still
+>   attached while the reader mounts.
 
 ### `.specs/08-wall-and-bricks.md` → Implementation layout (Modify)
 
@@ -376,12 +383,18 @@ the repo except a Playwright case somebody has to think to write.
    reader instead of revealing the media.
 
 What is *not* a hazard, despite looking like one: `FeedGrid`'s window-level
-freeze listeners (`FeedGrid.svelte:188`) survive neither the freeze nor the
-reader, because that effect registers them only while `feed.warming` is true and
-tears them down on cleanup, and `reader.open` freezes the wall first. And the
-sentinel's observer does stay connected, so the pump can still append behind an
-open reader; that is harmless, since an append never moves a laid brick and the
-reader locates its own brick by id.
+navigation-key handler. It is tempting to say `reader.open`'s freeze has already
+torn it down, and that is wrong twice over, since `feed.freeze()` is async and
+does not clear `warming` until its fetch resolves, and it returns immediately
+when a freeze is already in flight. What actually holds is that its key set
+(`FeedGrid.svelte:174`) is vertical navigation only, and the reader steps on left
+and right, so the two never overlap however the freeze is progressing. Space is
+in that set and does reach the handler from inside the reader, which is harmless
+because a second freeze is a no-op.
+
+Nor is the pump: the sentinel's observer stays connected, so bricks can still be
+appended behind an open reader. An append never moves a laid brick and the reader
+locates its own brick by id.
 
 ---
 

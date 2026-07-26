@@ -34,22 +34,22 @@ DONE(Task 26) is every obligation O1 to O7 below holding, each backed by the evi
     styled-only disabled turns a double tap into two bursts.
   - *Status:* unverified
 
-- **O2 · The handler refreshes before it scrolls, both paths are commented, and the motion path is asserted.**
+- **O2 · The handler does not scroll, and both the reason and the reduced-motion path are commented.**
   - *Claim:* the click handler calls `feed.refresh()` first and scrolls second, and only when the
     wall is not already at the top; the resolution is written in the file as a comment covering the
     event path **and** the reduced-motion path; and the event path is proven by the Playwright case
     rather than left to the next implementer.
-  - *Evidence to collect:* read the handler and confirm the two statements are in that order, with
-    the scroll behind a not-already-at-the-top condition. Read the comment and confirm it names both
-    paths. Run the Playwright case that distinguishes the two outcomes: after a click, the wall must
-    reflow (warming stays true through at least one preview) rather than freezing immediately.
-  - *Checks:* trace **two** chains, not one. First, `FeedGrid.svelte:188`-`:201` re-arms one-shot
-    `wheel`, `scroll`, `touchmove`, `keydown` and `focusin` listeners whenever `feed.warming` flips
-    true, and `refresh()` flips it true synchronously, so a programmatic `scrollTo` dispatched
-    **before** the refresh lands on `freezeOnEngage` and freezes the reflow the click just started.
-    The change spec's `08` Refreshing block names the fix (refresh first, scroll second, and only
-    when not already at the top), so the two orders are not equally acceptable here: the reversed one
-    is both the bug and a divergence from the block task 27 applies. Second,
+  - *Evidence to collect:* read the handler and confirm it contains no scroll call of any kind, and
+    that the comment explains why. Do NOT attempt a Playwright case that distinguishes reflow from
+    immediate freeze: `feed.rs:60` answers a demo preview with `warming: false`, so `#warm` freezes
+    on its first poll on the demo wall in every ordering, and that assertion has no discriminator.
+  - *Checks:* trace **two** chains, not one. First, the scroll coupling, which is symmetric and is
+    why the handler must not scroll: `FeedGrid.svelte:182` returns early when `!feed.warming`, so a
+    settled wall has no listener to freeze against; `refresh()` then flips `warming` true
+    synchronously, the effect re-runs on a microtask and attaches the `once` scroll listener at
+    `:191`, and the event queued by `window.scrollTo` arrives after it. `freeze()` at
+    `feed.svelte.ts:124` rejects only on `!warming || loading`, so either order commits without
+    reflowing. A handler containing any scroll call fails this obligation. Second,
     `FeedGrid.svelte:182`-`:187`
     is a different path entirely: under `prefers-reduced-motion: reduce` the same effect calls
     `freezeOnEngage()` at `:185` immediately and returns, with no listener and no scroll event, so
@@ -65,7 +65,7 @@ DONE(Task 26) is every obligation O1 to O7 below holding, each backed by the evi
 - **O3 · The Playwright spec asserts all four behaviours at 375px, with a named mechanism for the disabled window.**
   - *Claim:* `web/tests/refresh.test.ts` asserts the control renders with an accessible name at a
     375px viewport; clicking it leaves bricks on the wall (`#wall article` stays visible, the
-    skeleton grid never appears); the control is `disabled` while warming and enabled once settled;
+    twelve-card `initialLoad` grid never appears, while the four-card warming tail does); the control is `disabled` while warming and enabled once settled;
     and a second click while disabled starts nothing.
   - *Evidence to collect:* run `just build && cd web && pnpm test:e2e` and confirm the four
     assertions pass. Read the viewport setting. Read how the disabled assertion observes the window.
