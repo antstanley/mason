@@ -121,10 +121,18 @@ files in this jj-managed repo are seen too. `guard-dashes` additionally passes
 
 `just check` runs `just guard-dashes`, `just guard-autoplay`,
 `just guard-toolchain`, `just fmt-check`, `just guard-wasm`, `just lint` and
-`just test`, in that order. It is the same set CI runs, so a red pull request from a formatting slip
-is not a thing that has to happen. The recipe
-is dependencies-only: `just` runs the seven before an empty body, so there is
-exactly one list of gates and no second copy to drift out of step with it.
+`just test`, in that order, so a red pull request from a formatting slip is not
+a thing that has to happen. The recipe is dependencies-only: `just` runs the
+seven before an empty body, so there is exactly one list of gates and no second
+copy to drift out of step with it.
+
+**CI runs the recipe, not a copy of it.** `ci.yml` invokes `just check` as a
+single step. It used to name the gates individually, which meant that list and
+the recipe could disagree, and they did: `guard-toolchain` joined `check` and
+never reached CI, so for one commit a pull request whose pinned channel
+contradicted its declared MSRV would have gone green. Calling the recipe makes
+"the same set" true by construction, and a gate added to `check` is enforced in
+CI without anyone remembering to add it twice.
 
 The order is cheapest first, and it is measured rather than asserted: the two
 greps are about 0.2 s each, `fmt-check` about 1 s, `guard-wasm` about 1.4 s warm,
@@ -180,7 +188,7 @@ fork PRs where the preview deploy cannot.
 check job:      ./.github/actions/rust (+ clippy, rustfmt, just, nextest) · pnpm
                 ▸ cargo metadata --locked            (Cargo.lock is fresh)
                 ▸ just wasm                          (also the wasm compilability gate)
-                ▸ just test · just lint · just fmt-check · just guard-autoplay
+                ▸ just check                         (the gate recipe, not a copy of it)
 
 e2e job:        the same toolchain plus chromium
                 ▸ just build · pnpm test:e2e
@@ -415,6 +423,11 @@ web/vitest.config.ts        merged with the app's vite config
 - *`guard-toolchain` in `check`.* **The channel must satisfy the declared
   MSRV.** A parse cannot catch the other half of the drift: `rust-version` in
   `server/Cargo.toml` promising support for a compiler nobody builds with.
+- *CI invokes `just check` rather than listing its gates.* **One step, the
+  recipe itself.** A hand-maintained list of the same gates is a second copy,
+  and it drifted within a day of `check` existing: `guard-toolchain` was added
+  to the recipe and never reached CI. This is the same reasoning as parsing the
+  toolchain channel rather than retyping it, applied to the gate list.
 
 **Open questions**
 
