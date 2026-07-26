@@ -179,7 +179,9 @@ pub async fn handle_feed(
     // way. The cursor it hands back carries the same seed, so the next poll (and
     // the freeze) land on this very snapshot rather than rolling a new one.
     if intent == FeedIntent::Preview {
-        let snap = snapshot::ensure_snapshot(state, &did, seed, mode).await;
+        // the `false` is the refresh flag: no front parses `?refresh=` yet, so
+        // every wall is still laid from the warm content caches
+        let snap = snapshot::ensure_snapshot(state, &did, seed, mode, false).await;
         let (items, warming) = snapshot::preview_page(&snap, PAGE_SIZE).await;
         return Ok(FeedResponse {
             items,
@@ -188,7 +190,8 @@ pub async fn handle_feed(
         });
     }
 
-    let snap = snapshot::get_or_build(state, &did, seed, mode).await;
+    // the `false` is the refresh flag, as above
+    let snap = snapshot::get_or_build(state, &did, seed, mode, false).await;
     // Freeze commits the first screen immediately: the preview loop already gave
     // the reader the warming reflow, so re-paying the mix wait here is the exact
     // stall reflow exists to remove. Normal (server mode, no preview loop) still
