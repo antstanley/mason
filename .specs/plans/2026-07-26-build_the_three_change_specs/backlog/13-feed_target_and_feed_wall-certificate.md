@@ -71,16 +71,19 @@ it names.
   - *Evidence to collect:* run the six named wiremock tests. For the glaze case, confirm the test
     feeds more than `PAGE_SIZE` image posts and asserts all of them are laid; a test with fewer than
     `PAGE_SIZE` survivors would pass under a truncating implementation too.
-  - *Checks:* trace the truncate call site. The change spec's ASCII flow puts it unconditionally
-    after the glaze filter, which contradicts the paragraph below it. Confirm the code truncates on
-    the `Mode::Wall` path only.
+  - *Checks:* trace the truncate call site. The change spec's ASCII flow puts it on the `Mode::Wall`
+    arm alone, and the paragraph below it says laying every glaze survivor is a correctness
+    requirement rather than an optimisation, because there is no pool to hold a remainder in and the
+    cursor belongs to the call that fetched it. Confirm the code truncates on the `Mode::Wall` path
+    only.
   - *Status:* unverified
 
-- **O4 · The missing-parameter message exists once per language, and the pinned Rust copy follows.**
+- **O4 · The `bad_request` message exists once per language, reads honestly, and the pinned Rust copy follows.**
   - *Claim:* the message lives in `FeedTarget::from_query`'s `Err` arm and in
-    `web/src/service-worker.ts:254`'s hardcoded string, they match character for character, and
+    `web/src/service-worker.ts:254`'s hardcoded string, they match character for character,
     `error.rs`'s canonical `variants()` instance plus both pinned envelope arrays (`:90`, `:106`)
-    carry the same wording.
+    carry the same wording, and the wording is chosen to read correctly for **both** callers once
+    task 14 rewords `BadRequest`'s Display at `error.rs:5`.
   - *Evidence to collect:* read `feed.rs`'s error construction, `service-worker.ts` around
     `:248`-`:258`, and `error.rs:75`-`:110`; compare the strings. Run
     `cargo nextest run -p mortar-core error` and expect green.
@@ -88,7 +91,11 @@ it names.
     not a test. Confirm `tests/contract.rs`'s `errors()` is **unchanged** here: editing it without a
     fixture regeneration makes `cargo test` red, and this task is not one of the plan's three
     regenerations. Task 14 changes it inside its own regeneration, so the fixture pins the older
-    wording for exactly one task and the PR says so.
+    wording for exactly one task and the PR says so. The Display itself is task 14's for the same
+    reason, so read the payload strings this task picks against the wording task 14 will put in front
+    of them: `BadRequest` carries a `&'static str`, so "missing required parameter: {0}" cannot be
+    made honest for a `?feed=` that was present and malformed, and a payload chosen to read well only
+    under the old prefix leaves task 14 rewording twice.
   - *Status:* unverified
 
 - **O5 · The two offline rejections are asserted in Playwright.**

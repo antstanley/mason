@@ -10,7 +10,7 @@
 ## Steps
 
 - [ ] Turn `Cursor` into `#[serde(untagged)] enum { Feed { feed: String }, Wall { seed: u64, offset: usize } }`, with `Feed` declared **first** and a comment saying the order is load-bearing.
-- [ ] Update `encode` and `decode` signatures and every one of the three consumers, including the demo branch at `feed.rs:57` and `:64`, which the change spec's note 6 does not mention.
+- [ ] Update `encode` and `decode` signatures and every one of the three consumers, including the demo branch at `feed.rs:57` and `:64`, which the change spec's note 6 names as the third call site and asks for a test of.
 - [ ] Make a `Feed` cursor arriving on the graph path yield a fresh wall rather than a panic or a 500, and on the demo path yield offset 0.
 - [ ] Add round-trip tests for both shapes, and a test that a feed cursor handed to the demo wall lays from offset 0.
 

@@ -58,15 +58,21 @@ evidence it names.
     dedicated case is the lane.
   - *Status:* unverified
 
-- **O3 · The demo wall carries a covered brick and the wire did not change.**
-  - *Claim:* one fixture post has a `blur`, `cargo nextest run` is green, and `contract.json` is
-    untouched.
-  - *Evidence to collect:* read `server/crates/mortar-core/src/fixtures.rs` and confirm exactly one
-    of the two former `blur: None` sites now carries a `Blur`. Run `cd server && cargo nextest run`,
-    expect green. Confirm `git`/`jj` shows no change to
+- **O3 · The demo wall carries exactly one covered brick and the wire did not change.**
+  - *Claim:* the fixture post at `i == 0` has a `blur`, no other brick does, `cargo nextest run` is
+    green, and `contract.json` is untouched.
+  - *Evidence to collect:* read `server/crates/mortar-core/src/fixtures.rs:186` and confirm the post
+    arm's `blur` is a condition on `i` yielding `Some` only at `i == 0`. Run
+    `cd server && cargo nextest run`, expect green. Confirm `git`/`jj` shows no change to
     `server/crates/mortar-core/tests/fixtures/contract.json`.
-  - *Checks:* resolve where `contract.json` comes from: `tests/contract.rs` builds its own canonical
-    instances and imports nothing from `fixtures.rs`, so the fixture change must not appear in it.
+  - *Checks:* resolve how many bricks the edited expression builds. `:152`'s `_ =>` arm is shared by
+    all 84 posts in the 120-brick pool, so a `Blur` written without a condition covers two thirds of
+    the wall and the task's own "one covered brick" claim is false. Then resolve that the chosen
+    index renders a reveal control at all: `PostCard.svelte:18` mounts `<Sensitive>` only inside
+    `{#if img}`, and `:153` gives images only to `i.is_multiple_of(3)`, so a blurred post at an
+    index without an image is invisible to task 06. Then resolve where `contract.json` comes from:
+    `tests/contract.rs` builds its own canonical instances and imports nothing from `fixtures.rs`,
+    so the fixture change must not appear in it.
   - *Status:* unverified
 
 - **O4 · Meets the repo definition of done.**

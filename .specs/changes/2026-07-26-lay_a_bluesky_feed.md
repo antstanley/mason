@@ -686,15 +686,24 @@ than inside it. Nothing in `algo/` changes except the cursor.
      AppError::FeedNotFound(String) -> (404, "feed_not_found"). Add it to the
      variant list at :78 so the pinned envelope-string fixture covers it.
 
-     While here, BadRequest needs attention: it Displays as "missing required
-     parameter: {0}", so an unparseable feed reference would read "missing
-     required parameter: feed" when the parameter was present. Either give it a
-     second form for a malformed value or reword the Display. Note also that
-     web/src/service-worker.ts:254 carries its OWN hardcoded copy of the string
-     ("missing required parameter: actor"), and nothing in the repo compares the
-     two: the pinned fixture strings come from a literal BadRequest("actor") in
-     contract.rs:238 and error.rs:78, not from either front. Change both copies
-     together.
+     While here, BadRequest needs attention. It Displays as "missing required
+     parameter: {0}" over a `&'static str` payload, so an unparseable feed
+     reference reads "missing required parameter: feed" when the parameter was
+     present, and the payload type cannot carry a runtime malformed value.
+
+     REWORD THE DISPLAY; do not add a variant. A new variant pulls in the whole
+     forcing chain (variants(), ALL_CODES, code_key's exhaustive match, both
+     pinned envelope arrays) and would mean a FOURTH contract-fixture
+     regeneration; rewording changes only errors.bad_request.message, which the
+     regeneration in step 10 is already performing. Something like
+     "bad request: {0}" with the payload naming the parameter reads correctly
+     for both the missing and the malformed case.
+
+     Note also that web/src/service-worker.ts:254 carries its OWN hardcoded copy
+     of the old string ("missing required parameter: actor"), and nothing in the
+     repo compares the two: the pinned fixture strings come from a literal
+     BadRequest("actor") in contract.rs:238 and error.rs:78, not from either
+     front. Change both copies in the same commit.
 
 8. server/crates/mortar-core/src/feed.rs:44
      handle_feed takes FeedTarget instead of &str actor, and branches to a new

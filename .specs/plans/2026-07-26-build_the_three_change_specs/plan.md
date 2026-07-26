@@ -55,11 +55,13 @@ nothing in this repo typechecks.
   changeset for user-visible change. Task files add only task-specific
   acceptance on top.
 
-### Three corrections carried into the plan
+### Three corrections the specs have since absorbed
 
-The specs' `Implementation notes` are wrong in three places against the current
-branch. The plan builds what the code allows, and the merge tasks write the
-correction into the canonical pages rather than copying the proposal:
+The specs' `Implementation notes` were wrong in three places against the current
+branch when this plan was drawn, and the plan routed around all three. Commit
+`b55ef455` then corrected the change specs themselves, so each is now block text:
+the merge tasks confirm it landed rather than writing it in by hand, and the build
+tasks below already say what the code allows.
 
 1. **`FeedGrid`'s `brick` snippet carries no index.** It is
    `{#snippet brick(item: Brick, priority: boolean)}` at
@@ -67,16 +69,26 @@ correction into the canonical pages rather than copying the proposal:
    in `Bento.svelte:12` and `Masonry.svelte:12`. Task 01 therefore has the reader
    hold the brick and derive its position by id, which keeps `FeedGrid`, both
    layout components and all four cards out of the reader's diff, and removes a
-   collision with task 15.
+   collision with task 15. The reader spec's Reactive state block now says so
+   itself, under "The reader holds the brick, and locates it by id".
 2. **Two of the four cards give `BrickShell` no `href`.**
    `VideoCard.svelte:51` is `<BrickShell accent="video" {label}>` and
    `GlazeCard.svelte:132` is `<BrickShell accent="post" {label}>`. A
    `BrickShell`-only intercept would leave the whole glaze wall and every video
-   brick with no way into the reader, so task 04 names three activation points.
-3. **The reader cannot mount where note 7 says.** `+layout.svelte`'s wrapper div
-   opens at `:110` and closes at `:134`, so `{@render children()}` at `:133` is
-   inside it, and `inert` is inherited. Task 03 mounts `BrickReader` after the
-   wrapper's closing tag.
+   brick with no way into the reader, so task 04 names three activation points,
+   as the reader spec's Cards block and its note 6 now do.
+3. **The reader mounts outside the element it makes inert.**
+   `+layout.svelte`'s wrapper div opens at `:110` and closes at `:134`, so
+   `{@render children()}` at `:133` is inside it and `inert` is inherited. Task 03
+   mounts `BrickReader` after the wrapper's closing tag; the reader spec's note 8
+   (note 7 before the correction) now names `:134`, and its Dialog behaviour block
+   calls the reader the wrapper's sibling.
+
+The same commit corrected a fourth thing that never reached this plan's shape: the
+reader claims `VideoPlayer` under `reader:<brick.id>`, not the brick's own id, or
+the card behind the scrim keeps playing. Task 05 builds it and task 07 confirms
+the merged page says it, which is why that task counts four corrections and this
+section counts three.
 
 ---
 
@@ -259,10 +271,12 @@ behaviour and can land at any point before 21).
   promise; the plan makes browse-unavailable a first-class state instead.
 - **It does not touch `architecture-principles.md` or `development-guidelines.md`,
   and it changes exactly two rows of `.specs/10-build-release-deploy.md`.** No new
-  crate, no new build mode, no new justfile recipe. The first row is task 00's:
-  it puts a second tsc project inside `pnpm check:ci`, and therefore inside
-  `just test` and `just check`, so the `just test` row at
-  `10-build-release-deploy.md:54` has to say two tsc projects rather than one.
+  crate, no new build mode, no new justfile recipe; the only justfile edit is one
+  word, task 00 giving `test` the `wasm` dependency `dev`, `build`, `test-e2e` and
+  `deploy` already carry. The first row is task 00's: it puts a second tsc project
+  inside `pnpm check:ci`, and therefore inside `just test` and `just check`, so the
+  `just test` row at `10-build-release-deploy.md:54` has to say two tsc projects
+  rather than one, and that the recipe builds the wasm first.
   The second is task 27's: the `just test-e2e` row at `:55` calls the lane "the
   Playwright service-worker smoke", and by the end of this plan `web/tests/`
   holds four specs, so the row is reworded once, at the end, by the only task
@@ -310,10 +324,14 @@ Two further blind spots that are not about `.svelte`:
   `just wasm` then `just check`, which is the same excluded program. **Task 00
   closes this**, with a second tsc project over `src/service-worker.ts` wired
   into `check` and `check:ci` (verified green against the tree as it stands, so
-  the task is a config change and not a cleanup). After task 00 the original
-  sentence becomes true rather than false: `check` still does not run `just
-  wasm`, so tasks 13 and 22 must run `just wasm && cd web && pnpm check:ci`
-  explicitly, and CI gets it by construction.
+  the task is a config change and not a cleanup). Putting the file in a program
+  is also what makes the gate's missing dependency bite, so task 00 fixes that in
+  the same PR: `web/src/lib/mortar-wasm/pkg/` is gitignored, `just test` runs
+  `pnpm check:ci`, and `just check` runs `test`, so without a `wasm` dependency
+  the whole gate would fail on any tree that has never built the engine.
+  `test: wasm` is the one-line fix, `guard-wasm` cannot stand in for it (it is a
+  `cargo check` that emits no `pkg/`), and after it the wasm the worker project
+  typechecks against is fresh by construction, in the local gate and in CI alike.
   What task 00 still cannot see is **a transposition**. `feed_page` ends this
   plan as six positional `Option<String>` slots, and swapping two of them
   typechecks. That needs a behavioural lane, so tasks 13 and 22 each carry a
@@ -399,6 +417,14 @@ Two further blind spots that are not about `.svelte`:
   Task 26 also records that with a reader open the control is inside task 03's
   `inert` wrapper and therefore not clickable, so the call is a guarantee for any
   future trigger rather than a live path today.
+- *A refresh announces nothing new.* **The wall keeps its one polite live region.**
+  The refresh spec settles this in its `08` Refreshing block rather than leaving it
+  to the control: `FeedGrid.svelte:221` already says "laying bricks" while warming,
+  a refresh is a warm, and `RefreshWall` adds no region of its own. So task 26 adds
+  none and gives `FeedGrid` no refresh-aware branch, which would have needed
+  `FeedState` to expose that this warm is a refresh; and the count in
+  `08-wall-and-bricks.md`'s accessibility section, exactly one region for the whole
+  wall, stays true.
 - *The two overlays get one mutual-exclusion rule, written once.* **Opening
   either clears the other's `App.PageState` key.** Task 01 declares
   `brick?: string`, task 17 adds `picker?: 'feeds'` to the same interface rather
@@ -464,14 +490,6 @@ Two further blind spots that are not about `.svelte`:
   task 18's picker prefetch the first `getFeed` page into `feed_pages` under the
   card the reader is about to activate. That is a new behaviour rather than a
   signature change, so it can land later without reopening task 15's diff.
-- *What should the reader announce, and where?* The wall has exactly one polite
-  live region, in `FeedGrid.svelte:221`, driven by an effect that only knows about
-  wall state. The refresh spec proposes it announce "refreshing the wall", which
-  has no mechanism: `RefreshWall` mounts in `+layout.svelte`, a sibling subtree.
-  Task 26 either gives `FeedGrid` a refresh-aware branch (which needs `FeedState`
-  to expose that this warm is a refresh, which the change spec does not add) or
-  lets the existing "laying bricks" stand. Task 26 must pick one; the plan does
-  not pick for it.
 - *Is a snapshot-id collision worth code?* `fresh_seed` is `xxh3(did, unix_millis)`
   and `ensure_snapshot` only runs its `make` closure on a genuine insert, so two
   cursorless requests for the same DID in the same millisecond share a snapshot

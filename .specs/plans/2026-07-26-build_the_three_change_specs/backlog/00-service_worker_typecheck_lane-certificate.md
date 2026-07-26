@@ -38,7 +38,7 @@ DONE(Task 00) is every obligation O1 to O6 below holding, each backed by the evi
   - *Claim:* both `tsc --noEmit -p tsconfig.json` and `tsc --noEmit -p tsconfig.worker.json` pass,
     and the diff contains no change to any file under `web/src`.
   - *Evidence to collect:* run `cd web && pnpm check:ci`. List the diff's changed files and confirm
-    the set is `web/tsconfig.worker.json`, `web/package.json` and
+    the set is `web/tsconfig.worker.json`, `web/package.json`, `justfile` and
     `.specs/10-build-release-deploy.md`.
   - *Checks:* the plan verified this configuration green against the tree as it stands. A source fix
     in the diff means the shipped config differs from the verified one; resolve which option
@@ -54,21 +54,28 @@ DONE(Task 00) is every obligation O1 to O6 below holding, each backed by the evi
     checked against something other than the generated `mortar_wasm.d.ts`.
   - *Status:* unverified
 
-- **O4 · The limits are stated rather than implied.**
-  - *Claim:* the PR says (a) this lane catches arity and type, not order, because after task 22 the
+- **O4 · The limits are stated, and the gate survives a never-built tree.**
+  - *Claim:* the PR says this lane catches arity and type, not order, because after task 22 the
     call is six `Option<String>` slots and a transposition typechecks, with tasks 13 and 22 named as
-    the lanes that cover order; and (b) `web/src/lib/mortar-wasm/pkg/` is gitignored and `just check`
-    does not run `just wasm`, so on a never-built tree `pnpm check:ci` now fails to resolve the
-    module where before it skipped the file, with CI unaffected because `ci.yml` runs `just wasm`
-    first.
-  - *Evidence to collect:* read the PR body for both statements. Read `justfile`'s `check` and `test`
-    recipes and confirm neither depends on `wasm`; read `.github/workflows/ci.yml` and confirm the
-    `just wasm` step precedes `just check`.
+    the lanes that cover order. And `just test` now depends on `wasm`, so `just check` on a tree with
+    no `web/src/lib/mortar-wasm/pkg/` is green rather than failing on an unresolved module; a bare
+    `cd web && pnpm check:ci` still fails there, which the PR names along with `just wasm` as the
+    remedy.
+  - *Evidence to collect:* read the PR body for both statements. Read `justfile`'s `test` recipe and
+    confirm it depends on `wasm`, and `check` at `:152` and confirm it reaches `test`. Delete
+    `web/src/lib/mortar-wasm/pkg/`, run `just check`, and expect green; run `cd web && pnpm check:ci`
+    from the same state and expect the unresolved-module failure. Read
+    `.github/workflows/ci.yml` and confirm the `just wasm` step still precedes `just check`.
+  - *Checks:* `guard-wasm` is not a substitute and must not be treated as one: it is a `cargo check`
+    for `wasm32` and emits no `pkg/`, so a gate that ran it and not `wasm` would still fail the new
+    tsc project. Then resolve the cost: the added dependency puts an incremental wasm-pack build in
+    front of every `just check`. Confirm the timing comment above the `check` recipe still matches a
+    measured warm run, or was corrected.
   - *Status:* unverified
 
 - **O5 · Nothing else in the gate noticed.**
   - *Claim:* `pnpm knip`, `pnpm test` and `just check` are all still green, and the `just test` row
-    at `.specs/10-build-release-deploy.md:54` now says two tsc projects.
+    at `.specs/10-build-release-deploy.md:54` now says two tsc projects and a wasm build.
   - *Evidence to collect:* run `cd web && pnpm knip`, `cd web && pnpm test`, then `just check` from
     the repo root. Read the spec row.
   - *Checks:* knip reads `tsconfig.json`, not every tsconfig in the directory, and oxfmt formats only
@@ -87,8 +94,12 @@ DONE(Task 00) is every obligation O1 to O6 below holding, each backed by the evi
   `web/tests/service-worker-smoke.test.ts` are still green : (PRESERVED / REGRESSION)
 - The app tsc project. Trace: `tsc --noEmit -p tsconfig.json` still passes and still excludes the
   worker, so the app project's meaning did not change : (PRESERVED / REGRESSION)
-- CI's `check` job. Trace: `just wasm` then `just check` still passes with the extra tsc invocation :
+- CI's `check` job. Trace: `just wasm` then `just check` still passes with the extra tsc invocation,
+  and the now-redundant `just wasm` step is left in place rather than removed :
   (PRESERVED / REGRESSION)
+- `just check`'s stated cost. Trace: the recipe's own comment claims a warm gate of about eight
+  seconds; re-measure with `test: wasm` in place and confirm the comment either still holds or was
+  corrected in this diff : (PRESERVED / REGRESSION)
 
 ## Residue
 

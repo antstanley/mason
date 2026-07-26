@@ -22,16 +22,22 @@ DONE(Task 08) is every obligation O1 to O5 below holding, each backed by the evi
 
 ## Obligations
 
-- **O1 · Both spellings parse into the right case, and every rejection has a named test.**
-  - *Claim:* `at://<did>/app.bsky.feed.generator/<rkey>` parses to the ready case and
-    `https://bsky.app/profile/<handle|did>/feed/<rkey>` to the awaiting-resolution case; an AT-URI
-    naming another collection, a `javascript:` string, a scheme-relative `//bsky.app/...`, and a
-    lookalike host such as `https://evil-bsky.app/...` are each rejected by their own named test.
+- **O1 · All three spellings parse into the right case, and every rejection has a named test.**
+  - *Claim:* `at://<did>/app.bsky.feed.generator/<rkey>` parses to the ready case, while
+    `at://<handle>/app.bsky.feed.generator/<rkey>` and
+    `https://bsky.app/profile/<handle|did>/feed/<rkey>` both parse to the awaiting-resolution case;
+    an AT-URI naming another collection, a `javascript:` string, a scheme-relative `//bsky.app/...`,
+    and a lookalike host such as `https://evil-bsky.app/...` are each rejected by their own named
+    test.
   - *Evidence to collect:* run `cd server && cargo nextest run -p mortar-core feedref` and list the
-    test names. Confirm four distinct rejection tests and two acceptance tests. Read the return type
-    and confirm it has two cases, not an `Option<String>`.
+    test names. Confirm four distinct rejection tests and **three** acceptance tests. Read the return
+    type and confirm it has two cases, not an `Option<String>`.
   - *Checks:* trace the lookalike-host case specifically: a naive `ends_with("bsky.app")` or
-    `contains("bsky.app")` accepts `evil-bsky.app`. Confirm the host comparison is exact.
+    `contains("bsky.app")` accepts `evil-bsky.app`. Confirm the host comparison is exact. Then trace
+    the handle-authority AT-URI: it must land in the awaiting-resolution case, not be rejected and
+    not be forwarded as a finished URI, because the AT-URI mason queries with is always the DID form.
+    The change spec's `FeedRef` `$def` carries all three patterns, so a parser accepting two of them
+    is a divergence rather than a stricter reading.
   - *Status:* unverified
 
 - **O2 · A reference carrying `&` or `#` is handled explicitly.**
@@ -70,9 +76,9 @@ DONE(Task 08) is every obligation O1 to O5 below holding, each backed by the evi
 
 ## Residue
 
-- The schema pattern in the change spec requires `at://did:(plc|web):...`, so
-  `at://<handle>/app.bsky.feed.generator/<rkey>` is a `bad_request`. Whether that is deliberate is
-  the task's own open question and is settled in task 19's schema fold, not here.
+- The handle-authority spelling parses here and resolves nowhere: turning its `(profile, rkey)` pair
+  into a DID is task 13's `resolve_did`, so this task ships a case with no consumer for five tasks.
+  Not an obligation here, but the reason its acceptance test asserts the variant rather than a URI.
 
 ## Conclusion
 

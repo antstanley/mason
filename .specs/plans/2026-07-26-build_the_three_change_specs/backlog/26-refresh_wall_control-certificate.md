@@ -34,18 +34,23 @@ DONE(Task 26) is every obligation O1 to O7 below holding, each backed by the evi
     styled-only disabled turns a double tap into two bursts.
   - *Status:* unverified
 
-- **O2 · The scroll-versus-freeze interaction is resolved and commented on both paths, and the motion path is asserted.**
-  - *Claim:* the resolution is written in the file as a comment covering the event path **and** the
-    reduced-motion path, and the event path is proven by the Playwright case rather than left to the
-    next implementer.
-  - *Evidence to collect:* read the comment and confirm it names both paths. Run the Playwright case
-    that distinguishes the two outcomes: after a click, the wall must reflow (warming stays true
-    through at least one preview) rather than freezing immediately.
+- **O2 · The handler refreshes before it scrolls, both paths are commented, and the motion path is asserted.**
+  - *Claim:* the click handler calls `feed.refresh()` first and scrolls second, and only when the
+    wall is not already at the top; the resolution is written in the file as a comment covering the
+    event path **and** the reduced-motion path; and the event path is proven by the Playwright case
+    rather than left to the next implementer.
+  - *Evidence to collect:* read the handler and confirm the two statements are in that order, with
+    the scroll behind a not-already-at-the-top condition. Read the comment and confirm it names both
+    paths. Run the Playwright case that distinguishes the two outcomes: after a click, the wall must
+    reflow (warming stays true through at least one preview) rather than freezing immediately.
   - *Checks:* trace **two** chains, not one. First, `FeedGrid.svelte:188`-`:201` re-arms one-shot
     `wheel`, `scroll`, `touchmove`, `keydown` and `focusin` listeners whenever `feed.warming` flips
-    true, and `refresh()` flips it true synchronously, so a programmatic `scrollTo` dispatches a
-    scroll event that lands on `freezeOnEngage` and freezes the reflow the click just started;
-    confirm the chosen resolution actually breaks that chain. Second, `FeedGrid.svelte:182`-`:187`
+    true, and `refresh()` flips it true synchronously, so a programmatic `scrollTo` dispatched
+    **before** the refresh lands on `freezeOnEngage` and freezes the reflow the click just started.
+    The change spec's `08` Refreshing block names the fix (refresh first, scroll second, and only
+    when not already at the top), so the two orders are not equally acceptable here: the reversed one
+    is both the bug and a divergence from the block task 27 applies. Second,
+    `FeedGrid.svelte:182`-`:187`
     is a different path entirely: under `prefers-reduced-motion: reduce` the same effect calls
     `freezeOnEngage()` at `:185` immediately and returns, with no listener and no scroll event, so
     **no** scroll-side resolution can reach it. Confirm the comment states what a reduced-motion
@@ -77,16 +82,19 @@ DONE(Task 26) is every obligation O1 to O7 below holding, each backed by the evi
     evidence for the control that **is** the rate limit.
   - *Status:* unverified
 
-- **O4 · The spec says what it does not cover, and the live region question is decided.**
+- **O4 · The spec says what it does not cover, and no live region was added.**
   - *Claim:* the spec file notes that the demo wall ignores `refresh` in the engine, so this lane
-    covers the client behaviour and not the re-read; and the live-region question is answered one way
-    or the other, recorded in the file.
-  - *Evidence to collect:* read the spec's header comment and the component's live-region decision.
-    Confirm no second polite live region was added: `FeedGrid.svelte:221` is the wall's single one,
-    and `08-wall-and-bricks.md`'s accessibility section states there is exactly one.
-  - *Checks:* if the decision was to give `FeedGrid` a refresh-aware branch, resolve how it learns
-    the warm is a refresh; `FeedState` does not expose that today, so either it gained a field or the
-    decision was the other one.
+    covers the client behaviour and not the re-read; and `RefreshWall` announces nothing of its own,
+    with the reason recorded in the file.
+  - *Evidence to collect:* read the spec's header comment and the component's recorded decision. Run
+    `grep -rn 'aria-live' web/src/lib/components/` and confirm the only hit is `FeedGrid.svelte:221`.
+  - *Checks:* this is settled by the change spec rather than open to the implementer: the `08`
+    Refreshing block says the wall keeps its single polite region, that a refresh is a warm and so
+    needs no new announcement, and that `RefreshWall` adds no region of its own. A second region, or
+    a refresh-aware branch in `FeedGrid` (which would need `FeedState` to expose that this warm is a
+    refresh, a field task 25 does not add), is a divergence from the block and from
+    `08-wall-and-bricks.md`'s accessibility section, which states there is exactly one region for the
+    whole wall.
   - *Status:* unverified
 
 - **O5 · The reader is closed here, and only here.**

@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [03-brick_reader_dialog_shell-certificate.md](03-brick_reader_dialog_shell-certificate.md)
 
-**Implements:** [`changes/2026-07-26-read_a_brick_in_place.md`](../../../changes/2026-07-26-read_a_brick_in_place.md) §Proposed changes → `08-wall-and-bricks.md` → The brick reader → Dialog behaviour, and → `09-design-system.md` → Motion; implementation notes 6 and 7. Targets [`08-wall-and-bricks.md`](../../../08-wall-and-bricks.md) §Accessibility behaviours and [`09-design-system.md`](../../../09-design-system.md) §Motion.
+**Implements:** [`changes/2026-07-26-read_a_brick_in_place.md`](../../../changes/2026-07-26-read_a_brick_in_place.md) §Proposed changes → `08-wall-and-bricks.md` → The brick reader → Dialog behaviour, and → `09-design-system.md` → Motion; implementation notes 7 and 8. Targets [`08-wall-and-bricks.md`](../../../08-wall-and-bricks.md) §Accessibility behaviours and [`09-design-system.md`](../../../09-design-system.md) §Motion.
 **Depends on:** 01
 **Produces:** a modal dialog that opens over the demo wall, holds focus, locks the page scroll and closes four ways, with the wall behind it inert.
 **Pointers:** `web/src/routes/+layout.svelte:110` (the wrapper div opens), `:133` (`{@render children()}`, **inside** the wrapper), `:134` (the wrapper closes; the mount goes after this). `web/src/app.css:53` (`--animate-brick-in`), `:55` (its keyframes), `:99` (the `prefers-reduced-motion` override). `SwitchWall.svelte` is the existing dialog pattern to mirror. `web/knip.json` treats `src/routes/**/+*.{svelte,ts}` as entries, so the component and its mount must land together.

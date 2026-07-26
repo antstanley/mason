@@ -27,11 +27,14 @@ DONE(Task 06) is every obligation O1 to O5 below holding, each backed by the evi
     `[role=dialog]` carrying that brick's full text; `page.url()` is unchanged; a `window` marker set
     before the click survives it; Escape closes and `document.activeElement` is the clicked anchor;
     `page.goBack()` closes and leaves the same article count with no skeletons; with the reader open
-    the layout picker radio is not focusable and the close control is; the right-arrow key changes
+    the layout picker radio is not focusable and the close control is;
+    `document.documentElement.style.overflow` is `hidden` while open and restored after every close
+    route; the panel's **computed** animation matches the `09-design-system.md` motion row under
+    `no-preference` and the panel does not move under `reduce`; the right-arrow key changes
     the brick and does not step past the last laid one; revealing the covered fixture brick on the
     card leaves it revealed when the reader opens on it; and clicking "show anyway" reveals the media
     while leaving `[role=dialog]` absent.
-  - *Evidence to collect:* read the spec and check off each of the nine assertions by name. Run
+  - *Evidence to collect:* read the spec and check off each of the eleven assertions by name. Run
     `just test-e2e` and record the per-assertion result.
   - *Checks:* the `window` marker is what distinguishes "no navigation" from "navigated and came
     back". Confirm the marker is set before the click and read after, not merely that the URL string
@@ -39,7 +42,11 @@ DONE(Task 06) is every obligation O1 to O5 below holding, each backed by the evi
     single/grid branch the reveal button is a descendant of the anchor task 04 intercepts, so a
     missing `stopPropagation` opens the reader on the reveal, and the "still revealed when the reader
     opens on it" assertion passes under that broken behaviour too. Only the `[role=dialog]` absence
-    tells them apart.
+    tells them apart. The scroll-lock and motion assertions are the other two items the plan's
+    "Where the gate is blind" table hands from task 03 to here, so confirm they are real reads:
+    `getComputedStyle` on the panel and on `document.documentElement`, not a class-list or
+    inline-attribute check, and the motion one run under both media states rather than only the
+    default.
   - *Status:* unverified
 
 - **O2 · The file says what it is.**

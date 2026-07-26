@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [01-reader_rune_and_page_state-certificate.md](01-reader_rune_and_page_state-certificate.md)
 
-**Implements:** [`changes/2026-07-26-read_a_brick_in_place.md`](../../../changes/2026-07-26-read_a_brick_in_place.md) §Proposed changes → `07-web-client.md` → Reactive state → The reader is history, not a URL; implementation notes 1 and 4. Targets [`07-web-client.md`](../../../07-web-client.md) §Reactive state.
+**Implements:** [`changes/2026-07-26-read_a_brick_in_place.md`](../../../changes/2026-07-26-read_a_brick_in_place.md) §Proposed changes → `07-web-client.md` → Reactive state → The reader is history, not a URL; implementation notes 1 and 5. Targets [`07-web-client.md`](../../../07-web-client.md) §Reactive state.
 **Depends on:** none
 **Produces:** `App.PageState` exists with `brick?: string`, and every open, close, step and modifier-key decision the reader makes lives in one `.svelte.ts` module that vitest runs for real.
 **Pointers:** `web/src/app.d.ts:8` (the interface is a comment today, so it is created rather than extended); `web/src/lib/state/feed.svelte.ts:121` (`freeze()` is already a no-op on a settled wall); `web/src/lib/api.test.ts:9` (the `vi.mock` style to mirror); SvelteKit 2.70.1 types `pushState(url, state: App.PageState)`.

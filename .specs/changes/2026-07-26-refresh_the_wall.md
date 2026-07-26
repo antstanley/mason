@@ -7,8 +7,9 @@ is the scroll pump, and the only way to see anything newer is a browser reload,
 which throws away the wasm engine, the warm caches, the laid arrangement and any
 playing video to rebuild all of it. This change adds a refresh control: one
 button in the header that lays a new wall in place, and a `refresh=1` request
-flag that makes the fill re-read the two fast content caches so the new wall is
-genuinely newer rather than the same bricks reshuffled.
+flag that makes the fill re-read the fast content caches (`author_feed` and
+`image_feed` on a graph wall) so the new wall is genuinely newer rather than the
+same bricks reshuffled.
 
 ---
 
@@ -36,7 +37,7 @@ and no more.
 
 | Canonical page | Nature of change |
 |---|---|
-| [`.specs/01-domain-model.md`](../01-domain-model.md) | The `Snapshot` state table gains `refresh` |
+| [`.specs/01-domain-model.md`](../01-domain-model.md) | The `Snapshot` entity gains `refresh`, in its identity prose rather than its state table |
 | [`.specs/02-feed-engine.md`](../02-feed-engine.md) | `handle_feed` gains `refresh`; when it is honoured and what it reaches |
 | [`.specs/04-sources-and-moderation.md`](../04-sources-and-moderation.md) | The two fast content reads become bypassable, with a failure fallback |
 | [`.specs/05-caching-and-persistence.md`](../05-caching-and-persistence.md) | What a refresh re-reads and what it deliberately leaves warm |
@@ -335,17 +336,17 @@ Most of the work is on the web side.
        boundary.
      web/src/service-worker.ts:260                       forward the parameter.
 
-6. Regenerate the wire fixture for the new query vocabulary:
+7. Regenerate the wire fixture for the new query vocabulary:
       UPDATE_FIXTURE=1 cargo test -p mortar-core --test contract
     Then add `FeedRefresh` to web/src/lib/types.ts and its Equal<> assertion to
     web/src/lib/contract-check.ts, beside the FeedMode and FeedIntent ones.
 
-7. web/src/lib/api.ts:36
+8. web/src/lib/api.ts:36
      fetchFeed gains a `refresh?: boolean` argument; it sets refresh=1 only when
      true AND no cursor is passed, so the client never sends a flag mortar would
      ignore. api.test.ts gains a case for both.
 
-8. web/src/lib/state/feed.svelte.ts
+9. web/src/lib/state/feed.svelte.ts
      refresh() per the state-machine block above. TWO private fields, not one:
      a pending flag read by #warm's fetch (:97) and freeze's fetch (:131) and
      CLEARED WHEN A CURSORLESS RESPONSE IS ADOPTED (generation still matching),
@@ -359,7 +360,7 @@ Most of the work is on the web side.
      the freeze-beats-preview race; and the session cache entry is dropped so a
      later reset does not rehydrate.
 
-9. web/src/lib/components/RefreshWall.svelte    (new)
+10. web/src/lib/components/RefreshWall.svelte    (new)
      A button that calls feed.refresh() FIRST, then scrolls, and only when not
      already at the top. The other order defeats itself: FeedGrid registers
      one-shot wheel/touchmove/scroll freeze listeners whenever feed.warming
@@ -368,7 +369,7 @@ Most of the work is on the web side.
      just asked to re-lay. Mount it in web/src/routes/+layout.svelte:128
      (:126 is the control row's opening div, :127 is LayoutPicker).
 
-10. just check
+11. just check
     pnpm changeset   (minor: a visible capability)
 ```
 

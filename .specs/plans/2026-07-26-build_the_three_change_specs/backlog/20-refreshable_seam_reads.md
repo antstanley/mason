@@ -5,7 +5,7 @@
 **Implements:** [`changes/2026-07-26-refresh_the_wall.md`](../../../changes/2026-07-26-refresh_the_wall.md) §Proposed changes → `04-sources-and-moderation.md` → Per source → Bluesky and → Failure semantics, and → `05-caching-and-persistence.md` → The caches; implementation note 1. Targets [`04-sources-and-moderation.md`](../../../04-sources-and-moderation.md) §Failure semantics.
 **Depends on:** none
 **Produces:** the two fast content reads become bypassable with a cached-yield fallback, changing no observable behaviour yet because every caller passes a literal `false`.
-**Pointers:** `sources/fetch.rs:143` (`author_feed_cached` signature), `:147` (its cache read), `:155` (its transient arm), `:177` (`image_feed_cached` signature), `:181` (its cache read), `:187` (its transient arm; `:188` is the `tracing::debug!` inside it, which the change spec cites by mistake). `algo/fill.rs:232`-`:236` (the single call site). **`fetch.rs:373` is a bare `#[cfg(test)]` module**, and `wiremock` and `tokio` are `cfg(not(target_arch = "wasm32"))` dev-dependencies (`Cargo.toml:41`), while `just guard-wasm` compiles test targets with `--all-targets`.
+**Pointers:** `sources/fetch.rs:143` (`author_feed_cached` signature), `:147` (its cache read), `:155` (its transient arm), `:177` (`image_feed_cached` signature), `:181` (its cache read), `:187` (its transient arm, which the change spec's note 1 names; `:188` is the `tracing::debug!` inside it). `algo/fill.rs:232`-`:236` (the single call site). **`fetch.rs:373` is a bare `#[cfg(test)]` module**, and `wiremock` and `tokio` are `cfg(not(target_arch = "wasm32"))` dev-dependencies (`Cargo.toml:41`), while `just guard-wasm` compiles test targets with `--all-targets`.
 
 ## Steps
 

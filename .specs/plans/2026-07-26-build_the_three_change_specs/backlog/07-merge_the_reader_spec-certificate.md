@@ -12,8 +12,8 @@ DONE(Task 07) is every obligation O1 to O6 below holding, each backed by the evi
 
 ## Premises
 
-- **P1 · Goal.** Canonical pages 00, 07, 08 and 09 describe the reader that shipped, including the
-  three places the change spec's implementation notes were wrong.
+- **P1 · Goal.** Canonical pages 00, 07, 08 and 09 describe the reader that shipped, with the four
+  corrections the change spec absorbed on 2026-07-26 confirmed present rather than re-authored.
 - **P2 · Obligations.** Done iff O1 to O6 all hold; O6 is the Reviewable item.
 - **P3 · Invariants.** Must not break `.specs/README.md`'s tables or any intra-spec link. Canonical
   pages describe the current branch, so nothing may be written that the code does not do.
@@ -29,18 +29,21 @@ DONE(Task 07) is every obligation O1 to O6 below holding, each backed by the evi
     locate each in its target page. Read the four `**Date:**` headers.
   - *Status:* unverified
 
-- **O2 · The four corrections are in the canonical prose, not the proposal's wording.**
+- **O2 · The four corrections are in the canonical prose, carried by the blocks rather than re-authored.**
   - *Claim:* the pages say the reader holds the brick and locates it by id rather than storing an
     index; that activation is from `BrickShell`'s anchor on post and blog cards, the watch link on a
-    video card and an image anchor on a glaze card; that the reader mounts outside the inert wrapper;
-    and that the reader claims the video player under its own id so the card yields. The Dialog
-    behaviour block's overstated pump and freeze-listener claims are corrected.
+    video card and an image anchor on a glaze card; that the reader mounts as the wrapper's sibling,
+    outside the inert subtree; and that the reader claims the video player under `reader:<brick.id>`
+    so the card yields. The Dialog behaviour and Accessibility blocks' statements about the pump and
+    the freeze listeners are present and true.
   - *Evidence to collect:* read `08-wall-and-bricks.md`'s new brick-reader section and
     `07-web-client.md`'s reactive-state prose. For each of the four, confirm the canonical text
     matches the code: `reader.svelte.ts`'s `findIndex`, the five intercepted anchors,
     `+layout.svelte`'s mount position, and the reader's `VideoPlayer` id.
-  - *Checks:* resolve each canonical claim against the shipped file, not against the change spec.
-    The change spec is what got these wrong.
+  - *Checks:* the change spec once got all four wrong and was corrected in commit `b55ef455` on
+    2026-07-26, so each is now block text: a correction missing from the canonical page means the
+    block was applied incompletely, not that the merge failed to invent it. Resolve each canonical
+    claim against the shipped file all the same, never against the block.
   - *Status:* unverified
 
 - **O3 · The spec is merged and relocated.**

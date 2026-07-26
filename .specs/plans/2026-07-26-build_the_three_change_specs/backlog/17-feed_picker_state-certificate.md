@@ -45,15 +45,21 @@ DONE(Task 17) is every obligation O1 to O7 below holding, each backed by the evi
   - *Evidence to collect:* read the module for the named constant. Run the two cases.
   - *Status:* unverified
 
-- **O3 · The hidden-tier filter is driven from the type, not a retyped list.**
+- **O3 · The hidden-tier filter is driven from a runtime list the type checks, not a retyped one.**
   - *Claim:* a feed whose own view carries any hidden label, or whose creator does, is never listed;
-    there is one vitest case per label in `HiddenLabel`, driven from the type.
-  - *Evidence to collect:* read the test file and confirm the cases are generated from
-    `HiddenLabel` (for example a `satisfies Record<HiddenLabel, ...>` table) rather than a hand
-    array. Run them.
-  - *Checks:* resolve `HiddenLabel` to the export task 14 added to `types.ts`, which
-    `contract-check.ts` pins against mortar's `HIDDEN_LABELS`. A locally re-declared union would
-    compile and would drift.
+    there is one vitest case per label in `HiddenLabel`, generated from a runtime value whose
+    completeness `HiddenLabel` enforces.
+  - *Evidence to collect:* read the test file and confirm the cases are enumerated from a
+    `Record<HiddenLabel, ...>` table, or from an array declared
+    `as const satisfies readonly HiddenLabel[]` **with** a companion exhaustiveness check. Run them
+    and count the cases against the union's members.
+  - *Checks:* a type cannot drive anything at runtime, so "driven from the type" has to cash out as
+    one of the two spellings above. Probe the guard rather than reading it: add a sixth member to
+    `HiddenLabel` locally and confirm `pnpm check:ci` fails **in this test file**, then revert. A bare
+    `satisfies readonly HiddenLabel[]` passes that probe only if the exhaustiveness check is present,
+    because a short array satisfies the constraint on its own. Then resolve `HiddenLabel` to the
+    export task 14 added to `types.ts`, which `contract-check.ts` pins against mortar's
+    `HIDDEN_LABELS`; a locally re-declared union would compile and would drift.
   - *Status:* unverified
 
 - **O4 · An AppView failure degrades rather than empties.**

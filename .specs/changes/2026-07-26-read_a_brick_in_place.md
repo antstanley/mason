@@ -276,13 +276,24 @@ No wire change: nothing to regenerate in the contract fixture, and nothing in
      export const revealed = new SvelteSet<string>()   // svelte/reactivity
      Session-scoped; never persisted.
 
-3. server/crates/mortar-core/src/fixtures.rs:148
-     Give ONE fixture post a `blur: Some(Blur { label: "!warn".into() })`; both
-     fixture bricks are `blur: None` today (:148 and :186). Without it no demo
-     brick is ever covered, and since Playwright is the only lane that can see a
-     component, the entire shared-reveal half of this change would ship with no
-     way to observe it. This does NOT touch the wire: contract.json is built
-     from its own canonical instances in tests/contract.rs, not from fixtures.rs.
+3. server/crates/mortar-core/src/fixtures.rs:186
+     Give fixture brick `i == 0` a `blur: Some(Blur { label: "!warn".into() })`.
+     Both arms are `blur: None` today: :148 is the VIDEO arm, :186 is the post
+     arm, and the post arm is the one that matters.
+
+     The index is not arbitrary and picking another one silently breaks the
+     test. `:152`'s `_ =>` arm is shared by all 84 posts, so "one" needs a
+     condition on `i`; `PostCard` renders `<Sensitive>` only inside `{#if img}`
+     and `:153` gives images only to `i.is_multiple_of(3)`, so two thirds of the
+     posts would render no reveal control at all. Brick 0 is a post
+     (`0 % 20` misses the blog arms), carries an image, and is first on both the
+     wall and the glaze wall, so Playwright reaches it without scrolling.
+
+     Without this, no demo brick is ever covered, and since Playwright is the
+     only lane that can see a component, the entire shared-reveal half of this
+     change ships with nothing able to observe it. It does NOT touch the wire:
+     contract.json is built from its own canonical instances in
+     tests/contract.rs, not from fixtures.rs.
 
 4. web/src/lib/components/Sensitive.svelte:17
      Replace the local `revealed = $state(false)` (at :17; :18 is </script>)

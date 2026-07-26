@@ -52,7 +52,7 @@ what it owes the other two if it merges second.
 |---|---|
 | [2026-07-26-read_a_brick_in_place.md](changes/2026-07-26-read_a_brick_in_place.md) | An in-place brick reader, so a card no longer has to be a link out. Client only, no wire change |
 | [2026-07-26-lay_a_bluesky_feed.md](changes/2026-07-26-lay_a_bluesky_feed.md) | Split a wall into a source and a view: `?feed=<at-uri>` lays any Bluesky feed generator in its own order with no snapshot behind it, all three views apply to either source, and a feed picker becomes the second front door |
-| [2026-07-26-refresh_the_wall.md](changes/2026-07-26-refresh_the_wall.md) | A refresh control and a `refresh=1` flag that re-reads the two fast content caches |
+| [2026-07-26-refresh_the_wall.md](changes/2026-07-26-refresh_the_wall.md) | A refresh control and a `refresh=1` flag that re-reads the fast content caches: two of them on a graph wall, one on a feed wall |
 
 | Merged change spec | Merged | Shipped |
 |---|---|---|

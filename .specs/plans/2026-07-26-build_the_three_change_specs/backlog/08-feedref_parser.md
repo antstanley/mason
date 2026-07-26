@@ -10,19 +10,15 @@
 ## Steps
 
 - [ ] Add `server/crates/mortar-core/src/sources/feedref.rs` with a `parse` whose return type has **two cases**: a finished AT-URI, and a `(profile segment, rkey)` pair still awaiting DID resolution. A bare `Option<String>` cannot express that distinction and would make the caller re-inspect the string the parser just parsed.
-- [ ] Accept `at://<did>/app.bsky.feed.generator/<rkey>` unchanged, and `https://bsky.app/profile/<handle|did>/feed/<rkey>` as the pair.
+- [ ] Accept **three** spellings into those two cases: `at://<did>/app.bsky.feed.generator/<rkey>` as the finished AT-URI; `at://<handle>/app.bsky.feed.generator/<rkey>` as the pair, because a handle-authority AT-URI is a legal spelling people do paste and mason always queries with the DID form; and `https://bsky.app/profile/<handle|did>/feed/<rkey>` as the pair. The change spec says so at its implementation note 2 and pins all three patterns in the `FeedRef` `$def`.
 - [ ] Reject an AT-URI naming any other collection, a `javascript:` string, a scheme-relative `//bsky.app/...`, and any host that merely ends in `bsky.app`.
 - [ ] Declare `pub mod feedref` in `sources/mod.rs` and re-export the type beside `AuthorYield` and `Follow`.
 - [ ] Write the tests as pure function calls: no `AppState`, no wiremock, no async.
 
 ## Definition of done
 
-- [ ] Both accepted spellings parse into the right case, and each of the four rejection classes above has its own named negative-space test.
+- [ ] All three accepted spellings parse into the right case (the DID-authority AT-URI to the finished URI, the handle-authority AT-URI and the `bsky.app` URL to the pair), and each of the four rejection classes above has its own named negative-space test.
 - [ ] A reference carrying `&` or `#` either fails to parse or survives intact for `urlencode` downstream, asserted either way rather than left implicit.
 - [ ] The module is reached through `sources/mod.rs` and nothing outside `sources/` names `sources::feedref`.
 - [ ] Meets the repo definition of done (negative-space tests for every rejection path, named constants for any bound, `just guard-wasm` and `just check` green).
 - [ ] Reviewable: run `cd server && cargo nextest run -p mortar-core feedref` and read the test names; each one is a string somebody could paste.
-
-## Open questions
-
-- The change spec's schema pattern requires `at://did:(plc|web):...`, so `at://<handle>/app.bsky.feed.generator/<rkey>` (a legal AT-URI spelling people do paste) is a `bad_request`. If that is deliberate, say so beside the pattern in task 19's schema fold; if not, widen it here.

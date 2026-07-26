@@ -18,10 +18,10 @@ evidence it names.
   an empty pending list.
 - **P2 · Obligations.** Done iff O1, O2, O2b, O2c and O3 to O7 all hold; O7 is the Reviewable item.
 - **P3 · Invariants.** Must not break tasks 07 and 19's merged prose, the goals they added, or any
-  of the four merged specs already in `.specs/changes/merged/`. **Four** of the refresh spec's
-  blocks land on text that has moved since it was drafted, three of them rewritten by task 19 and one
-  of them counting a table that has since grown a row, and a verbatim paste of any of the four **is**
-  a break of this invariant, not an application of the spec.
+  of the four merged specs already in `.specs/changes/merged/`. **Three** of the refresh spec's
+  blocks land on text task 19 rewrote, and a verbatim paste of any of the three **is** a break of
+  this invariant, not an application of the spec. A fourth, `05`'s cache bullet, pastes cleanly and
+  still has to be read: it describes a table that has grown a row since it was drafted.
 
 ## Obligations
 
@@ -31,10 +31,12 @@ evidence it names.
     state table at `01:161`-`:174`; `FeedRefresh` is in `canonical-types.schema.json` beside
     `FeedMode` and `FeedIntent` with a description pointing at `refresh_from_query`; and the `07`
     state-machine block, the `08` Refreshing paragraph and `02`'s Refresh section describe what
-    tasks 25, 26 and 21 actually did, including what a **reduced-motion** refresh is (a cursorless
-    preview carrying the flag plus a cursorless freeze that does not, held to one flagged request by
-    task 25's in-flight guard, so one refreshed fan-out and no reflow) and where the reader close
-    shipped (at the control in `RefreshWall`, not in `FeedState`).
+    tasks 25, 26 and 21 actually did. The `08` paragraph is the block's own prose (the order,
+    `refresh()` first and the scroll second; the single live region and no new announcement) plus
+    **one sentence the block does not carry**, saying what a **reduced-motion** refresh is: a
+    cursorless preview carrying the flag plus a cursorless freeze that does not, held to one flagged
+    request by task 25's in-flight guard, so one refreshed fan-out and no reflow. The reader close is
+    described where it shipped, at the control in `RefreshWall`, not in `FeedState`.
   - *Evidence to collect:* walk the change spec's `Proposed changes` blocks and locate each. Read
     `01-domain-model.md`'s Snapshot section and confirm the row is not inside the `Inner` table. Read
     the four what-shipped passages and compare each against `feed.svelte.ts`, `RefreshWall.svelte`,
@@ -68,19 +70,18 @@ evidence it names.
     and neither is right about the sum.
   - *Status:* unverified
 
-- **O2b · The fourth collision, the cache count, is merged and the arithmetic checks out.**
+- **O2b · The cache bullet is true of the table it landed on, and still states no count.**
   - *Claim:* `05-caching-and-persistence.md` §The caches says a refresh bypasses `author_feed` and
-    `image_feed` on a graph wall and `feed_pages` on a feed wall, and that the other nine caches are
-    not re-read. The `02` feed-wall clause says the same thing in the same words.
-  - *Evidence to collect:* read the merged sentence. Count the rows of the table above it and the
-    caches it names as bypassed; the stated remainder must equal rows minus bypassed. Read the `02`
-    clause and compare the two wordings.
-  - *Checks:* the refresh spec's block says "exactly two of these ... the other nine are not", which
-    was true of the eleven-row table it was drafted against. Task 12 added `feed_pages` (twelve rows,
-    so nine becomes ten for a graph wall alone) and task 22 made a refresh bypass `feed_pages` on a
-    feed wall, so "exactly two" is wrong as well, and the second half contradicts the feed-wall
-    clause this same task adds two steps later. A verbatim paste ships a canonical page that both
-    miscounts and disagrees with its neighbour, and nothing mechanical catches either.
+    `image_feed` on a graph wall and `feed_pages` on a feed wall, and that every other cache stays
+    warm. The `02` feed-wall clause says the same thing in the same words. Neither states a number.
+  - *Evidence to collect:* read the applied sentence and the `02` clause and compare the two
+    wordings. Confirm `feed_pages` is a row in the table above the sentence, put there by task 12.
+  - *Checks:* the block is countless on purpose, and that is what makes it applicable rather than
+    mergeable: an earlier draft said "exactly two of these ... the other nine are not", which was
+    true only of the eleven-row table it was written against, and task 12's twelfth row falsified
+    both halves. So the failure to look for here is a **reintroduced** number, in either page, and a
+    sentence that names `feed_pages` on a feed wall while the table above it does not carry that row.
+    Nothing mechanical catches either.
   - *Status:* unverified
 
 - **O2c · Both e2e lane descriptions name what the lane became.**
@@ -161,9 +162,9 @@ evidence it names.
 
 ## Residue
 
-- The plan's four open questions (whether `warmFeed` means anything for a feed target, what the
-  reader announces, whether a snapshot-id collision is worth code, whether the glaze page size needs
-  its own bound) are recorded in `plan.md`, not in the canonical pages. If any was answered during
+- The plan's three open questions (whether `warmFeed` means anything for a feed target, whether a
+  snapshot-id collision is worth code, whether the glaze page size needs its own bound) are recorded
+  in `plan.md`, not in the canonical pages. If any was answered during
   the build, this is the last chance to move the answer into the right page's `Assumptions and open
   questions` block. Not an obligation.
 

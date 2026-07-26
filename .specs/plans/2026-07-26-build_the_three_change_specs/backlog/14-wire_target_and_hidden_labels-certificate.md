@@ -9,14 +9,15 @@
 
 ## Definition
 
-DONE(Task 14) is every obligation O1 to O6 below holding, O1b included, each backed by the evidence
-it names.
+DONE(Task 14) is every obligation O1 to O6 below holding, O1b and O3b included, each backed by the
+evidence it names.
 
 ## Premises
 
 - **P1 · Goal.** The target vocabulary and mortar's hidden-label list are pinned on both sides of
   the wire by the same mechanism that already keeps the error codes and video sources in step.
-- **P2 · Obligations.** Done iff O1, O1b and O2 to O6 all hold; O6 is the Reviewable item.
+- **P2 · Obligations.** Done iff O1, O1b, O2, O3, O3b and O4 to O6 all hold; O6 is the Reviewable
+  item.
 - **P3 · Invariants.** Must not drop task 10's `errors.feed_not_found` from the fixture, must not
   break the four existing vocabulary assertions in `contract-check.ts`, and must leave `just lint`
   green, which means exporting no type nothing consumes.
@@ -72,6 +73,26 @@ it names.
     `tests/contract.rs`'s `errors()` instance against `feed.rs`'s `FeedTarget::from_query` error arm
     and `error.rs`'s `variants()`; all three name both parameters, and the one-task window where the
     fixture pinned the older wording is now closed.
+  - *Status:* unverified
+
+- **O3b · The `bad_request` message is honest for both callers, and no variant was added.**
+  - *Claim:* `AppError::BadRequest`'s `#[error(...)]` Display at `error.rs:5` has been reworded so
+    that neither-parameter-present and an unparseable `?feed=` both read truthfully, the payload is
+    still a `&'static str`, and a mortar-core test asserts both messages.
+  - *Evidence to collect:* read the attribute and both messages. Run the mortar-core test that
+    exercises the two `BadRequest` callers (`FeedTarget::from_query`'s Err arm and the `FeedRef`
+    rejection) and read the strings it asserts. Read `error.rs:90` and `:106` and confirm both pinned
+    envelope arrays carry the new wording, and `contract.json`'s `errors.bad_request.message` with
+    them.
+  - *Checks:* resolve the shape of the fix. The old Display, `missing required parameter: {0}`,
+    is a lie for a parameter that was present and malformed, and `&'static str` cannot carry the
+    offending value, so the honest wording has to come from the Display rather than from the payload.
+    Confirm the fix is **not** a second variant: `AppError::variants()` must still hold exactly one
+    `BadRequest`, `ALL_CODES` must be unchanged, and `code_key`'s match must have gained no arm. A
+    new variant would walk task 10's whole forcing chain again and would make this the fourth touch
+    of a fixture the plan regenerates exactly three times. Then confirm the ordering held: task 13
+    changed only the payload literal and left `contract.rs`'s `errors()` alone, so the fixture pinned
+    the older wording for exactly one task and this regeneration closes that window.
   - *Status:* unverified
 
 - **O4 · A one-sided rename fails the gate.**

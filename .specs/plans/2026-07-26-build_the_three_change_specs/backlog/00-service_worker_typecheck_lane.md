@@ -36,11 +36,23 @@ import, **the only one in the repo**), `:19` (`mortar_wasm_bg.wasm?url`), `:260`
       voice: it counts arguments, it cannot read their order.
 - [ ] Change `check` and `check:ci` in `web/package.json` to run both projects:
       `svelte-kit sync && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.worker.json`.
+- [ ] Give the `test` recipe its missing `wasm` dependency in the same PR, because this task is
+      what makes it load-bearing: `web/src/lib/mortar-wasm/pkg/` is gitignored (`.gitignore:3`),
+      `justfile:34`'s `test` runs `cd web && pnpm check:ci`, and `check` at `:152` runs `test`, so
+      the moment the worker project enters that program a tree that has never run `just wasm` fails
+      `just check` on an unresolved module. Without the fix, every agent following `CLAUDE.md`'s
+      "run `just check` before finishing" hits it. `test: wasm` is one line and it is what `dev`,
+      `build`, `test-e2e` and `deploy` already do; `guard-wasm` cannot stand in, because it is a
+      `cargo check` that emits no `pkg/`. Re-measure the gate afterwards and correct the warm timing
+      in the comment above `check` if it moved: an incremental wasm-pack build on an unchanged engine
+      is close to free, and "close to free" is a measurement, not an assumption.
 - [ ] Prove the lane bites, once, by hand: pass a fifth argument to
       `feed_page(actor, cursor, mode, intent)` at `service-worker.ts:260`, run
       `cd web && pnpm check:ci`, confirm it fails on the arity, and revert.
 - [ ] Update `.specs/10-build-release-deploy.md:54`'s `just test` row to say two
-      tsc projects, the app and the service worker, rather than one.
+      tsc projects, the app and the service worker, rather than one, **and** that
+      the recipe builds the wasm first, which is what makes the second project
+      resolvable.
 
 ## Definition of done
 
@@ -49,9 +61,9 @@ import, **the only one in the repo**), `:19` (`mortar_wasm_bg.wasm?url`), `:260`
       Listing the first without the second would mean the call resolved to `any`
       and the project proves nothing.
 - [ ] Both projects are green with **no edit to any source file**. This task is
-      two config files and one spec row; a source fix appearing in the diff means
-      the second project was configured differently from the one the plan
-      verified, and the difference has to be explained.
+      two config files, one justfile line and one spec row; a source fix appearing
+      in the diff means the second project was configured differently from the one
+      the plan verified, and the difference has to be explained.
 - [ ] The by-hand arity break fails `pnpm check:ci` and the failure names
       `feed_page`. Recorded in the PR body, reverted in the diff.
 - [ ] The PR states the limit plainly: this lane catches an **arity or type**
@@ -59,13 +71,17 @@ import, **the only one in the repo**), `:19` (`mortar_wasm_bg.wasm?url`), `:260`
       after task 22 the call is six `Option<String>` slots in a row and swapping
       two of them typechecks. Tasks 13 and 22 each carry the Playwright case that
       covers the order.
-- [ ] The PR also states the one new failure mode: `web/src/lib/mortar-wasm/pkg/`
-      is gitignored and `just check` does not run `just wasm`, so on a tree that
-      has never built the wasm, `pnpm check:ci` now fails to resolve the module
-      where before it silently skipped the file. CI is unaffected (`ci.yml` runs
-      `just wasm` first) and so are `just dev`, `just build`, `just test-e2e` and
-      `just deploy`, which all depend on `wasm`. The remedy is `just wasm`, and
-      the error message says which module is missing.
+- [ ] The gate stays honest on a tree that has never built the wasm, which is the
+      failure mode this task would otherwise introduce: with
+      `web/src/lib/mortar-wasm/pkg/` deleted, `just check` and `just test` are both
+      green, because `test` now depends on `wasm`. Proven by deleting the directory
+      once and running them. A bare `cd web && pnpm check:ci` still fails there, on
+      an unresolved module rather than by silently skipping the file, and that is
+      the correct failure: the PR names it, names `just wasm` as the remedy for
+      anybody running the script directly, and notes that the error message says
+      which module is missing. CI was never exposed (`ci.yml` runs `just wasm`
+      first), and `just dev`, `just build`, `just test-e2e` and `just deploy`
+      already depended on `wasm`.
 - [ ] `cd web && pnpm knip` and `just check` are both still green: knip reads
       `tsconfig.json` and oxfmt formats only `src`, so neither should notice, and
       "should" is not evidence.

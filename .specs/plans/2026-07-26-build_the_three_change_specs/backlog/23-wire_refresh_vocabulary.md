@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [23-wire_refresh_vocabulary-certificate.md](23-wire_refresh_vocabulary-certificate.md)
 
-**Implements:** [`changes/2026-07-26-refresh_the_wall.md`](../../../changes/2026-07-26-refresh_the_wall.md) §Proposed changes → `06-wire-contract.md` → What the fixture covers, and the `FeedRefresh` fragment in §Type changes; implementation note 6. Targets [`06-wire-contract.md`](../../../06-wire-contract.md) §What the fixture covers.
+**Implements:** [`changes/2026-07-26-refresh_the_wall.md`](../../../changes/2026-07-26-refresh_the_wall.md) §Proposed changes → `06-wire-contract.md` → What the fixture covers, and the `FeedRefresh` fragment in §Type changes; implementation note 7. Targets [`06-wire-contract.md`](../../../06-wire-contract.md) §What the fixture covers.
 **Depends on:** 14, 22
 **Produces:** the refresh token joins the query vocabulary, pinned on both sides by the same mechanism as `mode` and `intent`. **This is wire regeneration 3 of 3.**
 **Pointers:** `tests/contract.rs:347` (the `GLAZE`/`PREVIEW`/`FREEZE` const block: each token bound **once** and used for both the parser assert and the fixture key), `:361` (the `query` object, which task 14 has already grown a `target` key on). `web/src/lib/types.ts:130` (`FeedMode`, the doc-comment style to copy). `web/src/lib/contract-check.ts:80` (`ModeVocabularyMatches`, the neighbour). `web/knip.json` already lists `contract-check.ts` as an entry, which is why an export consumed only there is not dead code.
