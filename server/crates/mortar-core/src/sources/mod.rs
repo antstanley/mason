@@ -6,6 +6,7 @@
 //! ingestion backend stays inside this directory.
 
 pub mod bluesky;
+pub mod feedref;
 pub mod fetch;
 pub mod pds;
 pub mod standardsite;
@@ -13,5 +14,6 @@ pub mod streamplace;
 pub mod util;
 
 pub use bluesky::{AuthorYield, Follow};
+pub use feedref::FeedRef;
 pub use standardsite::StdDocs;
 pub use streamplace::LiveStream;
