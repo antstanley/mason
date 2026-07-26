@@ -47,20 +47,14 @@ jobs:
       - name: Build wasm (generates web/src/lib/mortar-wasm/pkg)
         run: just wasm
 
-      - name: Test (nextest + tsc + vitest)
-        run: just test
-
-      - name: Lint (oxlint + knip + clippy)
-        run: just lint
-
-      - name: Format check
-        run: just fmt-check
-
-      - name: Guard autoplay
-        run: just guard-autoplay
-
-      - name: Guard dashes
-        run: just guard-dashes
+      # ONE step, the same recipe a developer runs before pushing. Naming the
+      # gates individually here meant this list and `check` could disagree, and
+      # they did: guard-toolchain joined `check` and never reached CI, so a pull
+      # request whose pinned channel contradicted its declared MSRV went green.
+      # Calling the recipe means a gate added to `check` is enforced here for
+      # free, and the claim that CI runs the same set is true by construction.
+      - name: Gate (guards, fmt-check, lint, test)
+        run: just check
 
   # the browser build's Rust paths (gloo transport, timer seam, wasm throttle)
   # executed for real: wasm-bindgen tests in headless chrome, which the ubuntu
