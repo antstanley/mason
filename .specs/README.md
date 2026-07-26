@@ -44,8 +44,15 @@ spec is folded back in; a change proposed and shipped together goes straight to
 A merged spec moves to [`changes/merged/`](changes/merged/) and is kept as dated
 history, including any claim it turned out to get wrong, annotated in place.
 
-No change spec is pending. Every one proposed so far has been merged into the
-pages above and moved to [`changes/merged/`](changes/merged/).
+Three change specs are pending, all proposed on 2026-07-26 from the same batch of
+feature requests. They are independent and can land in any order, but each names
+what it owes the other two if it merges second.
+
+| Pending change spec | Proposes |
+|---|---|
+| [2026-07-26-read_a_brick_in_place.md](changes/2026-07-26-read_a_brick_in_place.md) | An in-place brick reader, so a card no longer has to be a link out. Client only, no wire change |
+| [2026-07-26-lay_a_bluesky_feed.md](changes/2026-07-26-lay_a_bluesky_feed.md) | Split a wall into a source and a view: `?feed=<at-uri>` lays any Bluesky feed generator in its own order with no snapshot behind it, all three views apply to either source, and a feed picker becomes the second front door |
+| [2026-07-26-refresh_the_wall.md](changes/2026-07-26-refresh_the_wall.md) | A refresh control and a `refresh=1` flag that re-reads the two fast content caches |
 
 | Merged change spec | Merged | Shipped |
 |---|---|---|
