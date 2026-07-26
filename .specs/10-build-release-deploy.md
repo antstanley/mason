@@ -58,7 +58,8 @@ Every command in the repo goes through `just`.
 | `just fmt` / `just fmt-check` | `oxfmt` and `cargo fmt` |
 | `just guard-autoplay` | The video rule, enforced |
 | `just guard-dashes` | No U+2014 em dash in tracked source, docs or config |
-| `just check` | The local gate: `fmt-check`, `lint`, both guards, `test` |
+| `just guard-toolchain` | The pinned channel satisfies the MSRV `server/Cargo.toml` declares |
+| `just check` | The local gate: the three guards, `fmt-check`, `lint`, `test` |
 | `just push [args]` | `just check`, then `jj git push` with those args |
 | `just deploy [env]` | blogwright deploy (rebuilds wasm first) |
 | `just bootstrap [env]` / `just bootstrap-preview <domain>` | One-time infrastructure creation |
@@ -85,8 +86,8 @@ every source test points at a wiremock server rather than the network.
 
 ### Guards
 
-Two rules are enforced by grep rather than by review, because a convention nobody
-can check is a convention that erodes:
+Three rules are enforced mechanically rather than by review, because a convention
+nobody can check is a convention that erodes:
 
 - **`guard-autoplay`** fails on any `autoplay` or `autostartload` in `web/src`,
   and on any `.play(` outside `VideoPlayer.svelte`.
@@ -97,17 +98,22 @@ can check is a convention that erodes:
   An allowlist of scanned paths is the shape this recipe used to have, and it
   fails silently: a new tracked directory is simply never read, and the gate
   keeps exiting 0 over it. `.specs/` went a whole spec set unchecked that way.
+- **`guard-toolchain`** reads the channel from `rust-toolchain.toml` and the MSRV
+  from `server/Cargo.toml` and fails when they disagree. CI parsing the channel
+  removes one half of the toolchain drift; this removes the other, where
+  `rust-version` promises support for a compiler nobody builds with.
 
-Both use a filesystem grep rather than `git grep`, so new unsnapshotted files in
+The first two use a filesystem grep rather than `git grep`, so new unsnapshotted files in
 this jj-managed repo are seen too. `guard-dashes` additionally passes `-I` so a
 binary that happens to hold the byte sequence is not a finding.
 
 ### Local gates
 
-`just check` runs `just guard-dashes`, `just guard-autoplay`, `just fmt-check`,
-`just lint` and `just test`, in that order. It is the same set CI runs, so a red
-pull request from a formatting slip is not a thing that has to happen. The recipe
-is dependencies-only: `just` runs the five before an empty body, so there is
+`just check` runs `just guard-dashes`, `just guard-autoplay`,
+`just guard-toolchain`, `just fmt-check`, `just lint` and `just test`, in that
+order. It is the same set CI runs, so a red pull request from a formatting slip
+is not a thing that has to happen. The recipe
+is dependencies-only: `just` runs the six before an empty body, so there is
 exactly one list of gates and no second copy to drift out of step with it.
 
 The order is cheapest first, and it is measured rather than asserted: the two
@@ -140,13 +146,26 @@ local gate costs a red pull request rather than a bad merge.
 
 Four workflows, all with SHA-pinned actions.
 
+### The toolchain is installed by one composite action
+
+Every job that touches Rust uses `./.github/actions/rust`, which installs the
+toolchain, adds the wasm32 target, installs `wasm-pack`, and restores the cargo
+cache. Jobs pass `components` and `tools` for the extras they need, and nothing
+else.
+
+**It parses the channel out of `rust-toolchain.toml` rather than naming it.**
+The version used to be written into five workflow steps, in one of them directly
+beneath a comment claiming it came from that file. It did not, and the two could
+have disagreed silently for a release. The repo now holds exactly one Rust pin
+and one `wasm-pack` pin, each in one file.
+
 ### `ci.yml`
 
 Runs on every pull request and every push to `main`. No secrets, so it works on
 fork PRs where the preview deploy cannot.
 
 ```
-check job:      Rust 1.97.0 + wasm32 + clippy + rustfmt · just · nextest · wasm-pack · pnpm
+check job:      ./.github/actions/rust (+ clippy, rustfmt, just, nextest) · pnpm
                 ▸ cargo metadata --locked            (Cargo.lock is fresh)
                 ▸ just wasm                          (also the wasm compilability gate)
                 ▸ just test · just lint · just fmt-check · just guard-autoplay
@@ -377,12 +396,22 @@ web/vitest.config.ts        merged with the app's vite config
   public and a domain is deployment detail, not source.
 - *SHA-pinned actions.* **Every `uses:` carries a commit SHA.** A tag is mutable
   and a workflow with write permissions is worth pinning.
+- *One composite action installs the toolchain.* **CI parses the channel out of
+  `rust-toolchain.toml`.** Five copies of a version string is five chances to
+  disagree, and one of the five already carried a comment claiming it was
+  derived when it was typed. Parsing removes the class rather than the instance.
+- *`guard-toolchain` in `check`.* **The channel must satisfy the declared
+  MSRV.** A parse cannot catch the other half of the drift: `rust-version` in
+  `server/Cargo.toml` promising support for a compiler nobody builds with.
 
 **Open questions**
 
-- *Toolchain pin duplication.* `1.97.0` appears in `rust-toolchain.toml`, the
-  workspace `rust-version`, and three workflows. Open: read it from the file in
-  CI, or accept the duplication?
+- *Local `test-wasm` needs a matching Chrome.* The lane runs green in CI and
+  fails on at least one developer machine, where `wasm-bindgen-test-runner`
+  0.2.126 and a ChromeDriver newer than the installed Chrome return a 404 on the
+  session handshake. Nothing in the repo pins any of the three, so there is
+  nothing here to fix; open in the sense that the browser-only Rust paths are
+  CI-only coverage for anyone in that state.
 - *No native mortar deploy path.* Server mode has no packaging, image or deploy
   workflow; it exists as a `cargo run` target. Open until server mode has a
   consumer.

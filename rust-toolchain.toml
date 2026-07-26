@@ -1,5 +1,13 @@
-# pinned so every build (local, CI, deploy) uses the same rustc as the
-# workspace rust-version. bump this and workspace.package.rust-version together.
+# THE single source of truth for the Rust toolchain. rustup reads this for every
+# local build, and .github/actions/rust/action.yml parses it so CI installs the
+# same thing. Nothing else names a channel: the version used to sit in five
+# workflow steps, under a comment claiming it came from this file.
+#
+# The channel must stay compatible with [workspace.package] rust-version in
+# server/Cargo.toml, which declares the MSRV at minor granularity.
+# `just guard-toolchain` fails when the two disagree, so bumping to a new minor
+# here without bumping that is a build error rather than a discovery.
 [toolchain]
-channel = "1.97.0"
+channel = "1.97.1"
 targets = ["wasm32-unknown-unknown"]
+components = ["clippy", "rustfmt"]

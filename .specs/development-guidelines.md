@@ -19,11 +19,11 @@ commands and CI gates named here are defined in
 | Tool | Version / channel | Notes |
 |---|---|---|
 | just | latest | The only command surface; local and CI run identical recipes |
-| Rust | 1.97.0, pinned | `rust-toolchain.toml`, with the `wasm32-unknown-unknown` target |
+| Rust | 1.97.1, pinned | `rust-toolchain.toml`, the repo's ONE Rust pin. CI parses the channel out of it; nothing else names a version |
 | rustfmt | pinned channel | `just fmt` / `just fmt-check`; CI gate |
 | clippy | pinned channel | `cargo clippy --workspace --all-targets -- -D warnings` |
 | cargo-nextest | latest | The native Rust test runner |
-| wasm-pack | 0.15.0 | Builds `mortar-wasm`, and runs the wasm test lane in headless chrome |
+| wasm-pack | 0.15.0 | Builds `mortar-wasm`, and runs the wasm test lane in headless chrome. Pinned once, in `.github/actions/rust` |
 | TypeScript | 7.x, `strict` plus `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes` | `tsc --noEmit`; not `svelte-check` (see conventions) |
 | Node | 22 | Tooling runtime |
 | pnpm | 11.x | Package manager |
