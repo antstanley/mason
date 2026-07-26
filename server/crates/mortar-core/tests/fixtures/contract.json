@@ -183,6 +183,17 @@
         "status": 400
       }
     },
+    "feed_not_found": {
+      "server": {
+        "error": "feed_not_found",
+        "message": "feed not found: at://did:plc:nobody/app.bsky.feed.generator/gone"
+      },
+      "wasm": {
+        "error": "feed_not_found",
+        "message": "feed not found: at://did:plc:nobody/app.bsky.feed.generator/gone",
+        "status": 404
+      }
+    },
     "login_required": {
       "server": {
         "error": "login_required",

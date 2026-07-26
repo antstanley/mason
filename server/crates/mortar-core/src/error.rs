@@ -6,6 +6,12 @@ pub enum AppError {
     BadRequest(&'static str),
     #[error("actor not found: {0}")]
     ActorNotFound(String),
+    /// A feed generator the AppView will not serve: unknown, withdrawn, or a
+    /// reference that parsed but names nothing. Distinct from ActorNotFound
+    /// because the web hands back a handle box for that one, which is the
+    /// wrong repair to offer somebody holding a bad feed link.
+    #[error("feed not found: {0}")]
+    FeedNotFound(String),
     #[error("login required: {0}")]
     LoginRequired(String),
     #[error("upstream error: {0}")]
@@ -38,6 +44,7 @@ impl AppError {
         match self {
             AppError::BadRequest(_) => (400, "bad_request"),
             AppError::ActorNotFound(_) => (404, "actor_not_found"),
+            AppError::FeedNotFound(_) => (404, "feed_not_found"),
             // the owner asked to be seen only by signed-in visitors; mason has
             // no sign-in, so the wall stays sealed
             AppError::LoginRequired(_) => (403, "login_required"),
@@ -73,13 +80,51 @@ mod tests {
 
     use super::*;
 
-    fn variants() -> [AppError; 4] {
+    /// One canonical instance per AppError variant, each paired with the exact
+    /// JSON the two build modes must emit for it: `(variant, server body, wasm
+    /// throw)`.
+    ///
+    /// One table rather than three parallel arrays, because the parallel shape
+    /// did not force. The pinned tests zipped a hand-written `variants()`
+    /// against two hand-written `expected` arrays, and `zip` stops at the
+    /// shorter side: a variant added to `variants()` alone left its wire
+    /// strings unpinned with both tests still green. In a tuple the pairing is
+    /// structural and the array's length forces all three together.
+    fn pinned_wire() -> [(AppError, &'static str, &'static str); 5] {
         [
-            AppError::BadRequest("actor"),
-            AppError::ActorNotFound("nobody.example.com".into()),
-            AppError::LoginRequired("sealed.example.com".into()),
-            AppError::Upstream("appview timed out".into()),
+            (
+                AppError::BadRequest("actor"),
+                r#"{"error":"bad_request","message":"missing required parameter: actor"}"#,
+                r#"{"error":"bad_request","message":"missing required parameter: actor","status":400}"#,
+            ),
+            (
+                AppError::ActorNotFound("nobody.example.com".into()),
+                r#"{"error":"actor_not_found","message":"actor not found: nobody.example.com"}"#,
+                r#"{"error":"actor_not_found","message":"actor not found: nobody.example.com","status":404}"#,
+            ),
+            (
+                AppError::FeedNotFound("at://did:plc:nobody/app.bsky.feed.generator/gone".into()),
+                r#"{"error":"feed_not_found","message":"feed not found: at://did:plc:nobody/app.bsky.feed.generator/gone"}"#,
+                r#"{"error":"feed_not_found","message":"feed not found: at://did:plc:nobody/app.bsky.feed.generator/gone","status":404}"#,
+            ),
+            (
+                AppError::LoginRequired("sealed.example.com".into()),
+                r#"{"error":"login_required","message":"login required: sealed.example.com"}"#,
+                r#"{"error":"login_required","message":"login required: sealed.example.com","status":403}"#,
+            ),
+            (
+                AppError::Upstream("appview timed out".into()),
+                r#"{"error":"upstream","message":"upstream error: appview timed out"}"#,
+                r#"{"error":"upstream","message":"upstream error: appview timed out","status":502}"#,
+            ),
         ]
+    }
+
+    /// The same canonical instances without their pinned strings, for the
+    /// tests that only need one of every variant. Derived from the table so
+    /// there is still exactly one list of variants in this module.
+    fn variants() -> [AppError; 5] {
+        pinned_wire().map(|(error, _, _)| error)
     }
 
     /// The TS parse contract: web/src/service-worker.ts JSON.parses exactly
@@ -88,13 +133,7 @@ mod tests {
     /// it as one.
     #[test]
     fn wasm_envelope_is_pinned_per_variant() {
-        let expected = [
-            r#"{"error":"bad_request","message":"missing required parameter: actor","status":400}"#,
-            r#"{"error":"actor_not_found","message":"actor not found: nobody.example.com","status":404}"#,
-            r#"{"error":"login_required","message":"login required: sealed.example.com","status":403}"#,
-            r#"{"error":"upstream","message":"upstream error: appview timed out","status":502}"#,
-        ];
-        for (error, wire) in variants().iter().zip(expected) {
+        for (error, _, wire) in pinned_wire() {
             let json = serde_json::to_string(&error.envelope_with_status()).expect("serializes");
             assert_eq!(json, wire);
         }
@@ -104,13 +143,7 @@ mod tests {
     /// response line carries it instead.
     #[test]
     fn server_envelope_is_pinned_per_variant() {
-        let expected = [
-            r#"{"error":"bad_request","message":"missing required parameter: actor"}"#,
-            r#"{"error":"actor_not_found","message":"actor not found: nobody.example.com"}"#,
-            r#"{"error":"login_required","message":"login required: sealed.example.com"}"#,
-            r#"{"error":"upstream","message":"upstream error: appview timed out"}"#,
-        ];
-        for (error, wire) in variants().iter().zip(expected) {
+        for (error, wire, _) in pinned_wire() {
             let json = serde_json::to_string(&error.envelope()).expect("serializes");
             assert_eq!(json, wire);
         }

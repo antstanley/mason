@@ -134,7 +134,12 @@ export type FeedMode = "glaze";
  *  by the contract fixture. The web adds its own out-of-band codes ("wasm",
  *  "unknown") for failures that never reached mortar, so ErrorEnvelope.error
  *  stays a plain string. */
-export type MortarErrorCode = "bad_request" | "actor_not_found" | "login_required" | "upstream";
+export type MortarErrorCode =
+  | "bad_request"
+  | "actor_not_found"
+  | "feed_not_found"
+  | "login_required"
+  | "upstream";
 
 /** The one error shape mortar emits in both build modes: the native server
  *  sends it as a JSON body (status on the response line), the wasm build

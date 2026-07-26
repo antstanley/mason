@@ -224,9 +224,10 @@ fn bricks() -> Vec<(Brick, &'static str, Value)> {
 /// Every error code the fixture must cover, in one place. Same construction
 /// as `ALL_KINDS`: `code_key` indexes into it, and `contract()` asserts the
 /// fixture's error map carries exactly these keys.
-const ALL_CODES: [&str; 4] = [
+const ALL_CODES: [&str; 5] = [
     "bad_request",
     "actor_not_found",
+    "feed_not_found",
     "login_required",
     "upstream",
 ];
@@ -237,6 +238,7 @@ fn errors() -> Vec<AppError> {
     vec![
         AppError::BadRequest("actor"),
         AppError::ActorNotFound("nobody.example.com".into()),
+        AppError::FeedNotFound("at://did:plc:nobody/app.bsky.feed.generator/gone".into()),
         AppError::LoginRequired("sealed.example.com".into()),
         AppError::Upstream("appview timed out".into()),
     ]
@@ -252,8 +254,9 @@ fn code_key(error: &AppError) -> &'static str {
     let code = match error {
         AppError::BadRequest(_) => ALL_CODES[0],
         AppError::ActorNotFound(_) => ALL_CODES[1],
-        AppError::LoginRequired(_) => ALL_CODES[2],
-        AppError::Upstream(_) => ALL_CODES[3],
+        AppError::FeedNotFound(_) => ALL_CODES[2],
+        AppError::LoginRequired(_) => ALL_CODES[3],
+        AppError::Upstream(_) => ALL_CODES[4],
     };
     assert_eq!(
         code,
