@@ -170,10 +170,10 @@ Add after the `loadMore()` block in the diagram:
 
 > ```
 >    refresh()   ← the header control
->       ├─ refuses while loading, warming, or actorless
+>       ├─ refuses while loading, warming, or with no target
 >       ├─ drop this (actor, mode) from the session cache: back/forward must not
 >       │  resurrect the wall the reader just replaced
->       ├─ cursor = null, done = false, warming = true, generation++
+>       ├─ cursor = null, done = false, error = null, warming = true, generation++
 >       ├─ items are LEFT ON THE WALL and initialLoad stays false
 >       ├─ arm a one-shot refresh flag
 >       └─ spawn #warm(generation), whose first request carries the flag
@@ -196,8 +196,19 @@ Add after the `loadMore()` block in the diagram:
 >   Clearing on adopt is not sufficient on its own, because it lets both
 >   cursorless requests carry the flag: two fresh seeds, two snapshots, two fills,
 >   and two hundred-author fan-outs from one tap. So `refresh()` also arms a
->   private in-flight marker, and no second cursorless request goes out under the
->   same refresh. This matters more than it looks: under
+>   private in-flight marker, and **no second cursorless request goes out under
+>   the same refresh**: `freeze()` returns early while a flagged cursorless
+>   request is in flight, and `#warm` calls it once the preview has resolved and
+>   its cursor (which carries the seed) has been adopted, so the committed request
+>   lands on the refreshing snapshot.
+>
+>   Deferring the request is the whole mechanism, and merely stripping the second
+>   request's flag would be worse than doing nothing. An unflagged cursorless
+>   request rolls its own fresh seed, builds a second snapshot and fills it from
+>   the untouched five-minute author-feed cache, so it clears the twelve-author
+>   first-paint gate off cache hits while the refreshing fill is still working
+>   through a hundred rate-limited calls. It would win, and it would commit the
+>   pre-refresh wall. This matters more than it looks: under
 >   `prefers-reduced-motion: reduce` the wall freezes the instant `warming` flips
 >   true, with no scroll event at all, so preview-plus-freeze is the DEFAULT path
 >   for those readers rather than a race.
@@ -230,17 +241,23 @@ Add a row to the table, and a paragraph:
 > control, no confirmation, no count.
 >
 > **It does not scroll.** The wall re-lays under the reader, wherever they are.
-> That is not a preference, it is the only version that works: the wall's
-> freeze-on-engage listeners are armed the moment `warming` flips true, and a
-> programmatic scroll is indistinguishable from a reader reaching for the wall.
-> `window.scrollTo` mutates the position synchronously but queues its `scroll`
-> event, and the queued event is delivered *after* the microtask that re-runs the
-> effect and attaches those listeners. So a refresh that also scrolls freezes
-> itself on its own scroll, in either call order, and commits without ever
-> reflowing. Not scrolling removes the coupling rather than timing around it, and
-> it is what the rest of this page already describes: the outgoing wall stays on
-> screen and reflows into the new one, which is a thing the reader has to be
-> looking at to see.
+>
+> This is a product choice and not a mechanical necessity, and it is worth being
+> precise about which, because the mechanics nearly went the other way. A
+> programmatic scroll is indistinguishable from a reader reaching for the wall:
+> `window.scrollTo` moves the position synchronously but queues its `scroll`
+> event, and that event is delivered *after* the microtask that re-runs the
+> freeze effect and arms its listeners. Before the in-flight marker existed, a
+> refresh that scrolled therefore froze itself on its own scroll in either call
+> order, and committed the pre-refresh wall. The marker removes that: a freeze
+> during a refresh is deferred until the flagged preview lands, whoever triggered
+> it, so a scroll is now safe.
+>
+> What is left is the reason the control still does not scroll: the outgoing wall
+> stays on screen and reflows into the new one, and that is a thing the reader has
+> to be looking at to see. Jumping them to the top is not wrong, it just throws
+> the reflow away. The alternative is cheap now, and it is an open question below
+> rather than a closed door.
 >
 > It is disabled while the feed is loading or warming, and that is the whole rate
 > limit: one refresh can be in flight, so a double tap cannot start two
@@ -412,9 +429,10 @@ the reader would otherwise survive with a brick that is no longer on the wall,
 and stepping from it would find nothing.
 
 Both of the above also touch `.specs/05-caching-and-persistence.md`'s cache
-table, which counts its own rows in prose. It carries eleven caches today; the
-feed spec adds `feed_pages` as a twelfth. Whichever merges second owns making the
-count in the bypass sentence agree with the table above it.
+table. It carries eleven caches today and the feed spec adds `feed_pages` as a
+twelfth, so the bypass sentence in this spec's `05` block deliberately states no
+remainder count: it survives the table growing under it. Whichever merges second
+owns checking that it still reads true, not arithmetic.
 
 ---
 
@@ -490,15 +508,14 @@ count in the bypass sentence agree with the table above it.
   currently has nothing there. It competes with the browser's own overscroll
   refresh and needs a gesture threshold, a rubber band and a reduced-motion path.
   Open.
-- *Whether a refresh should return the reader to the top.* It does not, and the
-  reason is mechanical rather than chosen: a programmatic scroll is
-  indistinguishable from reader engagement to the wall's freeze listeners, and it
-  arrives after they are armed, so any refresh that scrolls commits without
-  reflowing. Making the two distinguishable means new state in `FeedGrid` (a
-  one-shot "ignore the next engage" that `freeze` honours, plus re-arming the
-  listeners it consumed), and no lane in this repo can verify it. Open: is
-  returning to the top worth that machinery, or is re-laying under the reader
-  actually the better behaviour?
+- *Whether a refresh should return the reader to the top.* It does not, and this
+  is now a live choice rather than the constraint it started as. The in-flight
+  marker defers any freeze during a refresh, including one a programmatic scroll
+  would trigger, so scrolling is no longer self-defeating: the cost is only that
+  a reader taken to the top does not watch the reflow they asked for. Open: is
+  landing at the top of a fresh wall worth more than seeing it arrive? A reader
+  deep in a long wall probably thinks so, and a reader who tapped refresh to see
+  what is new probably does not.
 - *Whether the reader's position means anything after a refresh.* The wall is a
   new arrangement from a new seed, so the brick they were looking at may not be
   on it. A refresh that appended instead would preserve the position, and would

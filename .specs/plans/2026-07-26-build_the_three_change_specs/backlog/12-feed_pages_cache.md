@@ -11,14 +11,15 @@
 
 - [ ] Define a small value type in `sources/` carrying `Arc<AuthorYield>` plus the next upstream cursor, and re-export it from `sources/mod.rs` so `cache.rs` never names `sources::bluesky`.
 - [ ] Add `Caches.feed_pages` with a named 60 second TTL constant and a named 500 capacity constant, created in `Caches::new`.
-- [ ] Add `feed_page_cached(state, uri, cursor)` to `sources/fetch.rs`, keyed on `format!("{uri}\u{1f}{}", cursor.unwrap_or_default())`.
+- [ ] Add `feed_page_cached(state, uri, cursor, limit)` to `sources/fetch.rs`, keyed on `format!("{uri}\u{1f}{limit}\u{1f}{}", cursor.unwrap_or_default())`. **The limit is part of the key**: `Mode::Wall` asks `getFeed` for `PAGE_SIZE` and `Mode::Glaze` asks for 100, so a key of `(uri, cursor)` alone serves a glaze request the 24-item page a mixed request cached a moment earlier, and the image wall silently runs a quarter as deep.
 - [ ] Map a 400 or 404 from `getFeed` to `AppError::FeedNotFound` and every other failure to `AppError::Upstream`.
 - [ ] Leave `feed_pages` out of `persist::CACHE_NAMES` and add a test naming the reason.
 
 ## Definition of done
 
 - [ ] `CACHE_NAMES` is still `[&str; 9]`, and a test asserts `feed_pages` is absent from it with a comment saying why: a persisted ranking would be laid hours later as though it were fresh.
-- [ ] A second call for the same `(uri, cursor)` issues no second upstream request, asserted with a wiremock `expect(1)`.
+- [ ] A second call for the same `(uri, cursor, limit)` issues no second upstream request, asserted with a wiremock `expect(1)`.
+- [ ] Two calls for the same `(uri, cursor)` at **different** limits do not collide: the second issues its own upstream request and gets its own page, asserted with a wiremock expectation of two. Without this the glaze wall is served the mixed wall's 24 items and nothing anywhere says so.
 - [ ] A 400 and a 404 each become `FeedNotFound` and a 500 becomes `Upstream`, each its own negative-space test.
 - [ ] Both new bounds are named constants with their units in the name, per the repo's limits discipline.
 - [ ] Meets the repo definition of done (`just guard-wasm` green, `just check` green, new wiremock tests in a module gated `#[cfg(all(test, not(target_arch = "wasm32")))]`).

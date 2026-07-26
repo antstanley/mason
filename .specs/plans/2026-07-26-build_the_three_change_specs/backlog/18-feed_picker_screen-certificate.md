@@ -9,17 +9,18 @@
 
 ## Definition
 
-DONE(Task 18) is every obligation O1 to O6 below holding, O4b included, each backed by the
+DONE(Task 18) is every obligation O1 to O6 below holding, O1b and O4b included, each backed by the
 evidence it names.
 
 ## Premises
 
 - **P1 · Goal.** The second front door: a screen that stands beside the handle box as a peer,
   reachable from the landing page and from a laid wall.
-- **P2 · Obligations.** Done iff O1 to O4, O4b, O5 and O6 all hold; O6 is the Reviewable item.
+- **P2 · Obligations.** Done iff O1, O1b, O2 to O4, O4b, O5 and O6 all hold; O6 is the Reviewable
+  item.
 - **P3 · Invariants.** Must not break the handle box (`HandleForm`), `SwitchWall`'s existing
-  switch-walls affordance, or task 03's reader, which shares `App.PageState` and the dialog
-  language.
+  switch-walls affordance, or task 03's reader, which shares `App.PageState`, the dialog language
+  **and the wrapper's `inert` condition** this task widens.
 
 ## Obligations
 
@@ -34,6 +35,21 @@ evidence it names.
     `FeedRef` shape mortar enforces, reached by navigating to `/?feed=<value>`, or a client-side
     pre-check that agrees with it. A client check that is stricter than mortar's would reject values
     mason can lay.
+  - *Status:* unverified
+
+- **O1b · The picker mounts outside the subtree it makes inert, and widens the reader's condition.**
+  - *Claim:* `FeedPicker` mounts after the `+layout.svelte` wrapper's closing tag at `:134`, beside
+    `BrickReader`, and that wrapper's `inert` is a single widened expression,
+    `page.state.brick || page.state.picker`, rather than a second attribute or a replacement of task
+    03's condition.
+  - *Evidence to collect:* read `+layout.svelte` around `:110` and `:134`. Run
+    `grep -n inert web/src/routes/+layout.svelte` and expect one hit naming both keys. Run
+    `just test-e2e` and confirm task 06's reader case is still green.
+  - *Checks:* both halves fail silently. `inert` is inherited, so a picker mounted inside the wrapper
+    is inert itself: unfocusable, unclickable, and invisible to every lane except a human at the
+    browser. And a condition **replaced** rather than widened leaves the reader open with a live wall
+    behind it, which task 06 only catches if it asserts the wall's inertness rather than the dialog's
+    presence. Neither tsc nor vitest reads this file at all.
   - *Status:* unverified
 
 - **O2 · Touch targets and motion follow the house rules.**

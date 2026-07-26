@@ -31,12 +31,13 @@ evidence it names.
     state table at `01:161`-`:174`; `FeedRefresh` is in `canonical-types.schema.json` beside
     `FeedMode` and `FeedIntent` with a description pointing at `refresh_from_query`; and the `07`
     state-machine block, the `08` Refreshing paragraph and `02`'s Refresh section describe what
-    tasks 25, 26 and 21 actually did. The `08` paragraph is the block's own prose (the order,
-    `refresh()` first and the scroll second; the single live region and no new announcement) plus
-    **one sentence the block does not carry**, saying what a **reduced-motion** refresh is: a
-    cursorless preview carrying the flag plus a cursorless freeze that does not, held to one flagged
-    request by task 25's in-flight guard, so one refreshed fan-out and no reflow. The reader close is
-    described where it shipped, at the control in `RefreshWall`, not in `FeedState`.
+    tasks 25, 26 and 21 actually did. The `08` paragraph is the block's own prose (the control does
+    not scroll at all, and why; the single live region and no new announcement) plus **one sentence
+    the block does not carry**, saying what a **reduced-motion** refresh is: a cursorless preview
+    carrying the flag plus a freeze deferred by task 25's in-flight marker until that preview's
+    cursor is adopted, so one cursorless request, one refreshed fan-out and one reflow when the
+    preview lands. The reader close is described where it shipped, at the control in `RefreshWall`,
+    not in `FeedState`.
   - *Evidence to collect:* walk the change spec's `Proposed changes` blocks and locate each. Read
     `01-domain-model.md`'s Snapshot section and confirm the row is not inside the `Inner` table. Read
     the four what-shipped passages and compare each against `feed.svelte.ts`, `RefreshWall.svelte`,

@@ -79,7 +79,7 @@ Replace the **No blog content rendering** bullet with:
 
 Add two rows to the table:
 
-> | `state/reader.svelte.ts` | `reader` | The brick being read in place, and its index on the wall | none (history state) |
+> | `state/reader.svelte.ts` | `reader` | The brick being read in place; its position on the wall is derived by id | none (history state) |
 > | `state/sensitive.svelte.ts` | `revealed` | Brick ids whose `!warn` media the reader uncovered | none (session set) |
 
 ### `.specs/07-web-client.md` → Reactive state → The reader is history, not a URL (Add)
@@ -89,8 +89,8 @@ Add two rows to the table:
 > the back button (and the phone's back gesture) closes the reader instead of
 > leaving the wall. `page.state.brick` is the single source of truth for whether
 > the reader is open, declared as `App.PageState` in `app.d.ts`; `reader` holds
-> the brick and its index so the reader can step along the wall without
-> re-deriving either.
+> the brick itself and derives its position on the wall from it when it needs to
+> step.
 >
 > A URL parameter was the alternative and it cannot be honest here. A
 > `?brick=<at-uri>` link would be shareable and would not work: the recipient's
@@ -155,6 +155,9 @@ Replace the **Outbound links** bullet with:
 >   unmodified left click is intercepted (`preventDefault`) and opens the brick
 >   reader. Keeping the anchor rather than swapping it for a button is what
 >   preserves the browser's own affordances.
+>
+>   `GlazeCard`'s existing rule that a tap opens the post while a drag scrolls
+>   the strip still holds; the tap now opens the reader instead.
 >
 >   **Which anchor stands for the brick differs by card, and there are three of
 >   them.** Only post and blog cards hand `BrickShell` an `href`, so only they
@@ -330,7 +333,11 @@ No wire change: nothing to regenerate in the contract fixture, and nothing in
        PostCard.svelte:17 and BlogCard.svelte:13 pass an href, so this covers
        post and blog only.
      web/src/lib/components/cards/VideoCard.svelte:147   the watch-at-source
-       anchor. VideoCard.svelte:51 passes BrickShell NO href.
+       anchor. VideoCard.svelte:51 passes BrickShell NO href, so this is the
+       card's ONLY anchor and it therefore stops being a plain-click route to
+       the source: a plain click opens the reader, which carries the watch link
+       itself. Every modified click still goes straight out, and the play button
+       is untouched, so the poster still plays in place.
      web/src/lib/components/cards/GlazeCard.svelte:147 and :195   the image
        anchors, one per branch. GlazeCard.svelte:132 passes NO href either.
      The filmstrip arrows, the ALT panel and the touch pill are SIBLINGS of

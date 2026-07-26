@@ -35,7 +35,10 @@ DONE(Task 07) is every obligation O1 to O6 below holding, each backed by the evi
     video card and an image anchor on a glaze card; that the reader mounts as the wrapper's sibling,
     outside the inert subtree; and that the reader claims the video player under `reader:<brick.id>`
     so the card yields. The Dialog behaviour and Accessibility blocks' statements about the pump and
-    the freeze listeners are present and true.
+    about the arrow keys are present and true, the second of them stated as **disjoint key sets**
+    (`FeedGrid.svelte:174`'s vertical `NAV_KEYS` against the reader's `ArrowLeft` / `ArrowRight`)
+    rather than as listeners the reader's freeze has torn down, which the freeze does not do: it is
+    async and leaves `warming` set until its fetch resolves.
   - *Evidence to collect:* read `08-wall-and-bricks.md`'s new brick-reader section and
     `07-web-client.md`'s reactive-state prose. For each of the four, confirm the canonical text
     matches the code: `reader.svelte.ts`'s `findIndex`, the five intercepted anchors,

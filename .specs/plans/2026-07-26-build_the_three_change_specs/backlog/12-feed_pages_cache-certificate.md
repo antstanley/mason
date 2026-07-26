@@ -31,12 +31,19 @@ DONE(Task 12) is every obligation O1 to O6 below holding, each backed by the evi
     copy of the list, or it would pass while the real list drifted.
   - *Status:* unverified
 
-- **O2 · A repeat read issues no second upstream request.**
-  - *Claim:* a second call for the same `(uri, cursor)` within the TTL issues no second `getFeed`.
+- **O2 · A repeat read issues no second upstream request, and two limits never collide.**
+  - *Claim:* a second call for the same `(uri, cursor, limit)` within the TTL issues no second
+    `getFeed`; and two calls for the same `(uri, cursor)` at **different** limits each issue their
+    own, because the limit is part of the key.
   - *Evidence to collect:* find the wiremock test using `expect(1)` on the `getFeed` mock and run it.
-  - *Checks:* trace the cache key: `format!("{uri}\u{1f}{}", cursor.unwrap_or_default())`. Confirm
-    the separator is the unit separator U+001F, not a character that could appear in a uri or a
-    cursor; a colon or a slash would let two distinct pairs collide.
+    Then find and run the differing-limits test, which expects two upstream requests.
+  - *Checks:* trace the cache key:
+    `format!("{uri}\u{1f}{limit}\u{1f}{}", cursor.unwrap_or_default())`. Confirm the separator is the
+    unit separator U+001F, not a character that could appear in a uri or a cursor; a colon or a slash
+    would let two distinct pairs collide. Then confirm the limit is genuinely in the key and not just
+    in the request: `Mode::Wall` asks `getFeed` for `PAGE_SIZE` and `Mode::Glaze` asks for 100, so a
+    `(uri, cursor)` key serves a glaze request the 24-item page a mixed request cached a moment
+    earlier and the image wall runs a quarter as deep, silently, with `expect(1)` still green.
   - *Status:* unverified
 
 - **O3 · Upstream failures map to the right two errors.**

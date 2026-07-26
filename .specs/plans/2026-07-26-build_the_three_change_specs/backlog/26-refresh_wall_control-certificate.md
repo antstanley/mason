@@ -35,10 +35,11 @@ DONE(Task 26) is every obligation O1 to O7 below holding, each backed by the evi
   - *Status:* unverified
 
 - **O2 · The handler does not scroll, and both the reason and the reduced-motion path are commented.**
-  - *Claim:* the click handler calls `feed.refresh()` first and scrolls second, and only when the
-    wall is not already at the top; the resolution is written in the file as a comment covering the
-    event path **and** the reduced-motion path; and the event path is proven by the Playwright case
-    rather than left to the next implementer.
+  - *Claim:* the click handler contains **no scroll call of any kind**; the resolution is written in
+    the file as a comment covering the symmetric event-delivery coupling **and** the reduced-motion
+    path; and the absence is verified by **reading**, because no Playwright case on the demo wall can
+    discriminate between the orderings (`feed.rs:60` answers a demo preview with `warming: false`, so
+    `#warm` freezes on its first poll in every one of them).
   - *Evidence to collect:* read the handler and confirm it contains no scroll call of any kind, and
     that the comment explains why. Do NOT attempt a Playwright case that distinguishes reflow from
     immediate freeze: `feed.rs:60` answers a demo preview with `warming: false`, so `#warm` freezes
@@ -54,12 +55,14 @@ DONE(Task 26) is every obligation O1 to O7 below holding, each backed by the evi
     is a different path entirely: under `prefers-reduced-motion: reduce` the same effect calls
     `freezeOnEngage()` at `:185` immediately and returns, with no listener and no scroll event, so
     **no** scroll-side resolution can reach it. Confirm the comment states what a reduced-motion
-    refresh actually is, read out of task 25's code rather than assumed: **two** cursorless requests
-    go out (the preview `refresh()` issues synchronously, and the freeze the effect triggers), task
-    25's in-flight marker lets only the first carry `refresh=1`, the preview's page is discarded when
-    the freeze bumps the generation, and the wall moves exactly once. One refreshed fan-out, no
-    reflow. A comment that describes only the listener chain is incomplete, and one that says "a
-    single cursorless freeze" is wrong; task 27 copies whichever into `08`.
+    refresh actually is, read out of task 25's code rather than assumed: that freeze is **deferred**
+    by task 25's in-flight marker while the flagged cursorless preview is in flight, so exactly
+    **one** cursorless request goes out; when the preview lands, `#warm` has adopted its cursor
+    (which carries the refreshing snapshot's seed) and freezes from there, so the committed request
+    is on the refreshed wall. One refreshed fan-out, and one reflow when the preview lands. A comment
+    that describes only the listener chain is incomplete, and one that says "two cursorless requests,
+    one of them flagged" describes the mechanism this plan replaced, in which the unflagged request
+    commits the pre-refresh wall from warm caches; task 27 copies whichever into `08`.
   - *Status:* unverified
 
 - **O3 · The Playwright spec asserts all four behaviours at 375px, with a named mechanism for the disabled window.**

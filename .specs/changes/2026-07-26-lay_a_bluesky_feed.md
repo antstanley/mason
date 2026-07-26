@@ -104,12 +104,13 @@ Replace the `Brick kinds`, `Walls` and `Pagination` rows with four:
 > parameter besides `actor` and `cursor` that reaches an upstream query, so it is
 > parsed rather than forwarded.
 >
-> Two spellings are accepted, because one of them is what people have in their
-> clipboard:
+> Three spellings are accepted, because two of them are what people have in
+> their clipboard:
 >
 > | Given | Handled |
 > |---|---|
 > | `at://<did>/app.bsky.feed.generator/<rkey>` | Used as is |
+> | `at://<handle>/app.bsky.feed.generator/<rkey>` | A legal AT-URI spelling; the authority is resolved to a DID and the AT-URI is rebuilt from it |
 > | `https://bsky.app/profile/<handle\|did>/feed/<rkey>` | The profile segment is resolved to a DID (the `did` cache, then `getProfile`) and the AT-URI is built from it |
 >
 > Anything else, including an AT-URI naming a different collection, is a
@@ -287,7 +288,7 @@ Append to the "does not own" paragraph:
 
 ### `.specs/05-caching-and-persistence.md` → The caches (Add)
 
-> | `feed_pages` | `<feed uri>\u{1f}<upstream cursor>` | `Arc<AuthorYield>` plus the next cursor | 60 s | 500 | **no** |
+> | `feed_pages` | `<feed uri>\u{1f}<limit>\u{1f}<upstream cursor>` | `Arc<AuthorYield>` plus the next cursor | 60 s | 500 | **no** |
 
 And append to the TTL discussion:
 
@@ -511,7 +512,12 @@ That block enumerates every component by name, so the two new ones join it after
 > The picker is a dialog in the same language as mason's other overlays:
 > `role="dialog"`, `aria-modal="true"`, focus into the input on open, Escape and
 > back to close, `inert` behind it, and the results as a list so a screen reader is
-> told how many there are. Touch targets stay at 44px and the cards' hover lift is
+> told how many there are. It mounts as a sibling of the layout's content wrapper,
+> beside the brick reader and outside the subtree it dims, and it shares that
+> wrapper's `inert` condition rather than adding a second one: the wrapper is
+> inert while **either** overlay is open. Opening one closes the other, because
+> the picker is a landing surface and the reader is a wall surface, and neither
+> has anything to say over the top of the other. Touch targets stay at 44px and the cards' hover lift is
 > `motion-safe:`, like a brick's.
 
 ---
@@ -648,8 +654,11 @@ than inside it. Nothing in `algo/` changes except the cursor.
 
 4. server/crates/mortar-core/src/sources/fetch.rs
      feed_page_cached(state, uri, cursor) -> Result<(Arc<AuthorYield>,
-     Option<String>), AppError>. Key: format!("{uri}\u{1f}{}", cursor.
-     unwrap_or_default()). 400/404 -> AppError::FeedNotFound; anything else ->
+     Option<String>), AppError>. Key: format!("{uri}\u{1f}{limit}\u{1f}{}",
+     cursor.unwrap_or_default()). THE LIMIT IS PART OF THE KEY: the mixed views
+     ask for PAGE_SIZE and glaze asks for 100, so a key of (uri, cursor) alone
+     serves a glaze request the 24-item page a mixed request cached a moment
+     earlier, and the image wall silently runs a quarter as deep. 400/404 -> AppError::FeedNotFound; anything else ->
      AppError::Upstream. Note the cached value has to carry the next cursor, so
      the cache value is a small struct, not a bare AuthorYield.
 
@@ -684,9 +693,11 @@ than inside it. Nothing in `algo/` changes except the cursor.
      full, including its {"seed":42} case, which still decodes to None because
      both variants require all of their fields.
 
-     THREE call sites break, not two. The demo wall is a consumer ahead of both
-     real paths: feed.rs:57 reads `decoded.map(|c| c.offset)` and feed.rs:64
-     constructs `Cursor { seed: 0, offset }`. Add a test that a feed cursor
+     SIX construction and read sites, not two, and the demo wall is a consumer
+     ahead of both real paths: feed.rs:57 reads `decoded.map(|c| c.offset)`,
+     :64 and :202 construct the demo cursors, and :77, :90 and :103 are the
+     real ones. rustc catches an omission, so the value of the list is the
+     reader's map rather than the build. Add a test that a feed cursor
      handed to the demo wall lays from offset 0 rather than panicking.
 
 7. server/crates/mortar-core/src/error.rs:6
@@ -762,8 +773,8 @@ than inside it. Nothing in `algo/` changes except the cursor.
     contract-check compares the fixture keys to THAT in both directions, the way
     ModeVocabularyMatches does at contract-check.ts:80.
 
-11. Web, the wall. FIVE call sites of the changed APIs, and tsc can see exactly
-    one of them; the other four are .svelte:
+11. Web, the wall. FIVE call sites of the changed APIs, and tsc can see NONE of
+    them: every one is a .svelte file, including routes/+page.svelte:
       lib/api.ts:36            fetchFeed(target: FeedTarget, cursor?, mode?,
                                intent?); warmFeed likewise. api.test.ts follows.
       lib/state/feed.svelte.ts:59    reset(target, mode); #key(target, mode)

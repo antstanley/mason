@@ -173,7 +173,7 @@ If the two ever disagree, the table wins.
 | 22 · refresh entry point and both fronts | 12, 21 | build, contract | `?refresh=1` re-reads on a graph wall, bypasses `feed_pages` on a feed wall, and is ignored mid-scroll |
 | 23 · wire refresh vocabulary | 14, 22 | contract | `query.refresh` and `FeedRefresh` pinned (**wire regeneration 3 of 3**) |
 | 24 · api sends refresh | 15, 23 | build, contract | the client never sends a flag mortar would ignore |
-| 25 · FeedState.refresh | 24 | build, data | a new wall in place, with the outgoing one left up and no skeletons, in a module vitest still runs in node |
+| 25 · FeedState.refresh | 24 | build, data | a new wall in place, with the outgoing one left up and no twelve-card initial grid, in a module vitest still runs in node |
 | 26 · RefreshWall control | 01, 03, 15, 25 | build, review | one header button that closes any open reader and lays the wall again, disabled while one is in flight |
 | 27 · merge the refresh spec | 19, 26 | review | all three specs merged, the goals renumbered once, the pending list empty |
 
@@ -183,14 +183,21 @@ and is found by globbing `*/NN-*.md`. `Depends on` always references lower
 numbers.
 
 Two edge kinds in this table need a note. Several `build` edges are **textual
-collision edges**: 03 to 15 and 03 to 26 exist because all three tasks edit
-`web/src/routes/+layout.svelte`, and 13 to 21 exists because both edit
+collision edges**: 03 to 15, 03 to 18 and 03 to 26 exist because all four tasks
+edit `web/src/routes/+layout.svelte`, and 13 to 21 exists because both edit
 `server/crates/mortar-core/src/feed.rs` around lines 86 and 95. The edge fixes
 which shape lands first so the second task writes against the final markup rather
-than rebasing onto it. The `review` edges from 03 to 18 and 07 to 19 are the
-reviewability rule: the picker is reviewed as a second instance of the reader's
-dialog language, and the feed spec's goal numbering is only checkable once the
-reader spec has claimed goal 8.
+than rebasing onto it. 03 to 18 is the sharpest of them and is not only a
+mounting collision: task 03 introduces the wrapper's `inert` condition and task
+18 **widens** it, because `FeedPicker` mounts beside `BrickReader` after the
+wrapper's closing tag at `+layout.svelte:134` and the wrapper is what goes inert
+behind either overlay, so the condition becomes
+`page.state.brick || page.state.picker`. Written the other way round it is task
+18 replacing task 03's condition rather than extending it, and the reader stops
+making the wall inert. The `review` edges from 03 to 18 and 07 to 19 are the
+reviewability rule on top of that: the picker is reviewed as a second instance of
+the reader's dialog language, and the feed spec's goal numbering is only
+checkable once the reader spec has claimed goal 8.
 
 ---
 
@@ -227,7 +234,8 @@ dependency-only sort, each deliberate:
 **Parallelism.** The stated order is one valid serialization. Four stretches are
 genuinely independent and can run concurrently by separate hands: task 00 (two
 config files, no source change at all, and it must simply be in before 13), tasks
-01 to 06 (client only, no Rust), tasks 08 to 12 (Rust only, no client), and task
+01 to 06 (client, plus one fixture field in `fixtures.rs` at task 02), tasks 08 to
+12 (Rust only, no client), and task
 20 (one Rust file, every caller passing a literal `false`, so it changes no
 behaviour and can land at any point before 21).
 
@@ -238,7 +246,7 @@ behaviour and can land at any point before 21).
 | M1 - read a brick in place | 01-07 | On `/?actor=demo`, a plain left click on a post, blog, video or glaze brick opens a dialog holding that brick's whole content; Escape and the back gesture close it; focus returns to the anchor; cmd-click still opens the source in a new tab | `just check` plus `just test-e2e`, with `web/tests/reader.test.ts` green. The reader spec is merged and `.specs/README.md` lists two pending, not three |
 | M2 - a feed becomes a source | 00, 08-14 | `just dev-server`, then `curl 'localhost:8787/api/feed?feed=at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot'` returns a page in the feed's own order; a malformed `feed` is a 400 that never lays somebody's graph | `cargo nextest run` green, `just guard-wasm` green, `just wasm && pnpm check:ci` green (which after task 00 genuinely includes `service-worker.ts`, typechecked against the regenerated `mortar_wasm.d.ts`), the positional-order Playwright case green, and the `contract.json` diff reviewed line by line |
 | M3 - a feed becomes a wall | 15-19 | `/?feed=<uri>` lays a wall with the layout picker, the client picker and the generator's face in `SwitchWall`; the picker opens from the landing page and from a laid wall, and back closes it | `just test-e2e` with `web/tests/feed-picker.test.ts` green, and the honest statement in the PR that the five `.svelte` call sites have no typecheck coverage |
-| M4 - refresh the wall | 20-27 | One header control lays a new wall in place with no reload: the outgoing bricks stay on screen, no skeletons, the control disables while one is in flight, and mortar re-read the two fast caches | `just check`, `just test-e2e` with `web/tests/refresh.test.ts` green, and all three change specs in `.specs/changes/merged/` with an empty pending list |
+| M4 - refresh the wall | 20-27 | One header control lays a new wall in place with no reload: the outgoing bricks stay on screen, no twelve-card initial grid (the four-card warming tail at `FeedGrid.svelte:355`-`:363` does appear, and is expected), the control disables while one is in flight, and mortar re-read the two fast caches | `just check`, `just test-e2e` with `web/tests/refresh.test.ts` green, and all three change specs in `.specs/changes/merged/` with an empty pending list |
 
 ---
 
@@ -308,7 +316,7 @@ nothing else. Named honestly, task by task:
 | 15 · client target plumbing | five `.svelte` call sites of the three changed signatures: `+page.svelte:22`, `FeedGrid.svelte:55`, `FeedGrid.svelte:263`, `LandingWall.svelte:16`, `HandleForm.svelte:21`, **plus the page's only `h1` at `+page.svelte:31`**, which reads `@{actor}'s wall on mason` and renders as `@'s wall on mason` the moment `{#if actor}` at `:26` widens to `actor \|\| feed` | task 15's own Playwright cases (`/?actor=demo` still lays, `/?feed=nonsense` renders header plus error panel, and the feed wall's `h1` text is read rather than assumed) |
 | 16 · feed identity and the fourth error | `SwitchWall.svelte` and `FeedGrid.svelte`'s new panel | **nothing.** No offline e2e case can reach a live `getFeedGenerator` or a `getFeed` 404. The `.ts` half (`appview.ts`, `feedinfo.svelte.ts`, `#fail`) is vitest-covered and the PR says the rest is not |
 | 18 · feed picker screen | `FeedPicker.svelte` and `FeedCard.svelte` entirely | task 18's own Playwright spec, with the AppView list stubbed or the browse-unavailable state used so the case needs no network |
-| 26 · RefreshWall control | the disabled attribute that **is** the rate limit, the scroll-versus-freeze ordering (both the event path and the reduced-motion path at `FeedGrid.svelte:184`, which fires with no scroll event at all), the 375px header fit, and the `reader.close()` that precedes `feed.refresh()` | task 26's own Playwright spec at a 375px viewport. The disabled window on the demo wall is short (a demo preview answers `warming: false` at `feed.rs:60`), so the mechanism is a single `page.evaluate` that clicks and reads `disabled` in one evaluated function. `context.route` is **not** an option: `service-worker.ts:290` answers `/api/feed` from wasm over compiled-in fixtures, so on the demo wall there is no network request to delay |
+| 26 · RefreshWall control | the disabled attribute that **is** the rate limit, the 375px header fit, the `reader.close()` that precedes `feed.refresh()`, and **the absence of any scroll call together with the reason for it**, including the reduced-motion path at `FeedGrid.svelte:184`, which freezes with no scroll event at all | task 26's own Playwright spec at a 375px viewport for the first three. The disabled window on the demo wall is short (a demo preview answers `warming: false` at `feed.rs:60`), so the mechanism is a single `page.evaluate` that clicks and reads `disabled` in one evaluated function. `context.route` is **not** an option: `service-worker.ts:290` answers `/api/feed` from wasm over compiled-in fixtures, so on the demo wall there is no network request to delay. **The absent scroll is covered by reading, not by a lane:** no Playwright case on the demo wall can discriminate the orderings, because `feed.rs:60` answers a demo preview with `warming: false`, so `#warm` freezes on its first poll in every one of them. The obligation is the handler and its comment, read |
 
 Two further blind spots that are not about `.svelte`:
 
@@ -446,18 +454,28 @@ Two further blind spots that are not about `.svelte`:
   get the same const-bound assert `GLAZE`, `PREVIEW` and `FREEZE` already have at
   `tests/contract.rs:347`.
 - *A refresh spends one fan-out, and a marker is what holds it to one.* **The
-  flag alone is not the rate limit.** `refresh()` issues `#warm`'s first preview
-  synchronously with a null cursor, and `freeze()` proceeds while `warming` is
-  true and `loading` is false with a null cursor of its own, so one tap puts two
-  cursorless requests on the wire. Under reduced motion that is not a race but
-  the default path: `FeedGrid.svelte:184` calls `freezeOnEngage()` the instant
-  `warming` flips true, with no scroll event at all. Task 25 therefore carries a
-  private in-flight marker as well as the armed flag: at most one request per
-  refresh may carry `refresh=1`, and the superseded one's fan-out has already
-  re-read the caches the survivor then reads. Task 26 states that in the file and
-  task 27 copies what it says into `08`, so the count is written down once and
-  asserted once, in a vitest case that counts flagged calls across the whole mock
-  list.
+  marker defers the second cursorless request; it does not send it unflagged.**
+  `refresh()` issues `#warm`'s first preview synchronously with a null cursor,
+  and `freeze()` proceeds while `warming` is true and `loading` is false with a
+  null cursor of its own, so one tap would otherwise put two cursorless requests
+  on the wire. Under reduced motion that is not a race but the default path:
+  `FeedGrid.svelte:184` calls `freezeOnEngage()` the instant `warming` flips
+  true, with no scroll event at all. Letting the second request go out with the
+  flag merely stripped is not a fix, it is the defect: a cursorless request rolls
+  its own `fresh_seed` (`feed.rs:78`, `snapshot.rs:334`), inserts a second
+  snapshot and spawns a second, unflagged fill, and that fill is served by the
+  still-valid five-minute `author_feed` entries (`fetch.rs:143` returns before
+  any network), so it clears `FIRST_PAINT_AUTHORS` at once while the flagged fill
+  is still working through up to a hundred rate-limited AppView calls. The
+  unflagged request is therefore the one that commits, and what it commits is the
+  pre-refresh wall. So task 25's marker holds the second cursorless request back
+  instead: `freeze()` returns early, without side effects, while a flagged
+  cursorless request is in flight, and once that preview resolves `#warm` has
+  adopted its cursor (which carries the seed, `feed.rs:90`) and freezes from
+  there, so the request that commits lands on the refreshing snapshot. Task 26
+  states that in the file and task 27 copies what it says into `08`, so the rule
+  is written down once and asserted once, in a vitest case that reads the
+  **committed** request rather than counting flags.
 - *The reader derives its position by id, it does not store an index.* **It
   deletes seven files from the diff and cannot point at the wrong brick.** A
   replaced or reordered `feed.items` yields -1 rather than a stale index, which is

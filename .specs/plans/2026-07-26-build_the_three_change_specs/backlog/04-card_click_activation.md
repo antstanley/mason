@@ -13,7 +13,7 @@
 - [ ] Pass `brick` from `PostCard.svelte:17` and `BlogCard.svelte:13`.
 - [ ] Add the same single `reader.activate(event, brick)` call to the watch-at-source anchor in `VideoCard.svelte:147`.
 - [ ] Add it to both image anchors in `GlazeCard.svelte` (`:147` and `:195`).
-- [ ] Verify by reading that no anchor lost its `href`, `target="_blank"` or `rel="noopener noreferrer"`, that the three `clientUrl` call sites (`PostCard.svelte:17`, `GlazeCard.svelte:148` and `:196`, `VideoCard.svelte:148`) still wrap their urls, and that no card gained a wrapping button. `BlogCard.svelte:13` passes the raw `brick.url` and always has: `clientUrl` rewrites `bsky.app` hostnames only, so a blog anchor has no rewrite to lose.
+- [ ] Verify by reading that no anchor lost its `href`, `target="_blank"` or `rel="noopener noreferrer"`, that the four `clientUrl` call sites, one per card type except the blog (`PostCard.svelte:17`, `GlazeCard.svelte:148` and `:196`, `VideoCard.svelte:148`), still wrap their urls, and that no card gained a wrapping button. `BlogCard.svelte:13` passes the raw `brick.url` and always has: `clientUrl` rewrites `bsky.app` hostnames only, so a blog anchor has no rewrite to lose.
 - [ ] Verify by reading that `Sensitive`'s show-anyway button still calls `event.stopPropagation()` (task 02 added it). It is a descendant of the intercepted anchor on `PostCard` and on `GlazeCard`'s single/grid branch, so without the stop this task turns a reveal into a reader open. Nothing in `just check` can see it: tsc drops both files.
 
 ## Definition of done
