@@ -51,10 +51,10 @@ Every command in the repo goes through `just`.
 | `just dev` | Local mode: build wasm, run vite on :5173 |
 | `just dev-server` | Server mode: native mortar on :8787 and the SPA against it |
 | `just build` | Static site into `web/build/` (rebuilds wasm first) |
-| `just test` | `cargo nextest run`, `pnpm check:ci` (tsc), `pnpm test` (vitest) |
+| `just test` | Build the wasm first, then `cargo nextest run`, `pnpm check:ci` (tsc over **two** projects, the app and the service worker), `pnpm test` (vitest) |
 | `just test-e2e` | Build, then the Playwright service-worker smoke in chromium |
 | `just test-wasm` | The wasm-only Rust paths in a headless browser |
-| `just lint` | `oxlint`, `knip`, `cargo clippy --workspace --all-targets -D warnings` |
+| `just lint` | Build the wasm first, then `oxlint`, `knip`, `cargo clippy --workspace --all-targets -D warnings` |
 | `just fmt` / `just fmt-check` | `oxfmt` and `cargo fmt` |
 | `just guard-autoplay` | The video rule, enforced |
 | `just guard-dashes` | No U+2014 em dash in tracked source, docs or config |
@@ -68,6 +68,16 @@ Every command in the repo goes through `just`.
 
 `just dev-server` polls both child PIDs rather than using `wait -n`, which needs
 bash 4+; macOS ships bash 3.2.
+
+**`lint` and `test` both depend on `wasm`, and both have to declare it.** The
+generated pkg is gitignored, so a fresh clone has none, and both recipes read it:
+knip resolves the service worker's two imports of it, and `pnpm check:ci` now
+typechecks that worker in a second tsc project. `just` runs a recipe's own
+dependencies immediately before that recipe rather than hoisting a shared one to
+the front of `check`, so declaring it on `test` alone would still leave `lint`
+meeting a missing pkg. Declared on both, it runs exactly once per invocation,
+between `guard-wasm` and `lint`, and costs the gate about two seconds warm.
+`guard-wasm` cannot serve instead: it is a `cargo check` and produces no pkg.
 
 ### Test lanes
 
@@ -373,6 +383,8 @@ scripts/release.mjs         tag, push, gh release from the changelog section
 config/{production,preview}.jsonc   blogwright
 .github/workflows/          ci · preview · release · deploy
 web/vite.config.ts          adapter-static, SW register: false, the mode define
+web/tsconfig.worker.json    the second tsc project: the service worker, which
+                            the generated config excludes from the first
 web/playwright.config.ts    the service-worker smoke
 web/vitest.config.ts        merged with the app's vite config
 ```
@@ -396,7 +408,10 @@ web/vitest.config.ts        merged with the app's vite config
 - *`just` as the only command surface.* **Local and CI run identical recipes.**
   Two sets of commands drift, and the one that drifts is always the local one.
 - *Build the wasm before the web checks.* **`tsc` and `knip` need the pkg.** It
-  also makes wasm compilability a CI gate for free.
+  also makes wasm compilability a CI gate for free. CI has always done this as an
+  explicit step; `lint` and `test` now declare it as a dependency, so the local
+  gate holds on a fresh clone rather than only on a machine that happens to have
+  built once.
 - *Assert `Cargo.lock` is fresh in every building workflow.* **Fail fast.** A
   build that silently repairs the lock ships an unpinned dependency graph.
 - *Guards are greps in CI.* **Autoplay and em dashes.** Both are rules a reviewer
