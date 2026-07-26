@@ -93,9 +93,13 @@ mod tests {
     fn pinned_wire() -> [(AppError, &'static str, &'static str); 5] {
         [
             (
-                AppError::BadRequest("actor"),
-                r#"{"error":"bad_request","message":"missing required parameter: actor"}"#,
-                r#"{"error":"bad_request","message":"missing required parameter: actor","status":400}"#,
+                // the canonical instance is the one `FeedTarget::from_query`
+                // raises when a request names no wall at all. It names both
+                // parameters because either one would have answered, and it is
+                // the string web/src/service-worker.ts carries a hand copy of.
+                AppError::BadRequest("actor or feed"),
+                r#"{"error":"bad_request","message":"missing required parameter: actor or feed"}"#,
+                r#"{"error":"bad_request","message":"missing required parameter: actor or feed","status":400}"#,
             ),
             (
                 AppError::ActorNotFound("nobody.example.com".into()),

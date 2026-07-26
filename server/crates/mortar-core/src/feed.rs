@@ -10,10 +10,85 @@ use crate::fixtures;
 use crate::http::HttpError;
 use crate::mode::Mode;
 use crate::model::{Brick, FeedResponse};
+use crate::sources::feedref::{self, FeedRef};
 use crate::sources::fetch;
 use crate::state::AppState;
 
 pub const PAGE_SIZE: usize = 24;
+
+/// What the image wall asks a feed generator for in one call: `getFeed`'s own
+/// ceiling, four times what the mixed views ask for.
+///
+/// Most posts in a general feed carry no image, so a `PAGE_SIZE` request
+/// filtered down to its image posts would lay three or four bricks and spend a
+/// dozen network calls filling one screen. There is no pool behind a feed wall
+/// to accumulate them in, so depth has to come from the request itself.
+const GLAZE_FEED_LIMIT: u32 = 100;
+
+/// What the mixed views ask a feed generator for: exactly a page. Derived from
+/// `PAGE_SIZE` rather than written out again, so the two cannot drift; the cast
+/// is only that a page is a count of bricks and an AppView `limit` is a `u32`.
+/// Coming back a few short is normal and fine, because reposts and moderated
+/// posts are dropped after the request and the client's pump already retries.
+const PAGE_SIZE_LIMIT: u32 = PAGE_SIZE as u32;
+
+/// The `bad_request` payload for a request that names no wall at all. It names
+/// both parameters because either one alone would have answered the question,
+/// and supplying one of them is the reader's repair.
+const NO_TARGET: &str = "actor or feed";
+
+/// The `bad_request` payload for a `?feed=` that will not parse. It names the
+/// parameter rather than quoting what arrived: the value is attacker-writable
+/// and this message is displayed.
+const UNPARSEABLE_FEED: &str = "feed";
+
+/// Which wall a request names: somebody's follow graph, or a feed generator.
+///
+/// Borrowed rather than owned because both fronts already hold the strings the
+/// query string was parsed into, and `handle_feed` never outlives them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FeedTarget<'a> {
+    /// A handle, a DID, or the literal `demo`: whose graph to lay.
+    Actor(&'a str),
+    /// A feed generator reference, in any of the spellings
+    /// [`crate::sources::feedref`] accepts.
+    Feed(&'a str),
+}
+
+impl<'a> FeedTarget<'a> {
+    /// Read the pair of query parameters that name a wall.
+    ///
+    /// Both halves of the rule live here rather than in each front, and that is
+    /// not tidiness: `tests/contract.rs` is a mortar-core integration test and
+    /// can reach neither front, and mortar-server has no test module at all, so
+    /// a rule spelled out in the axum route is a rule nothing can test. Spelled
+    /// once here, it is a unit test and a fixture assert away.
+    ///
+    /// The lifetime is explicit rather than `'_`: two input references cannot
+    /// elide into one output lifetime.
+    pub fn from_query(actor: Option<&'a str>, feed: Option<&'a str>) -> Result<Self, AppError> {
+        // `feed` wins when both are present, because the two name different
+        // walls and one of them has to. It wins rather than erroring so a
+        // client that keeps an actor in the URL can still open a feed.
+        if let Some(feed) = feed {
+            return Ok(Self::Feed(feed));
+        }
+        if let Some(actor) = actor {
+            return Ok(Self::Actor(actor));
+        }
+        Err(AppError::BadRequest(NO_TARGET))
+    }
+
+    /// The wire token for this arm: `"actor"` or `"feed"`, spelled exactly as
+    /// the query parameters are. This is the query vocabulary the contract
+    /// fixture pins, so a rename here is a wire change.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Actor(_) => "actor",
+            Self::Feed(_) => "feed",
+        }
+    }
+}
 
 /// What a feed request is for.
 ///
@@ -43,11 +118,22 @@ impl FeedIntent {
 
 pub async fn handle_feed(
     state: &Arc<AppState>,
-    actor: &str,
+    target: FeedTarget<'_>,
     cursor: Option<&str>,
     mode: Mode,
     intent: FeedIntent,
 ) -> Result<FeedResponse, AppError> {
+    // A feed generator is an algorithm somebody else published, so its wall is
+    // laid in FRONT of the snapshot machinery rather than inside it: none of
+    // what follows (the owner gate, the pool, the cohort, the waves, grout and
+    // the mixer) has anything to do for a feed.
+    let actor = match target {
+        FeedTarget::Feed(reference) => {
+            return feed_wall(state, reference, cursor, mode, intent).await;
+        }
+        FeedTarget::Actor(actor) => actor,
+    };
+
     let decoded = cursor.and_then(cursor::decode);
 
     // offline demo wall, kept from M0. Its bricks are fixtures compiled into the
@@ -123,52 +209,139 @@ pub async fn handle_feed(
     })
 }
 
-/// Resolve `actor` to a DID and, in the same breath, honour the owner's
-/// logged-out opt-out. Returns the DID, or `LoginRequired` for a sealed wall.
+/// One page of a feed generator, laid in the generator's own order.
 ///
-/// One `getProfile` does what used to take a `resolveHandle` then a separate
-/// `getProfile`: its response carries both the DID and the opt-out label, so a
-/// cold handle load pays one AppView round trip on this path instead of two.
-///
-/// The fail direction depends on what is already known. When the DID is not yet
-/// in hand (a cold handle), this call is load-bearing for resolution, so a
-/// network error fails the wall closed (`Upstream`) exactly as handle
-/// resolution always did. When the DID is already known (a `did:` actor or a
-/// cached handle) and only the opt-out is outstanding, the preference is
-/// best-effort: a flaky getProfile is treated as "not opted out" so it can
-/// never seal a wall by accident.
-async fn resolve_and_gate(state: &Arc<AppState>, actor: &str) -> Result<String, AppError> {
-    let known_did = if actor.starts_with("did:") {
-        Some(actor.to_string())
-    } else {
-        state.caches.did.get(&actor.to_string()).await
+/// The whole of a feed wall: parse the reference, read one page, filter it for
+/// the view, answer. There is no snapshot to build, no pool to admit into, no
+/// cohort to sample and no mixer to run, because the feed already published an
+/// order and mason's job here is to lay it rather than to re-rank it.
+async fn feed_wall(
+    state: &Arc<AppState>,
+    reference: &str,
+    cursor: Option<&str>,
+    mode: Mode,
+    intent: FeedIntent,
+) -> Result<FeedResponse, AppError> {
+    let uri = feed_uri(state, reference).await?;
+
+    // a graph cursor names a position in a snapshot a feed wall has none of, so
+    // it is treated exactly as garbage is: the feed from its head, never an
+    // error.
+    let upstream = match cursor.and_then(cursor::decode) {
+        Some(Cursor::Feed { feed }) => Some(feed),
+        Some(Cursor::Wall { .. }) | None => None,
     };
 
-    // DID already in hand: the only open question is the opt-out, and it fails
-    // open. A cached negative answer needs no network at all.
-    if let Some(did) = known_did {
-        if let Some(opted_out) = state.caches.profiles.get(&did).await {
-            return gate(actor, did, opted_out);
-        }
-        return match fetch::get_profile(state, &did).await {
-            Ok(profile) => {
-                state
-                    .caches
-                    .profiles
-                    .insert(did.clone(), profile.opted_out)
-                    .await;
-                gate(actor, did, profile.opted_out)
-            }
-            Err(e) => {
-                // best-effort: never let a flaky getProfile seal a known wall
-                tracing::debug!("profile opt-out check for {did} failed: {e}");
-                Ok(did)
-            }
-        };
+    // The depth follows the view, because glaze's filter is aggressive. Both
+    // limits are part of the `feed_pages` cache key, so the two views of one
+    // feed never serve each other's page.
+    let limit = match mode {
+        Mode::Wall => PAGE_SIZE_LIMIT,
+        Mode::Glaze => GLAZE_FEED_LIMIT,
+    };
+    let page = fetch::feed_page_cached(state, &uri, upstream.as_deref(), limit).await?;
+
+    let items: Vec<Brick> = match mode {
+        // upstream was asked for exactly a page and the mapper only ever drops
+        // (reposts, hidden authors), so this truncation is the guard against a
+        // generator that ignores `limit`, not the normal path.
+        Mode::Wall => page.yield_.bricks.iter().take(PAGE_SIZE).cloned().collect(),
+        // EVERY survivor, not the first PAGE_SIZE of them. That is a
+        // correctness requirement rather than an optimisation: there is no pool
+        // to hold a remainder in, and the cursor mason hands back belongs to the
+        // call that fetched these bricks, so a truncated page throws the rest
+        // away instead of deferring it.
+        Mode::Glaze => page
+            .yield_
+            .bricks
+            .iter()
+            .filter(|brick| brick.is_image_post())
+            .cloned()
+            .collect(),
+    };
+
+    if intent == FeedIntent::Preview {
+        // One AppView call answers a page, so there is nothing to warm: the
+        // preview reports itself settled and the client freezes on its first
+        // poll. The cursor it hands back points at the CURRENT screen, so the
+        // freeze commits this very page, and the sixty second `feed_pages`
+        // entry makes that freeze a cache hit rather than a second round trip.
+        //
+        // It is re-encoded from the position actually read rather than echoed
+        // from the request, so a graph cursor handed to a feed wall is dropped
+        // here instead of being returned to the client as though it meant
+        // something. For a feed cursor the two are byte identical.
+        return Ok(FeedResponse {
+            items,
+            cursor: upstream.map(|feed| cursor::encode(&Cursor::Feed { feed })),
+            warming: Some(false),
+        });
     }
 
-    // Cold handle: one getProfile resolves the DID and reads the opt-out. This
-    // call is load-bearing, so its failure fails the wall closed.
+    Ok(FeedResponse {
+        items,
+        // `getFeed` returning no cursor is a feed wall's whole end condition:
+        // no pool to drain and no graph to spend.
+        cursor: page.next.map(|feed| cursor::encode(&Cursor::Feed { feed })),
+        warming: None,
+    })
+}
+
+/// Turn the `?feed=` parameter into the DID-authority AT-URI `getFeed` is asked
+/// for.
+async fn feed_uri(state: &Arc<AppState>, reference: &str) -> Result<String, AppError> {
+    // A parse, not a fallback. `mode` and `intent` fall back because they are
+    // optional decorations on a wall that exists either way; a malformed `feed`
+    // names no wall at all, and quietly laying the reader's graph instead would
+    // be a different product than the one they asked for.
+    let parsed = feedref::parse(reference).ok_or(AppError::BadRequest(UNPARSEABLE_FEED))?;
+    match parsed {
+        FeedRef::Uri(uri) => Ok(uri),
+        FeedRef::NeedsDid { profile, rkey } => {
+            // A handle authority (an `at://` spelling or a bsky.app link) owes
+            // one resolution hop, through the same `did` cache a wall uses and
+            // WITHOUT the wall-owner gate: see `resolve_did`.
+            let did = resolve_did(state, &profile).await.map_err(|e| match e {
+                // the profile in a feed link is part of the reference, not a
+                // wall the reader asked for, so an unknown one is a feed that
+                // is not there. `actor_not_found` would hand somebody with a
+                // bad feed link a handle box, which repairs nothing.
+                AppError::ActorNotFound(_) => AppError::FeedNotFound(reference.to_string()),
+                other => other,
+            })?;
+            Ok(feedref::uri_for(&did, &rkey))
+        }
+    }
+}
+
+/// Resolve an actor to a DID, with no gate on it.
+///
+/// The resolution half of `resolve_and_gate`, split out because a feed wall has
+/// a profile segment to resolve and no owner to gate. `!no-unauthenticated` is
+/// a request about a person's own social graph being put on display; a feed
+/// generator is a published service, and its creator has not asked anybody not
+/// to read it. The posts a feed yields are still filtered per author and per
+/// post by the shared mapper, which is the complete coverage there, because a
+/// feed cannot yield a blog or a stream for the cohort filter to catch.
+///
+/// One `getProfile` does what used to take a `resolveHandle` then a separate
+/// `getProfile`: the response carries both the DID and the opt-out label, so a
+/// cold handle pays one AppView round trip here and leaves the preference
+/// cached for the gate above to read.
+///
+/// This call is load-bearing for resolution, so its failure fails closed
+/// (`ActorNotFound` on a 400 or 404, `Upstream` otherwise) exactly as handle
+/// resolution always did.
+async fn resolve_did(state: &Arc<AppState>, actor: &str) -> Result<String, AppError> {
+    // a `did:` actor is already resolved, and a handle read before is cached;
+    // neither costs a round trip
+    if actor.starts_with("did:") {
+        return Ok(actor.to_string());
+    }
+    if let Some(did) = state.caches.did.get(&actor.to_string()).await {
+        return Ok(did);
+    }
+
     match fetch::get_profile(state, actor).await {
         Ok(profile) => {
             state
@@ -181,10 +354,49 @@ async fn resolve_and_gate(state: &Arc<AppState>, actor: &str) -> Result<String, 
                 .profiles
                 .insert(profile.did.clone(), profile.opted_out)
                 .await;
-            gate(actor, profile.did, profile.opted_out)
+            Ok(profile.did)
         }
         Err(HttpError::Status(400 | 404)) => Err(AppError::ActorNotFound(actor.to_string())),
         Err(e) => Err(AppError::Upstream(e.to_string())),
+    }
+}
+
+/// Resolve `actor` to a DID and, in the same breath, honour the owner's
+/// logged-out opt-out. Returns the DID, or `LoginRequired` for a sealed wall.
+///
+/// A wall is somebody's social graph on display; if they asked to be seen only
+/// by signed-in visitors, a logged-out mason must not lay it. Their own posts
+/// never reach the fill, so this is the one place that preference is checked.
+///
+/// The fail direction depends on what is already known. Resolution fails closed
+/// (see `resolve_did`), because an unresolvable handle has no wall either way.
+/// The opt-out fails OPEN: a flaky getProfile is treated as "not opted out", so
+/// it can never seal a wall by accident.
+async fn resolve_and_gate(state: &Arc<AppState>, actor: &str) -> Result<String, AppError> {
+    let did = resolve_did(state, actor).await?;
+
+    // A cold handle's opt-out arrived with its resolution, so this is a cache
+    // read rather than a second round trip; so is a wall laid twice in an hour.
+    if let Some(opted_out) = state.caches.profiles.get(&did).await {
+        return gate(actor, did, opted_out);
+    }
+
+    // Nothing cached: a `did:` actor resolves without reading a profile at all,
+    // so the opt-out is still outstanding and worth one call of its own.
+    match fetch::get_profile(state, &did).await {
+        Ok(profile) => {
+            state
+                .caches
+                .profiles
+                .insert(did.clone(), profile.opted_out)
+                .await;
+            gate(actor, did, profile.opted_out)
+        }
+        Err(e) => {
+            // best-effort: never let a flaky getProfile seal a known wall
+            tracing::debug!("profile opt-out check for {did} failed: {e}");
+            Ok(did)
+        }
     }
 }
 
@@ -221,6 +433,64 @@ fn demo_page(offset: usize, mode: Mode) -> FeedResponse {
     }
 }
 
+/// The selection rule, tested where it lives.
+///
+/// A plain `#[cfg(test)]` module rather than the target-gated one below: this
+/// is pure string work with no wiremock and no tokio runtime behind it, so it
+/// compiles and runs on wasm32 too, exactly like `sources::feedref`'s.
+#[cfg(test)]
+mod target_tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    /// The two parameters name different walls, so when both arrive one of them
+    /// has to win. `feed` does, which is what lets a client keep an actor in the
+    /// URL and still open a feed over it.
+    #[test]
+    fn feed_wins_when_both_parameters_are_present() {
+        let target = FeedTarget::from_query(Some("alice.bsky.social"), Some("at://did:plc:aa/x"))
+            .expect("two parameters still name one wall");
+        assert_eq!(target, FeedTarget::Feed("at://did:plc:aa/x"));
+    }
+
+    /// Either one alone names a wall, and nothing is inferred from the other's
+    /// absence.
+    #[test]
+    fn one_parameter_alone_names_its_own_wall() {
+        let actor = FeedTarget::from_query(Some("alice.bsky.social"), None)
+            .expect("an actor alone names a wall");
+        assert_eq!(actor, FeedTarget::Actor("alice.bsky.social"));
+
+        let feed =
+            FeedTarget::from_query(None, Some("at://did:plc:aa/x")).expect("so does a feed alone");
+        assert_eq!(feed, FeedTarget::Feed("at://did:plc:aa/x"));
+    }
+
+    /// The negative space of the pair: a request naming no wall is a 400, and
+    /// the message names both parameters, because either one would have
+    /// answered and the reader cannot tell from "actor" alone that a feed would
+    /// have done.
+    #[test]
+    fn neither_parameter_present_is_a_bad_request_naming_both() {
+        let error = FeedTarget::from_query(None, None)
+            .expect_err("a request naming no wall cannot lay one");
+        assert_eq!(error.status_and_code(), (400, "bad_request"));
+        let message = error.to_string();
+        assert!(
+            message.contains("actor") && message.contains("feed"),
+            "the message must name both parameters, got {message:?}"
+        );
+    }
+
+    /// The wire tokens the contract fixture pins, and the vocabulary the query
+    /// string is spelled in. A rename here is a wire change.
+    #[test]
+    fn kind_is_the_query_parameter_it_came_from() {
+        assert_eq!(FeedTarget::Actor("alice.bsky.social").kind(), "actor");
+        assert_eq!(FeedTarget::Feed("at://did:plc:aa/x").kind(), "feed");
+    }
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -241,12 +511,18 @@ mod tests {
             feed: "3lqk2hj4xyz2t".to_string(),
         });
 
-        let fresh = handle_feed(&state, "demo", None, Mode::Wall, FeedIntent::Normal)
-            .await
-            .expect("the demo wall always lays");
+        let fresh = handle_feed(
+            &state,
+            FeedTarget::Actor("demo"),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect("the demo wall always lays");
         let with_feed_cursor = handle_feed(
             &state,
-            "demo",
+            FeedTarget::Actor("demo"),
             Some(&feed_cursor),
             Mode::Wall,
             FeedIntent::Normal,
@@ -260,7 +536,7 @@ mod tests {
 
         let preview = handle_feed(
             &state,
-            "demo",
+            FeedTarget::Actor("demo"),
             Some(&feed_cursor),
             Mode::Wall,
             FeedIntent::Preview,
@@ -325,7 +601,7 @@ mod tests {
         });
         let page = handle_feed(
             &state,
-            "did:plc:viewer",
+            FeedTarget::Actor("did:plc:viewer"),
             Some(&feed_cursor),
             Mode::Wall,
             FeedIntent::Normal,
@@ -366,7 +642,7 @@ mod tests {
 
         let err = handle_feed(
             &state,
-            "did:plc:owner",
+            FeedTarget::Actor("did:plc:owner"),
             None,
             Mode::Wall,
             FeedIntent::Normal,
@@ -450,7 +726,7 @@ mod tests {
         for _ in 0..30 {
             let page = handle_feed(
                 &state,
-                "did:plc:viewer",
+                FeedTarget::Actor("did:plc:viewer"),
                 cursor.as_deref(),
                 Mode::Wall,
                 FeedIntent::Normal,
@@ -537,7 +813,7 @@ mod tests {
 
         let first = handle_feed(
             &state,
-            "did:plc:viewer",
+            FeedTarget::Actor("did:plc:viewer"),
             None,
             Mode::Wall,
             FeedIntent::Normal,
@@ -559,7 +835,7 @@ mod tests {
             .expect("one recovered author is not a spent graph yet");
         let last = handle_feed(
             &state,
-            "did:plc:viewer",
+            FeedTarget::Actor("did:plc:viewer"),
             Some(&cursor),
             Mode::Wall,
             FeedIntent::Normal,
@@ -636,7 +912,7 @@ mod tests {
 
         let page = handle_feed(
             &state,
-            "did:plc:viewer",
+            FeedTarget::Actor("did:plc:viewer"),
             None,
             Mode::Glaze,
             FeedIntent::Normal,
@@ -651,6 +927,519 @@ mod tests {
         assert_eq!(
             page.items[0].id(),
             "at://did:plc:friend/app.bsky.feed.post/img"
+        );
+    }
+}
+
+// The feed wall, driven against a wiremock AppView. A SECOND gated module
+// rather than cases in the one above, because everything here reads `getFeed`
+// and nothing here builds a snapshot: keeping the two apart is what makes the
+// mount list of each test readable as the claim it is making.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod feed_wall_tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::state::AppState;
+    use serde_json::{Value, json};
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// A feed generator's AT-URI in the DID form, which owes no resolution hop.
+    /// Most of these tests use it precisely so that mounting `getProfile` would
+    /// be mounting something a feed wall must never need.
+    const FEED: &str = "at://did:plc:gen/app.bsky.feed.generator/whats-hot";
+
+    /// A fixed timestamp. Nothing on a feed wall is scored, so no assertion here
+    /// depends on how old a post is, and a fixed one keeps the fixtures byte
+    /// identical run to run.
+    const CREATED: &str = "2026-07-10T12:00:00Z";
+
+    fn state_for(server: &MockServer) -> Arc<AppState> {
+        // every base points at the mock, so a read this wall should never make
+        // fails against a mount that is not there rather than leaving the test
+        // machine's network to decide
+        Arc::new(AppState::new(Config {
+            appview_base: server.uri(),
+            plc_base: server.uri(),
+            streamplace_base: server.uri(),
+        }))
+    }
+
+    fn post_uri(rkey: &str) -> String {
+        format!("at://did:plc:author/app.bsky.feed.post/{rkey}")
+    }
+
+    /// One post as `getFeed` hydrates it: `created` and `likes` vary so a test
+    /// can hand the wall an order grout would invert.
+    fn post(rkey: &str, created: &str, likes: u64) -> Value {
+        json!({"post": {
+            "uri": post_uri(rkey),
+            "author": {"did": "did:plc:author", "handle": "author.test"},
+            "record": {"text": "hello wall", "createdAt": created},
+            "likeCount": likes,
+            "repostCount": 0
+        }})
+    }
+
+    /// The same post carrying one image, which is what a glaze wall keeps.
+    fn image_post(rkey: &str) -> Value {
+        let mut item = post(rkey, CREATED, 0);
+        item["post"]["embed"] = json!({
+            "$type": "app.bsky.embed.images#view",
+            "images": [{"thumb": "https://cdn.test/a.jpg", "alt": "",
+                "aspectRatio": {"width": 4, "height": 3}}]
+        });
+        item
+    }
+
+    /// A feed item the mapper must drop, in each of the two ways it can:
+    /// somebody else's post the feed surfaced by reposting it, and a post whose
+    /// author opted out of being read logged out.
+    fn repost(rkey: &str) -> Value {
+        let mut item = post(rkey, CREATED, 999);
+        item["reason"] = json!({"$type": "app.bsky.feed.defs#reasonRepost"});
+        item
+    }
+
+    fn post_by_an_opted_out_author(rkey: &str) -> Value {
+        let mut item = post(rkey, CREATED, 999);
+        item["post"]["author"]["labels"] = json!([{"val": "!no-unauthenticated"}]);
+        item
+    }
+
+    /// Mount one `getFeed` answer. `limit` and `at` are matched rather than
+    /// ignored, so a wall that asked for the wrong depth or paged from the wrong
+    /// place finds no mock at all and fails loudly instead of quietly reading
+    /// this page.
+    async fn feed_answers(
+        server: &MockServer,
+        limit: u32,
+        at: Option<&str>,
+        items: Vec<Value>,
+        next: Option<&str>,
+    ) {
+        let mut body = json!({ "feed": items });
+        if let Some(next) = next {
+            body["cursor"] = json!(next);
+        }
+        let mut mock = Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .and(query_param("limit", limit.to_string()));
+        if let Some(at) = at {
+            mock = mock.and(query_param("cursor", at));
+        }
+        mock.respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(server)
+            .await;
+    }
+
+    fn laid(page: &FeedResponse) -> Vec<&str> {
+        page.items.iter().map(Brick::id).collect()
+    }
+
+    async fn upstream_paths(server: &MockServer) -> Vec<String> {
+        server
+            .received_requests()
+            .await
+            .expect("the mock server records what it was asked")
+            .iter()
+            .map(|request| request.url.path().to_string())
+            .collect()
+    }
+
+    /// The whole claim of a feed wall: the generator published an order and
+    /// mason lays it in that order. The three surviving posts arrive
+    /// oldest-first and least-liked-first, which is precisely the order grout
+    /// would invert, so laying them as they came proves no scoring happened.
+    ///
+    /// The same page also proves the moderation a feed wall inherits for free by
+    /// sharing the author feeds' mapper: a repost is dropped (it is not the
+    /// reposter's brick) and so is a post whose author opted out of being read
+    /// logged out.
+    #[tokio::test]
+    async fn a_feed_wall_lays_the_generators_own_order() {
+        let server = MockServer::start().await;
+        feed_answers(
+            &server,
+            PAGE_SIZE_LIMIT,
+            None,
+            vec![
+                post("first", "2026-07-01T00:00:00Z", 0),
+                repost("reposted"),
+                post_by_an_opted_out_author("sealed"),
+                post("second", "2026-07-05T00:00:00Z", 10),
+                post("third", "2026-07-20T00:00:00Z", 900),
+            ],
+            Some("page2"),
+        )
+        .await;
+        let state = state_for(&server);
+
+        let page = handle_feed(
+            &state,
+            FeedTarget::Feed(FEED),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect("a feed wall must lay");
+
+        assert_eq!(
+            laid(&page),
+            vec![post_uri("first"), post_uri("second"), post_uri("third")],
+            "the feed's own order, untouched: grout would have inverted this one"
+        );
+
+        // the upstream cursor is the whole of mason's position in the feed's
+        // order, and it travels back to the client inside a cursor of its own
+        let next = cursor::decode(page.cursor.as_deref().expect("the feed has more"))
+            .expect("and it decodes");
+        assert_eq!(
+            next,
+            Cursor::Feed {
+                feed: "page2".to_string()
+            }
+        );
+        assert!(
+            page.warming.is_none(),
+            "a committed page never reports warming"
+        );
+
+        // The structural claim, in one assertion: a feed wall reads getFeed and
+        // nothing else. No getFollows, no getAuthorFeed, no getProfile, which
+        // is what "no snapshot, no cohort, no fill" looks like from outside.
+        assert_eq!(
+            upstream_paths(&server).await,
+            vec!["/xrpc/app.bsky.feed.getFeed"],
+            "one page of a feed wall is one AppView call"
+        );
+    }
+
+    /// `getFeed` returning no cursor is a feed wall's whole end condition: there
+    /// is no pool to drain and no graph to spend, so the wall ends exactly when
+    /// the feed does.
+    #[tokio::test]
+    async fn a_feed_wall_ends_when_the_generator_does() {
+        let server = MockServer::start().await;
+        // the cursor-bearing mock goes up first: the general one would match a
+        // request carrying a cursor too, and wiremock takes the first match
+        feed_answers(
+            &server,
+            PAGE_SIZE_LIMIT,
+            Some("page2"),
+            vec![post("last", CREATED, 0)],
+            None,
+        )
+        .await;
+        feed_answers(
+            &server,
+            PAGE_SIZE_LIMIT,
+            None,
+            vec![post("first", CREATED, 0)],
+            Some("page2"),
+        )
+        .await;
+        let state = state_for(&server);
+
+        let first = handle_feed(
+            &state,
+            FeedTarget::Feed(FEED),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect("the first page lays");
+        let carried = first.cursor.expect("a feed with more hands back a cursor");
+
+        let last = handle_feed(
+            &state,
+            FeedTarget::Feed(FEED),
+            Some(&carried),
+            Mode::Wall,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect("and the page after it lays too");
+        assert_eq!(
+            laid(&last),
+            vec![post_uri("last")],
+            "paging must reach the next page, not re-serve the first"
+        );
+        assert!(
+            last.cursor.is_none(),
+            "a feed that ended must end the wall rather than invite a page that can never come"
+        );
+    }
+
+    /// There is nothing to warm on a feed wall: one AppView call answers a page,
+    /// so a preview reports itself already settled and the client freezes on its
+    /// first poll. The cursor it hands back points at the CURRENT screen, so the
+    /// freeze commits this very page, and the sixty second `feed_pages` entry
+    /// makes that freeze a cache hit rather than a second round trip.
+    #[tokio::test]
+    async fn a_feed_wall_preview_is_already_settled_and_echoes_its_cursor() {
+        let server = MockServer::start().await;
+        feed_answers(
+            &server,
+            PAGE_SIZE_LIMIT,
+            Some("page2"),
+            vec![post("mid", CREATED, 0)],
+            Some("page3"),
+        )
+        .await;
+        let state = state_for(&server);
+
+        let incoming = cursor::encode(&Cursor::Feed {
+            feed: "page2".to_string(),
+        });
+        let preview = handle_feed(
+            &state,
+            FeedTarget::Feed(FEED),
+            Some(&incoming),
+            Mode::Wall,
+            FeedIntent::Preview,
+        )
+        .await
+        .expect("a preview must lay");
+
+        assert_eq!(
+            preview.warming,
+            Some(false),
+            "a feed wall is settled the moment it answers"
+        );
+        assert_eq!(
+            preview.cursor.as_deref(),
+            Some(incoming.as_str()),
+            "the preview's cursor is the screen it just laid, not the one after it"
+        );
+        assert_eq!(laid(&preview), vec![post_uri("mid")]);
+    }
+
+    /// A graph cursor names a position in a snapshot a feed wall has none of, so
+    /// it is treated exactly as garbage is: the feed from its head, never an
+    /// error, and never a page fetched under somebody else's cursor. The mock
+    /// matches on the ABSENCE of a cursor parameter, so a wall that forwarded
+    /// this one would find no mock at all.
+    #[tokio::test]
+    async fn a_graph_cursor_on_a_feed_wall_lays_from_the_head() {
+        let server = MockServer::start().await;
+        feed_answers(
+            &server,
+            PAGE_SIZE_LIMIT,
+            None,
+            vec![post("head", CREATED, 0)],
+            None,
+        )
+        .await;
+        let state = state_for(&server);
+
+        let graph_cursor = cursor::encode(&Cursor::Wall {
+            seed: 42,
+            offset: 96,
+        });
+        let page = handle_feed(
+            &state,
+            FeedTarget::Feed(FEED),
+            Some(&graph_cursor),
+            Mode::Wall,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect("a graph cursor must not fail a feed wall");
+        assert_eq!(laid(&page), vec![post_uri("head")]);
+
+        // and a preview handed one drops it rather than echoing a position that
+        // means nothing here back to the client
+        let preview = handle_feed(
+            &state,
+            FeedTarget::Feed(FEED),
+            Some(&graph_cursor),
+            Mode::Wall,
+            FeedIntent::Preview,
+        )
+        .await
+        .expect("a preview must lay too");
+        assert!(preview.cursor.is_none(), "there is no position to echo");
+    }
+
+    /// Glaze over a feed asks for `getFeed`'s ceiling and lays EVERY image post
+    /// that survives, not the first `PAGE_SIZE` of them. That is a correctness
+    /// requirement rather than an optimisation: the cursor mason hands back
+    /// belongs to the call that fetched these bricks, and there is no pool to
+    /// hold a remainder in, so a truncated page would throw the rest away.
+    ///
+    /// The mock matches `limit=100`, so a wall that asked for a page's worth
+    /// finds no mock and fails rather than quietly running a quarter as deep.
+    #[tokio::test]
+    async fn glaze_over_a_feed_lays_every_image_post_rather_than_a_page_of_them() {
+        let server = MockServer::start().await;
+        // thirty image posts, each followed by a text post: more images than a
+        // page holds, and a filter to prove.
+        let mut items = Vec::new();
+        for n in 0..30 {
+            items.push(image_post(&format!("image-{n}")));
+            items.push(post(&format!("text-{n}"), CREATED, 0));
+        }
+        feed_answers(&server, GLAZE_FEED_LIMIT, None, items, None).await;
+        let state = state_for(&server);
+
+        let page = handle_feed(
+            &state,
+            FeedTarget::Feed(FEED),
+            None,
+            Mode::Glaze,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect("a glaze feed wall must lay");
+
+        assert_eq!(page.items.len(), 30, "every image post the page carried");
+        assert!(
+            page.items.len() > PAGE_SIZE,
+            "and more than a page of them, which is the case truncation would eat"
+        );
+        assert!(
+            page.items.iter().all(Brick::is_image_post),
+            "a glaze wall is image posts and nothing else"
+        );
+        assert_eq!(
+            laid(&page).first().copied(),
+            Some(post_uri("image-0").as_str()),
+            "the feed's order survives the filter"
+        );
+    }
+
+    /// A feed wall has no owner to gate. `!no-unauthenticated` is a request
+    /// about a person's own social graph being put on display; a feed generator
+    /// is a published service, and its creator has not asked anybody not to read
+    /// it. So the creator here is sealed, and the feed still lays.
+    ///
+    /// This is also the resolution hop: a bsky.app link's profile segment is
+    /// resolved to a DID and the AT-URI rebuilt from it, which the `getFeed`
+    /// mock matches on.
+    #[tokio::test]
+    async fn a_sealed_creator_does_not_seal_their_feed() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "did": "did:plc:sealed",
+                "handle": "sealed.test",
+                "labels": [{"val": "!no-unauthenticated"}]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .and(query_param(
+                "feed",
+                "at://did:plc:sealed/app.bsky.feed.generator/whats-hot",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "feed": [post("published", CREATED, 0)]
+            })))
+            .mount(&server)
+            .await;
+        let state = state_for(&server);
+
+        let page = handle_feed(
+            &state,
+            FeedTarget::Feed("https://bsky.app/profile/sealed.test/feed/whats-hot"),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect("a published feed lays whatever its creator set on their own profile");
+        assert_eq!(laid(&page), vec![post_uri("published")]);
+    }
+
+    /// The negative space of that resolution hop. A feed link naming a profile
+    /// the AppView does not know is a feed that is not there, not an actor that
+    /// is not there: `actor_not_found` would hand somebody holding a bad feed
+    /// link a handle box, which repairs nothing they got wrong.
+    #[tokio::test]
+    async fn a_feed_link_naming_nobody_is_a_feed_that_is_not_there() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .respond_with(ResponseTemplate::new(400))
+            .mount(&server)
+            .await;
+        let state = state_for(&server);
+
+        let reference = "https://bsky.app/profile/nobody.test/feed/whats-hot";
+        let failure = handle_feed(
+            &state,
+            FeedTarget::Feed(reference),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect_err("an unresolvable creator is a failure, not a wall");
+        match failure {
+            AppError::FeedNotFound(named) => assert_eq!(
+                named, reference,
+                "the error names the reference the reader actually holds"
+            ),
+            other => panic!("a feed link naming nobody must be a missing feed, got {other:?}"),
+        }
+    }
+
+    /// The one place a fallback would be tempting, and the reason there is none:
+    /// `mode` and `intent` fall back because they decorate a wall that exists
+    /// either way, and a malformed `feed` names no wall at all. Laying the actor
+    /// beside it instead would be a different product than the one the reader
+    /// asked for, so this is a 400 even with a perfectly good actor in hand.
+    ///
+    /// Nothing is mounted: every one of these is rejected before a socket opens,
+    /// which is what the request count at the end asserts.
+    #[tokio::test]
+    async fn an_unparseable_feed_reference_is_a_bad_request_and_asks_nobody() {
+        let server = MockServer::start().await;
+        let state = state_for(&server);
+
+        for reference in [
+            "nonsense",
+            "",
+            "javascript:alert(1)",
+            // a legal AT-URI, but naming a collection getFeed cannot page
+            "at://did:plc:aa/app.bsky.feed.post/3k2a",
+            // a lookalike host, which must never reach a network call either
+            "https://evilbsky.app/profile/alice.test/feed/whats-hot",
+        ] {
+            let failure = handle_feed(
+                &state,
+                FeedTarget::Feed(reference),
+                None,
+                Mode::Wall,
+                FeedIntent::Normal,
+            )
+            .await
+            .expect_err("a reference that names no feed cannot lay one");
+            assert_eq!(
+                failure.status_and_code(),
+                (400, "bad_request"),
+                "{reference:?} must be a bad request"
+            );
+        }
+
+        // and the precedence rule composed with it: `feed` wins, so a request
+        // carrying a good actor beside a bad feed is a 400 rather than that
+        // actor's wall
+        let both = FeedTarget::from_query(Some("did:plc:viewer"), Some("nonsense"))
+            .expect("two parameters still name one wall");
+        let failure = handle_feed(&state, both, None, Mode::Wall, FeedIntent::Normal)
+            .await
+            .expect_err("mason must not quietly lay somebody's graph instead");
+        assert_eq!(failure.status_and_code(), (400, "bad_request"));
+
+        assert!(
+            upstream_paths(&server).await.is_empty(),
+            "a malformed reference is rejected before any network call"
         );
     }
 }

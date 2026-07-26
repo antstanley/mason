@@ -239,25 +239,32 @@ async function serveShell(request: Request): Promise<Response> {
 async function serveFeed(request: Request): Promise<Response> {
   await ensureInit();
   const url = new URL(request.url);
-  const actor = url.searchParams.get("actor");
+  // the two wall sources: whose graph, or which feed generator. Exactly one is
+  // needed, and mortar decides which wins when both arrive.
+  const actor = url.searchParams.get("actor") ?? undefined;
+  const feed = url.searchParams.get("feed") ?? undefined;
   const cursor = url.searchParams.get("cursor") ?? undefined;
   const mode = url.searchParams.get("mode") ?? undefined;
   // "preview" / "freeze" drive the warm-then-commit first screen; absent is a
   // normal committed page (every page after the first).
   const intent = url.searchParams.get("intent") ?? undefined;
-  if (!actor) {
+  if (!actor && !feed) {
     return json(
       {
         // typed as MortarErrorCode: mortar would answer this exact code, so
         // renaming it there (and in the contract fixture) fails here too
         error: "bad_request" satisfies MortarErrorCode,
-        message: "missing required parameter: actor",
+        // a hand copy of what FeedTarget::from_query throws, because nothing in
+        // the repo compares the two: change them together
+        message: "missing required parameter: actor or feed",
       } satisfies ErrorEnvelope,
       400,
     );
   }
   try {
-    const body = await feed_page(actor, cursor, mode, intent);
+    // positional, and every slot is an optional string, so the ORDER here is
+    // the contract: see feed_page's doc comment in mortar-wasm
+    const body = await feed_page(actor, feed, cursor, mode, intent);
     return new Response(body, {
       status: 200,
       headers: { "content-type": "application/json" },

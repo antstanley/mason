@@ -62,6 +62,17 @@ pub enum FeedRef {
     NeedsDid { profile: String, rkey: String },
 }
 
+/// Build the DID-authority AT-URI a `NeedsDid` reference becomes once its
+/// profile segment has been resolved.
+///
+/// It lives beside the parser rather than at the call site so the one
+/// collection literal mason queries with is spelled in exactly one module: a
+/// second spelling is a second thing to keep in step with the check that vets
+/// it, and the two would disagree the day either moves.
+pub fn uri_for(did: &str, rkey: &str) -> String {
+    format!("{AT_URI_PREFIX}{did}/{FEED_GENERATOR_COLLECTION}/{rkey}")
+}
+
 /// Read a `feed` query value. `None` is a `bad_request`: unlike `mode` and
 /// `intent`, an unparseable feed reference has no default to fall back to,
 /// because it names no wall at all.
@@ -238,6 +249,31 @@ mod tests {
                 profile: "did:plc:z72i7hdynmk6r22z27h6tvur".to_string(),
                 rkey: "whats-hot".to_string(),
             })
+        );
+    }
+
+    /// The two spellings meet here: a reference that owed a resolution hop
+    /// becomes, once its profile segment is a DID, byte for byte the URI the
+    /// DID spelling of the same feed parses to. If they ever diverged, one
+    /// feed would occupy two `feed_pages` cache keys and the reader would pay
+    /// two upstream reads for one page.
+    #[test]
+    fn a_resolved_reference_rebuilds_the_did_spelling_exactly() {
+        let did = "did:plc:z72i7hdynmk6r22z27h6tvur";
+        let Some(FeedRef::NeedsDid { rkey, .. }) =
+            parse("https://bsky.app/profile/alice.bsky.social/feed/whats-hot")
+        else {
+            panic!("a bsky.app link parses to the pair");
+        };
+        let rebuilt = uri_for(did, &rkey);
+        assert_eq!(
+            parse(&rebuilt),
+            Some(FeedRef::Uri(rebuilt.clone())),
+            "what the caller rebuilds must itself parse as a finished URI"
+        );
+        assert_eq!(
+            rebuilt,
+            "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.feed.generator/whats-hot"
         );
     }
 
