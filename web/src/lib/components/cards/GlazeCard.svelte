@@ -11,11 +11,15 @@
 	//
 	// Each image is its own link and the controls sit outside them, so a tap opens
 	// the post while a drag scrolls the strip, and the arrows / ALT button / panel
-	// never trip the navigation. Touch has no hover, so there the pill and caption
-	// stay shown. Under prefers-reduced-motion nothing slides.
+	// never trip the navigation. That rule still holds now that the tap opens the
+	// brick reader instead: this card hands BrickShell no href, so these image
+	// anchors are the brick's own link, and without them the whole glaze wall
+	// would have no way into the reader. Touch has no hover, so there the pill and
+	// caption stay shown. Under prefers-reduced-motion nothing slides.
 	import { tick } from 'svelte';
 	import type { PostBrick } from '$lib/types';
 	import { clientUrl } from '$lib/state/client.svelte';
+	import { reader } from '$lib/state/reader.svelte';
 	import BrickShell from '../BrickShell.svelte';
 	import AuthorChip from '../AuthorChip.svelte';
 	import Sensitive from '../Sensitive.svelte';
@@ -148,6 +152,12 @@
 							href={clientUrl(brick.url)}
 							target="_blank"
 							rel="noopener noreferrer"
+							onclick={(event) => {
+								// a plain tap on the picture reads the brick in place; a drag
+								// never reaches here (it scrolls the strip), and a modified
+								// click falls through to the href and the source
+								reader.activate(event, brick);
+							}}
 							class="block h-full w-full shrink-0 focus-visible:outline-offset-[-3px]"
 						>
 							<img
@@ -196,6 +206,13 @@
 				href={clientUrl(brick.url)}
 				target="_blank"
 				rel="noopener noreferrer"
+				onclick={(event) => {
+					// the single/grid branch's one link, same rule as the strip's. The
+					// reveal button below is a DESCENDANT of this anchor rather than a
+					// sibling, so it stops its own propagation (Sensitive.svelte) and
+					// "show anyway" stays a reveal instead of becoming a read.
+					reader.activate(event, brick);
+				}}
 				class="block focus-visible:outline-offset-[-3px]"
 			>
 				<Sensitive id={brick.id} blur={brick.blur}>

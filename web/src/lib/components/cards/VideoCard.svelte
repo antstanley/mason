@@ -2,6 +2,7 @@
 	import type { VideoBrick } from '$lib/types';
 	import { player } from '$lib/state/player.svelte';
 	import { clientUrl } from '$lib/state/client.svelte';
+	import { reader } from '$lib/state/reader.svelte';
 	import BrickShell from '../BrickShell.svelte';
 	import AuthorChip from '../AuthorChip.svelte';
 	import VideoPlayer from '../VideoPlayer.svelte';
@@ -144,10 +145,19 @@
 		{/if}
 		<div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
 			<AuthorChip author={brick.author} />
+			<!-- this card hands BrickShell no href, so this is its ONE anchor and
+			     therefore the brick's own link: a plain left click reads the brick
+			     in place (the reader carries this watch link itself) while every
+			     modified click still goes straight out to the source. The play
+			     button above is a sibling of this, so playing in place is
+			     untouched. -->
 			<a
 				href={clientUrl(brick.url)}
 				target="_blank"
 				rel="noopener noreferrer"
+				onclick={(event) => {
+					reader.activate(event, brick);
+				}}
 				class="inline-flex min-h-11 shrink-0 items-center gap-1 text-sm font-semibold text-brick-video-ink hover:underline dark:text-brick-video-bright"
 			>
 				{brick.live ? 'watch live' : 'watch'} on {sourceName}

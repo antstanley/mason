@@ -10,7 +10,7 @@
 	const label = $derived(`blog post: ${brick.title}`);
 </script>
 
-<BrickShell accent="blog" href={brick.url} {label}>
+<BrickShell accent="blog" href={brick.url} {brick} {label}>
 	{#if brick.coverImage}
 		<img
 			src={brick.coverImage}

@@ -14,7 +14,7 @@
 	const label = $derived(`post by ${brick.author.displayName ?? brick.author.handle}`);
 </script>
 
-<BrickShell accent="post" href={clientUrl(brick.url)} {label}>
+<BrickShell accent="post" href={clientUrl(brick.url)} {brick} {label}>
 	{#if img}
 		<Sensitive id={brick.id} blur={brick.blur}>
 			<img
