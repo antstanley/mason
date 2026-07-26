@@ -35,7 +35,9 @@ no engine work at all.
 ## Affected spec pages
 
 No wire change: `FeedResponse`, `Brick` and the cursor are untouched, so there is
-no `Type changes` section below and no fixture to regenerate.
+no `Type changes` section below and no contract fixture to regenerate. One Rust
+file is still edited (`fixtures.rs`, to give a demo brick a `!warn` blur), because
+otherwise the shared-reveal half of this change has nothing that can observe it.
 
 | Canonical page | Nature of change |
 |---|---|
@@ -99,8 +101,23 @@ Add two rows to the table:
 > **Opening the reader freezes the wall.** A click is engagement, so
 > `reader.open` calls `feed.freeze()` before anything else. That is not only
 > consistency with the wheel, touch and focus signals: while the wall is warming
-> the arrangement reorders between preview polls, so an index into `feed.items`
-> would go stale under an open reader.
+> the arrangement reorders between preview polls, so a position on the wall would
+> go stale under an open reader.
+>
+> **The reader holds the brick, and locates it by id.** `reader` stores the
+> `Brick` itself and derives its position with
+> `feed.items.findIndex(b => b.id === id)` when it needs to step. Threading an
+> index down from the wall was the alternative and it is worse in every direction:
+> `FeedGrid`'s `brick` snippet takes `(item, priority)` and nothing else, so an
+> index would mean editing that signature, both layout components' prop types,
+> both render call sites, all four cards and `BrickShell`, none of which any lane
+> typechecks. Locating by id is O(n) once per click on a list of hundreds, it
+> keeps `FeedGrid` out of this change entirely, and a replaced or reordered
+> `feed.items` returns -1 rather than silently pointing at the wrong brick.
+>
+> Page state does not survive a reload, so reloading with a reader open reopens
+> the wall without it. That is the intended behaviour rather than a gap to work
+> around: the reader is a view of a brick on a wall that is itself being rebuilt.
 
 ### `.specs/07-web-client.md` → Decisions (Add)
 
@@ -109,7 +126,12 @@ Add two rows to the table:
 >   advertise a deep link mason cannot serve: a single brick is not fetchable, so
 >   the recipient would get the wall and a dropped parameter.
 > - *Opening the reader freezes the wall.* **A click is engagement.** The reader
->   holds an index into `feed.items`, and a warming wall reorders between polls.
+>   locates its brick in `feed.items` by id, and a warming wall reorders between
+>   polls.
+> - *No index is threaded down to the cards.* **The reader locates the brick by
+>   id.** An index would edit the snippet signature, both layouts, all four cards
+>   and `BrickShell` to save a `findIndex` over a few hundred items, and every one
+>   of those files is invisible to `tsc`.
 > - *The reveal choice follows the brick.* **A session set of brick ids, shared
 >   by the card and the reader.** Uncovering a brick on the wall and finding it
 >   covered again one click later reads as a bug. It is still forgotten on
@@ -123,14 +145,21 @@ Add two rows to the table:
 
 Replace the **Outbound links** bullet with:
 
-> - **Outbound links stay real links, and a plain click opens the reader
->   instead.** Every card keeps its `<a href>` with `target="_blank"`,
+> - **Every outbound anchor stays a real link, and the anchor that stands for the
+>   brick opens the reader on a plain click.** Anchors keep `target="_blank"`,
 >   `rel="noopener noreferrer"` and the `clientUrl` rewrite, so middle-click,
 >   cmd-click and "copy link address" all still reach the source. A plain
 >   unmodified left click is intercepted (`preventDefault`) and opens the brick
 >   reader. Keeping the anchor rather than swapping it for a button is what
->   preserves the browser's own affordances, and it means the card is still
->   meaningful with JavaScript half-loaded.
+>   preserves the browser's own affordances.
+>
+>   **Which anchor stands for the brick differs by card, and there are three of
+>   them.** Only post and blog cards hand `BrickShell` an `href`, so only they
+>   have a card-wide link: a video card's one anchor is its watch-at-source link,
+>   and a glaze card's are per image. All three call the same
+>   `reader.activate(event, brick)`, so the modifier-key rule lives in one place.
+>   Intercepting `BrickShell` alone would leave the entire glaze wall and every
+>   video brick with no way into the reader.
 
 ### `.specs/08-wall-and-bricks.md` → The brick reader (Add, new section after Cards)
 
@@ -173,16 +202,26 @@ Replace the **Outbound links** bullet with:
 > - Escape closes. So does the close control, a click on the scrim, and the back
 >   gesture (the reader is a history entry).
 > - The layout's content wrapper is `inert` while the reader is up, which is what
->   traps focus and keeps the wall's own key handlers out of the way.
-> - `document.documentElement` gets `overflow: hidden`, so the wall does not
->   scroll behind the reader and the pump cannot fire under it.
+>   traps focus. The reader is mounted as that wrapper's **sibling**, not inside
+>   it, because `inert` applies to an element and all of its descendants: a reader
+>   nested in the wrapper it dims would be unfocusable and invisible to assistive
+>   tech the moment it opened.
+> - `document.documentElement` gets `overflow: hidden`, which stops the wall
+>   scrolling behind the reader. It does not stop the pump: the sentinel's
+>   observer stays connected, so bricks may still be appended behind an open
+>   reader. That is harmless, because an append never moves a laid brick and the
+>   reader locates its own brick by id.
 > - Left and right arrows step to the previous and next brick on the wall, and
 >   two visible controls do the same. Stepping stops at the ends of the laid
 >   wall; the reader never triggers pagination.
-> - One video plays at a time, network-wide, unchanged: the reader claims the
->   player by brick id, so opening a reader over a playing card pauses the card.
->   `VideoPlayer` remains the only sanctioned `.play(`, and `just guard-autoplay`
->   still holds over the reader.
+> - One video plays at a time, network-wide, unchanged, but the reader must claim
+>   the player under **its own id** (`reader:<brick.id>`). A card collapses back
+>   to its poster only when `player.activeId` stops matching its own brick id, so
+>   a reader claiming the same id would leave the card mounted and playing behind
+>   the scrim, two elements and two audio streams. Claiming a distinct id makes
+>   the card a loser of the claim and tears it down through the path that already
+>   exists. `VideoPlayer` remains the only sanctioned `.play(`, and
+>   `just guard-autoplay` still holds over the reader.
 
 ### `.specs/08-wall-and-bricks.md` → Sensitive media (Modify)
 
@@ -200,9 +239,11 @@ Replace the **Outbound links** bullet with:
 
 > - **The reader is a real dialog.** `role="dialog"`, `aria-modal="true"`, an
 >   accessible name from the brick, focus in on open and back to the opening card
->   on close, Escape and click-away, and `inert` on everything behind it. Arrow
->   keys step along the wall from inside it; the wall's own arrow-key freeze
->   handler never sees them, because the wall is inert.
+>   on close, Escape and click-away, and `inert` on everything behind it (with the
+>   reader mounted outside the inert subtree). Arrow keys step along the wall from
+>   inside it, and they cannot collide with the wall's own arrow-key freeze
+>   handler: those window listeners exist only while the wall is warming and are
+>   torn down by the freeze, which `reader.open` has already performed.
 
 ### `.specs/08-wall-and-bricks.md` → Implementation layout (Modify)
 
@@ -222,67 +263,114 @@ Add a row to the motion table:
 
 ## Implementation notes
 
-Client only. No Rust changes, no wasm rebuild needed to see it, and nothing to
-regenerate in the contract fixture.
+No wire change: nothing to regenerate in the contract fixture, and nothing in
+`types.ts` follows. One Rust file is touched all the same, and step 3 says why.
 
 ```
 1. web/src/app.d.ts:8
-     Uncomment `interface PageState` and declare `brick?: string`. This is what
-     types `page.state.brick` across the app.
+     `interface PageState` is COMMENTED OUT, so this creates it rather than
+     extending it: uncomment and declare `brick?: string`. That is what types
+     `page.state.brick` across the app.
 
 2. web/src/lib/state/sensitive.svelte.ts        (new, ~12 lines)
      export const revealed = new SvelteSet<string>()   // svelte/reactivity
      Session-scoped; never persisted.
 
-3. web/src/lib/components/Sensitive.svelte:19
-     Replace the local `revealed = $state(false)` with a lookup against the
-     shared set. The component gains an `id` prop (the brick id); every call
-     site in cards/ forwards `brick.id`.
+3. server/crates/mortar-core/src/fixtures.rs:148
+     Give ONE fixture post a `blur: Some(Blur { label: "!warn".into() })`; both
+     fixture bricks are `blur: None` today (:148 and :186). Without it no demo
+     brick is ever covered, and since Playwright is the only lane that can see a
+     component, the entire shared-reveal half of this change would ship with no
+     way to observe it. This does NOT touch the wire: contract.json is built
+     from its own canonical instances in tests/contract.rs, not from fixtures.rs.
 
-4. web/src/lib/state/reader.svelte.ts           (new, ~40 lines)
-     open(brick, index): feed.freeze(); then pushState('', { brick: brick.id })
-     close(): history.back() when the reader owns the top entry, else
-              replaceState('', {})
-     next() / prev(): step the index within feed.items, replaceState the id
-     Holds `brick` and `index` as $state; `page.state.brick` decides open/shut.
+4. web/src/lib/components/Sensitive.svelte:17
+     Replace the local `revealed = $state(false)` (at :17; :18 is </script>)
+     with a lookup against the shared set. The component gains an `id` prop.
+     FOUR call sites forward `brick.id`, not three: PostCard.svelte:19,
+     VideoCard.svelte:52, and GlazeCard.svelte TWICE, at :138 (carousel branch)
+     and :201 (single/grid branch). GlazeCard.svelte:69 has an UNRELATED local
+     `revealed` for its touch pill: do not delete that one.
+     Also give Sensitive's show-anyway button (:32) an event.stopPropagation():
+     on PostCard and on GlazeCard's single/grid branch it is a DESCENDANT of the
+     anchor step 6 intercepts, so without it a reveal opens the reader instead.
 
-5. web/src/lib/components/BrickShell.svelte:32
-     Add an onclick to the existing <a>. Return early (no preventDefault) when
-     event.metaKey || ctrlKey || shiftKey || altKey || button !== 0, so every
-     modified click keeps its browser behaviour. Otherwise preventDefault and
-     call reader.open. BrickShell needs the brick and its index as props;
-     FeedGrid's `brick` snippet (web/src/lib/components/FeedGrid.svelte:204)
-     already has both and threads them through each card.
+5. web/src/lib/state/reader.svelte.ts           (new, ~45 lines)
+     open(brick):  feed.freeze(); pushState('', { brick: brick.id }); set a
+                   private pushed flag
+     close():      history.back() ONLY if that flag is set, else
+                   replaceState('', {}); clear it either way
+     activate(event, brick): the one modifier-key rule. Return false (no
+                   interception) on metaKey/ctrlKey/shiftKey/altKey or
+                   button !== 0; otherwise preventDefault, open, return true.
+     next()/prev(): locate by id (feed.items.findIndex), step, replaceState.
+                   -1 means the brick is gone from the wall: do not step.
+     Holds the Brick as $state; `page.state.brick` decides open/shut.
 
-6. web/src/lib/components/BrickReader.svelte    (new)
+6. Three activation points, all calling reader.activate:
+     web/src/lib/components/BrickShell.svelte:32   the card-wide anchor. Only
+       PostCard.svelte:17 and BlogCard.svelte:13 pass an href, so this covers
+       post and blog only.
+     web/src/lib/components/cards/VideoCard.svelte:147   the watch-at-source
+       anchor. VideoCard.svelte:51 passes BrickShell NO href.
+     web/src/lib/components/cards/GlazeCard.svelte:147 and :195   the image
+       anchors, one per branch. GlazeCard.svelte:132 passes NO href either.
+     The filmstrip arrows, the ALT panel and the touch pill are SIBLINGS of
+     those anchors and need nothing; Sensitive's button is a descendant and is
+     handled in step 4.
+
+7. web/src/lib/components/BrickReader.svelte    (new)
      The kind switch mirrors the FeedGrid snippet at :204. Reuse AuthorChip,
      Sensitive, Icon and VideoPlayer; do NOT add a second .play( call site, or
-     `just guard-autoplay` fails.
+     `just guard-autoplay` fails. Claim the player as `reader:${brick.id}`, NOT
+     as brick.id, or the card behind keeps playing (VideoCard.svelte:47).
 
-7. web/src/routes/+layout.svelte:110
+8. web/src/routes/+layout.svelte:110
      Mark the wrapper div inert when the reader is open, and mount
-     <BrickReader /> after {@render children()} at :133.
+     <BrickReader /> AFTER that div's closing tag at :134. It must not go at
+     :133, which is inside the wrapper: inert covers descendants, so the reader
+     would open unfocusable and invisible.
 
-8. web/tests/reader.test.ts                     (new Playwright spec)
+9. web/tests/reader.test.ts                     (new Playwright spec)
      The demo wall is the fixture: click a card, assert the reader opens with the
      full text, Escape closes it, focus returns to the card, and the wall did not
-     navigate. This lane is the ONLY one that can cover a component (tsc drops
-     .svelte files and both vitest suites are .ts), so the reader has no
-     typechecked coverage without it. See 07-web-client.md, Testing.
+     navigate. Add two more that nothing else can catch: cmd-click still opens a
+     tab, and clicking "show anyway" on the step 3 fixture reveals the media and
+     leaves [role=dialog] ABSENT. This lane is the ONLY one that can cover a
+     component (tsc drops .svelte files and both vitest suites are .ts), so the
+     reader has no typechecked coverage without it. See 07-web-client.md,
+     Testing.
 
-9. just check && just test-e2e
+10. just check && just test-e2e
    pnpm changeset   (minor: a new surface)
 ```
 
-### The one thing to get wrong
+### Four things to get wrong
 
-`inert` on the layout wrapper is what traps focus, and it must go on the wrapper
-rather than on the wall, or the header's pickers stay tabbable behind the reader.
-`FeedGrid`'s window-level `keydown` and `scroll` listeners
-(`FeedGrid.svelte:189`) are on `window`, not on the wall, so `inert` does not
-stop them: the `overflow: hidden` on the root element is what keeps the pump
-from firing, and the arrow-key freeze handler is harmless because the wall is
-already frozen by `reader.open`.
+Each of these compiles, passes `just check`, and is invisible to every lane in
+the repo except a Playwright case somebody has to think to write.
+
+1. **Mounting the reader inside the element it makes inert.** `inert` covers
+   descendants, so the reader opens unfocusable and invisible. It goes after
+   `+layout.svelte:134`, outside the wrapper. The wrapper is also the right
+   element to mark, rather than the wall: on the wall, the header's pickers stay
+   tabbable behind an open reader.
+2. **Claiming the video player under the brick's own id.** A card tears down its
+   player when `player.activeId` stops matching its brick id, so claiming the
+   same id leaves the card playing behind the scrim. Claim `reader:<brick.id>`.
+3. **Intercepting `BrickShell` only.** Two of the four cards pass it no `href`,
+   so the glaze wall and every video brick would have no way into the reader.
+4. **Forgetting that `Sensitive`'s button is inside the intercepted anchor** on
+   two of the four cards. Without a `stopPropagation`, "show anyway" opens the
+   reader instead of revealing the media.
+
+What is *not* a hazard, despite looking like one: `FeedGrid`'s window-level
+freeze listeners (`FeedGrid.svelte:188`) survive neither the freeze nor the
+reader, because that effect registers them only while `feed.warming` is true and
+tears them down on cleanup, and `reader.open` freezes the wall first. And the
+sentinel's observer does stay connected, so the pump can still append behind an
+open reader; that is harmless, since an append never moves a laid brick and the
+reader locates its own brick by id.
 
 ---
 
@@ -325,6 +413,12 @@ already frozen by `reader.open`.
   `SwitchWall`.** A native `<dialog>` with `showModal()` would bring its own
   focus trap and top layer, and its own quirks (scroll containment, the backdrop
   pseudo-element, iOS behaviour); the repo already has a working pattern.
+- *One demo brick gains a `!warn` blur.* **The shared reveal needs something to
+  reveal.** Every fixture brick is `blur: None`, and Playwright over the demo
+  wall is the only lane that can see a component at all, so without this the
+  reveal ships unobservable. It costs one Rust file and touches no wire: the
+  contract fixture is built from its own canonical instances, not from
+  `fixtures.rs`.
 - *Arrow keys step, they do not paginate.* **Stepping stops at the last laid
   brick.** Loading a page from inside a reader would grow the wall the reader
   cannot see, and the pump is already the only thing that grows it.

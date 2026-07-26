@@ -60,6 +60,18 @@ what it owes the other two if it merges second.
 | [2026-07-25-drop_snapshot_from_cursor.md](changes/merged/2026-07-25-drop_snapshot_from_cursor.md) | 2026-07-25 | Removed the `snapshot` field the cursor carried and never read |
 | [2026-07-25-tighten_typescript_and_add_a_prepush_gate.md](changes/merged/2026-07-25-tighten_typescript_and_add_a_prepush_gate.md) | 2026-07-25 | `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and `just push` as the local gate |
 
+## Plans
+
+An implementation plan decomposes one or more specs into a dependency-ordered
+graph of reviewable task packages, each with a definition of done and a done
+certificate a validator later discharges. Plans live under
+[`plans/`](plans/); a plan's folder is a kanban board, so a task's status is the
+subfolder it sits in.
+
+| Plan | Covers |
+|---|---|
+| [2026-07-26-build_the_three_change_specs](plans/2026-07-26-build_the_three_change_specs/plan.md) | All three pending change specs as one ordered build: 28 tasks in four milestones, sequenced so each shared surface is touched once in its final shape and the wire fixture is regenerated three times in a fixed order |
+
 ## Related documents
 
 These are not specs, and they are deliberately short. Anything structural belongs

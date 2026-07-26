@@ -187,8 +187,8 @@ Replace the `Brick kinds`, `Walls` and `Pagination` rows with four:
 >   ├─ feed_page_cached(uri, upstream cursor)
 >   │     ──▶ (bricks, next upstream cursor)  |  Err(FeedNotFound | Upstream)
 >   │
->   ├─ Mode::Glaze ? ──▶ keep only is_image_post()
->   ├─ truncate to PAGE_SIZE
+>   ├─ Mode::Glaze ? ──▶ keep only is_image_post()   (and lay every survivor)
+>   ├─ Mode::Wall  ? ──▶ truncate to PAGE_SIZE
 >   │
 >   └─ intent == Preview ? {items, cursor: the INCOMING cursor, warming: false}
 >                        : {items, cursor: next.map(encode)}
@@ -341,7 +341,18 @@ Add a row:
 
 ### `.specs/07-web-client.md` → Shape (Modify)
 
-Append to the description under the tree:
+The tree names `lib/` modules individually, so two lines change in it:
+
+> ```
+>     api.ts                  fetchFeed, warmFeed, FeedError, localMode
+>     appview.ts              the public AppView base, for the header and picker
+> ```
+>
+> ```
+>     +page.svelte            actor or feed ? wall : landing form
+> ```
+
+And append to the description under the tree:
 
 > There is still one route. `?actor=` and `?feed=` are the source of truth for
 > which wall is showing and are mutually exclusive, with `feed` winning if both
@@ -425,6 +436,16 @@ Replace the opening paragraph and the layout table's Glaze row:
 > stall, the ending, the three error panels) is unchanged, and all three views are
 > offered.
 
+### `.specs/08-wall-and-bricks.md` → Implementation layout (Modify)
+
+That block enumerates every component by name, so the two new ones join it after
+`LandingWall.svelte`:
+
+> ```
+>     FeedPicker.svelte        the second front door: browse, search, paste
+>     FeedCard.svelte          one feed generator as a result
+> ```
+
 ### `.specs/08-wall-and-bricks.md` → The feed picker (Add, new section after Wall states)
 
 > ## The feed picker
@@ -505,10 +526,17 @@ Replace the opening paragraph and the layout table's Glaze row:
       "description": "The ?feed= request parameter: a pointer to a Bluesky feed generator record. Parsed, never forwarded. Either an AT-URI whose collection is exactly app.bsky.feed.generator, or a bsky.app feed URL whose profile segment mason resolves to a DID. Anything else is bad_request.",
       "oneOf": [
         {
+          "$comment": "The DID authority form, which is what mason ultimately queries with.",
           "type": "string",
           "pattern": "^at://did:(plc|web):[A-Za-z0-9._:%-]+/app\\.bsky\\.feed\\.generator/[A-Za-z0-9._~-]+$"
         },
         {
+          "$comment": "The handle authority form. A legal AT-URI spelling that people do paste; the handle is resolved to a DID before the upstream query.",
+          "type": "string",
+          "pattern": "^at://[A-Za-z0-9.-]+/app\\.bsky\\.feed\\.generator/[A-Za-z0-9._~-]+$"
+        },
+        {
+          "$comment": "A bsky.app feed link, whose profile segment may be a handle or a DID.",
           "type": "string",
           "pattern": "^https://bsky\\.app/profile/[A-Za-z0-9._:%-]+/feed/[A-Za-z0-9._~-]+$"
         }
@@ -595,10 +623,23 @@ than inside it. Nothing in `algo/` changes except the cursor.
      sent.
 
 2. server/crates/mortar-core/src/sources/feedref.rs   (new, ~60 lines)
-     FeedRef::parse(&str) -> Option<String>, plus the bsky.app URL form. Pure
-     string work; the DID resolution for a handle-form URL is the caller's, so
-     this module stays testable without an AppState. Export it from
+     Pure string work; the DID resolution for a handle-form URL is the caller's,
+     so this module stays testable without an AppState. Export it from
      sources/mod.rs, not from a source submodule directly.
+
+     The return must be TWO-CASE, not Option<String>: the caller cannot
+     otherwise tell a finished AT-URI from a bsky.app URL whose profile segment
+     is a handle still needing resolution, without re-inspecting the string the
+     parser just parsed.
+
+       pub enum FeedRef { Uri(String), NeedsDid { profile: String, rkey: String } }
+       pub fn parse(raw: &str) -> Option<FeedRef>
+
+     An AT-URI spelled with a handle authority (at://alice.bsky.social/
+     app.bsky.feed.generator/x) is a legal spelling people do paste. It is
+     accepted as NeedsDid rather than rejected, and the schema pattern in Type
+     changes is widened to match; the AT-URI mason then queries with is always
+     the DID form.
 
 3. server/crates/mortar-core/src/feed.rs:130
      Factor `resolve_did` out of `resolve_and_gate` (the cold-handle branch at
@@ -616,6 +657,18 @@ than inside it. Nothing in `algo/` changes except the cursor.
      Add the feed_pages field (60s, 500). Do NOT add it to persist::CACHE_NAMES.
      `idbSweepStale` already deletes orphaned per-cache keys, so nothing rots.
 
+5b. server/crates/mortar-core/src/feed.rs
+     `pub fn FeedTarget::from_query<'a>(actor: Option<&'a str>, feed:
+     Option<&'a str>) -> Result<FeedTarget<'a>, AppError>` holding the whole
+     precedence rule (feed wins; neither present is bad_request), plus
+     `kind() -> &'static str` for the wire token. BOTH fronts call it rather
+     than each spelling the rule out. This is not tidiness: contract.rs is a
+     mortar-core integration test and cannot reach either front, so a rule
+     living in the axum route has nothing for step 10's fixture assert to check
+     against, and mortar-server has no test module at all (grep for cfg(test)
+     under its src returns nothing). An explicit lifetime is needed; two input
+     refs do not elide.
+
 6. server/crates/mortar-core/src/algo/cursor.rs:8
      Cursor becomes #[serde(untagged)] enum { Feed { feed: String }, Wall { seed,
      offset } }, Feed FIRST. Order is load-bearing: {seed, offset} cannot match
@@ -624,40 +677,90 @@ than inside it. Nothing in `algo/` changes except the cursor.
      proves it for the dropped `snapshot` key). Both existing tests must still
      pass unchanged, including garbage_is_none's {"seed":42} case.
 
+     THREE call sites break, not two. The demo wall is a consumer ahead of both
+     real paths: feed.rs:57 reads `decoded.map(|c| c.offset)` and feed.rs:64
+     constructs `Cursor { seed: 0, offset }`. Add a test that a feed cursor
+     handed to the demo wall lays from offset 0 rather than panicking.
+
 7. server/crates/mortar-core/src/error.rs:6
      AppError::FeedNotFound(String) -> (404, "feed_not_found"). Add it to the
      variant list at :78 so the pinned envelope-string fixture covers it.
+
+     While here, BadRequest needs attention: it Displays as "missing required
+     parameter: {0}", so an unparseable feed reference would read "missing
+     required parameter: feed" when the parameter was present. Either give it a
+     second form for a malformed value or reword the Display. Note also that
+     web/src/service-worker.ts:254 carries its OWN hardcoded copy of the string
+     ("missing required parameter: actor"), and nothing in the repo compares the
+     two: the pinned fixture strings come from a literal BadRequest("actor") in
+     contract.rs:238 and error.rs:78, not from either front. Change both copies
+     together.
 
 8. server/crates/mortar-core/src/feed.rs:44
      handle_feed takes FeedTarget instead of &str actor, and branches to a new
      `feed_wall` path before resolve_and_gate. The demo branch at :56 stays on
      the Actor arm.
 
-9. Both fronts:
-     server/crates/mortar-server/src/routes/feed.rs:16   FeedQuery gains `feed`;
-       the ok_or(BadRequest("actor")) at :44 becomes "actor or feed".
+9. Both fronts, each calling FeedTarget::from_query from step 5b:
+     server/crates/mortar-server/src/routes/feed.rs:15   the struct is
+       `FeedParams`, NOT FeedQuery. It gains `feed`; the ok_or(BadRequest(...))
+       at :42 is replaced by the shared parser.
      server/crates/mortar-wasm/src/lib.rs:88             feed_page gains a feed
        argument (Option<String> from JS).
      web/src/service-worker.ts                           forward the parameter.
 
 10. Regenerate the wire fixture, which now needs the new error code and the
-    target vocabulary:
+    target and label vocabularies:
       UPDATE_FIXTURE=1 cargo test -p mortar-core --test contract
-    Then follow it in web/src/lib/types.ts (MortarErrorCode) and
-    web/src/lib/contract-check.ts (the Equal<> over query.target).
 
-11. Web, the wall:
+    Two prerequisites, or the new keys are retyped literals rather than pins:
+    - Make HIDDEN_LABELS pub in sources/bluesky.rs:68 and re-export it from
+      sources/mod.rs (contract.rs is an integration test and can only see pub
+      items), then GENERATE vocab.hiddenLabels from it rather than retyping the
+      five labels.
+    - Bind the actor/feed tokens once as consts used for both the fixture keys
+      and an assert against FeedTarget::kind(), the way contract.rs:347 already
+      does for glaze/preview/freeze.
+
+    Then follow it in web/src/lib/types.ts (MortarErrorCode) and
+    web/src/lib/contract-check.ts. The target assertion needs a named union to
+    compare against: `keyof FeedTarget` is `never` for a `{actor} | {feed}`
+    union, so api.ts also exports `FeedTargetKind = "actor" | "feed"` and
+    contract-check compares the fixture keys to THAT in both directions, the way
+    ModeVocabularyMatches does at contract-check.ts:80.
+
+11. Web, the wall. FIVE call sites of the changed APIs, and tsc can see exactly
+    one of them; the other four are .svelte:
       lib/api.ts:36            fetchFeed(target: FeedTarget, cursor?, mode?,
                                intent?); warmFeed likewise. api.test.ts follows.
       lib/state/feed.svelte.ts:59    reset(target, mode); #key(target, mode)
       lib/state/feedinfo.svelte.ts   new, modelled on state/profile.svelte.ts
-      routes/+page.svelte:10   derive both parameters; feed wins
+      routes/+page.svelte:10         derive both parameters; feed wins
+      components/FeedGrid.svelte:55  feed.reset(handle, currentMode)
+      components/FeedGrid.svelte:263 feed.reset(currentActor, currentMode)
+      components/LandingWall.svelte:16   fetchFeed('demo')
+      components/HandleForm.svelte:21    warmFeed(handle || 'demo')
       components/SwitchWall.svelte   the generator's face, and a way into the
                                      picker, on a feed wall
       components/FeedGrid.svelte     the feed-not-found error panel
 
+    warmFeed stays ACTOR-ONLY and a feed target skips it. Its purpose is to land
+    a follow graph and author feeds ahead of the wall; a feed target has neither,
+    so the only thing left to warm is the wasm compile, which the picker screen
+    has already paid by the time a feed is chosen.
+
+11b. web/src/routes/+layout.svelte:13, :101, :110, :111, :129
+    THE HEADER IS GATED ON `{#if actor}` AT :111. The skip link, the bottom
+    padding, LayoutPicker, ClientPicker and SwitchWall are all inside it, and the
+    document title at :101 is the same ternary, so a wall opened as /?feed=...
+    renders today with no chrome at all. That contradicts this spec's own claim
+    that all three views are offered on a feed wall. Derive both parameters at
+    :13, gate on `actor || feed`, and give the title a feed-wall branch.
+
 12. Web, the picker:
-      app.d.ts:8               App.PageState gains `picker?: 'feeds'`
+      app.d.ts:8               App.PageState is a COMMENTED-OUT placeholder, so
+                               it is created rather than extended: uncomment and
+                               declare `picker?: 'feeds'`
       lib/appview.ts           new: hoist the APPVIEW base out of
                                state/profile.svelte.ts:6. There are three
                                client-side AppView readers after this change
@@ -691,9 +794,12 @@ half of the feed interaction: `refresh` over a feed wall bypasses the
 
 ### Tests worth writing before the code
 
-- `feedref.rs`: both accepted spellings, an AT-URI naming
-  `app.bsky.feed.post` (rejected), a `javascript:` string, a URL on a lookalike
-  host, and a reference carrying `&`.
+- `feedref.rs`: all three accepted spellings and which variant each returns, an
+  AT-URI naming `app.bsky.feed.post` (rejected), a `javascript:` string, a URL
+  on a lookalike host, and a reference carrying `&`.
+- `FeedTarget::from_query`: feed wins over actor, actor alone, feed alone,
+  neither (bad_request), and `kind()` for both. This is a mortar-core unit test
+  precisely because neither front can host one.
 - `cursor.rs`: a feed cursor round-trips; a graph cursor still round-trips; a
   legacy cursor with a stray `snapshot` key still decodes to `Wall`; a feed
   cursor on the graph path decodes to something the graph path treats as a fresh

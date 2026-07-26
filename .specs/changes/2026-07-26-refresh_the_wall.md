@@ -55,9 +55,17 @@ directory. Links outside the blocks resolve from `.specs/changes/` as usual.
 
 ### `.specs/01-domain-model.md` → Entities → Snapshot (Modify)
 
-Add a row to the state table:
+**Not** a row in the state table: that table lists the fields of `Inner`, the
+mutex-guarded half. `refresh` is an immutable `pub` field on `Snapshot` itself,
+beside `id`, `seed`, `viewer` and `mode`, so it goes in the prose above the
+table:
 
-> | `refresh` | This wall was asked for explicitly, so the fill re-reads the fast content caches instead of trusting them |
+> Identity: `snapshot_id = "<mode-tag>-<xxh3_64(did, seed) as 16 hex>"`, so a
+> glaze wall and a full wall for the same actor and seed can never collide.
+> Beside it the snapshot carries `refresh`, set once at construction: this wall
+> was asked for explicitly, so its fill re-reads the fast content caches instead
+> of trusting them. It is immutable for the snapshot's life and therefore not
+> guarded state.
 
 ### `.specs/02-feed-engine.md` → Entry point (Modify)
 
@@ -123,8 +131,9 @@ Add a row to the table:
 
 Append after the three TTL shapes:
 
-> **A refresh bypasses exactly two of these.** `author_feed` and `image_feed` are
-> re-read on a `refresh=1` request; the other nine are not. The split is the same
+> **A refresh bypasses two of these on a graph wall, and one on a feed wall.**
+> `author_feed` and `image_feed` are re-read on a `refresh=1` request; on a feed
+> wall it is `feed_pages` instead. Every other cache stays warm. The split is the same
 > reasoning the TTLs already encode: identity and repo contents move on a scale of
 > days, so re-reading them would spend a hundred PDS round trips to learn nothing,
 > while the AppView author feed is precisely the thing that has changed since the
@@ -176,11 +185,21 @@ Add after the `loadMore()` block in the diagram:
 >   `#replace` reflows the old arrangement into the new one. That is the same
 >   machinery the warming reflow already uses; clearing to skeletons would make a
 >   refresh look like a failure for two seconds.
-> - **The flag is one-shot and consumed by whichever request goes out first.**
->   `#warm`'s first poll normally carries it, but a reader who engages
->   immediately can make `freeze()` the first request instead, and that request is
->   cursorless too. Both call sites consume the same flag, so the refresh is
->   never silently dropped by a race with the reader's own scroll.
+> - **The flag is one-shot, and it is cleared when a cursorless request is
+>   ADOPTED rather than when one is issued.** `#warm`'s first poll normally
+>   carries it, but `freeze()` can fire while that poll is still in flight, with
+>   the cursor still null, so a flag cleared at issue time would be spent on a
+>   request whose result is then discarded and the committed wall would never be
+>   refreshed at all.
+>
+>   Clearing on adopt is not sufficient on its own, because it lets both
+>   cursorless requests carry the flag: two fresh seeds, two snapshots, two fills,
+>   and two hundred-author fan-outs from one tap. So `refresh()` also arms a
+>   private in-flight marker, and no second cursorless request goes out under the
+>   same refresh. This matters more than it looks: under
+>   `prefers-reduced-motion: reduce` the wall freezes the instant `warming` flips
+>   true, with no scroll event at all, so preview-plus-freeze is the DEFAULT path
+>   for those readers rather than a race.
 > - **`FeedState` still touches no DOM.** Scrolling back to the top of the wall is
 >   the control's job, not the state machine's, which is what keeps the vitest
 >   lane running the real module in node.
@@ -207,15 +226,22 @@ Add a row to the table, and a paragraph:
 > ### Refreshing
 >
 > `RefreshWall` sits in the header beside the layout and client pickers: one
-> control, no confirmation, no count. It scrolls the wall back to the top (with
-> `behavior: 'auto'` under `prefers-reduced-motion`) and then asks `feed.refresh()`.
+> control, no confirmation, no count.
+>
+> **It asks `feed.refresh()` first and scrolls second.** The other order defeats
+> the reflow it is starting: the wall registers one-shot `wheel`, `touchmove` and
+> `scroll` freeze listeners the moment `warming` becomes true, and `refresh()`
+> sets `warming` synchronously, so a programmatic scroll dispatched before it
+> lands on `freezeOnEngage` and freezes the wall the reader just asked to re-lay.
+> Scrolling after, and only when not already at the top, keeps the two apart.
 >
 > It is disabled while the feed is loading or warming, and that is the whole rate
 > limit: one refresh can be in flight, so a double tap cannot start two
-> hundred-author fan-outs. The live region announces "refreshing the wall" and
-> then the wall's usual settled message; the announcement of *new* bricks is
-> suppressed for free, because the region's count already resets while warming so
-> a reflow's churn never reads as new bricks.
+> hundred-author fan-outs. The wall keeps its single polite live region, which
+> already says "laying bricks" while warming; a refresh is a warm, so it needs no
+> new announcement and `RefreshWall` adds no region of its own. The announcement
+> of *new* bricks is suppressed for free, because the region's count resets while
+> warming so a reflow's churn never reads as new bricks.
 
 ### `.specs/08-wall-and-bricks.md` → Accessibility behaviours (Modify)
 
@@ -260,21 +286,25 @@ Most of the work is on the web side.
 ```
 1. server/crates/mortar-core/src/sources/fetch.rs:143 and :177
      author_feed_cached / image_feed_cached take `refresh: bool`. When set, skip
-     the `state.caches.*.get` at the top. In the transient-failure arm (:155,
-     :188) return the cached entry instead of None when refreshing, so the wall
-     is never thinner than the one it replaced. Every other caller passes false.
+     the `state.caches.*.get` at the top. In the transient-failure arm (:155 for
+     the author feed, :187 for the image feed) return the cached entry instead of
+     None when refreshing, so the wall is never thinner than the one it replaced.
+     Every other caller passes false.
 
 2. server/crates/mortar-core/src/algo/snapshot.rs:88
      Snapshot gains `pub refresh: bool`, set in `new` (:105) from a new argument.
      ensure_snapshot (:346) and get_or_build (:375) take and forward it.
 
 3. server/crates/mortar-core/src/algo/fill.rs:56, :89, :151, :153, :235
-     fan_out_authors takes the flag (or reads snapshot.refresh) and passes it to
-     the two seam functions. The extension waves at :151 and :153 pass FALSE
-     even on a refreshed snapshot: a wave asks authors this wall has never asked,
-     so there is nothing cached for them to bypass, and re-reading the cohort
-     again on every wave would multiply the cost of a refresh by the length of
-     the scroll.
+     fan_out_authors takes an EXPLICIT `refresh: bool`. It must not read
+     `snapshot.refresh` itself: `extend` hands it the same `Arc<Snapshot>` that
+     `fill` does, so a function reading the field cannot tell a wave from a fill
+     and would refresh on every wave. `fill::fill` passes `snapshot.refresh`;
+     `fill::extend` passes a literal `false`, because a wave asks authors this
+     wall has never asked, so there is nothing cached for them to bypass and
+     re-reading the cohort on every wave would multiply a refresh by the length
+     of the scroll. No signature enforces this rule, so it needs the test named
+     below.
 
 4. server/crates/mortar-core/src/feed.rs:44
      handle_feed takes `refresh: bool`. Ignore it when `decoded.is_some()`, and
@@ -282,12 +312,28 @@ Most of the work is on the web side.
      path's ensure_snapshot (:86), so a refresh that begins with a preview poll
      still refreshes.
 
-5. Both fronts and the worker:
-     server/crates/mortar-server/src/routes/feed.rs:16   FeedQuery gains
-       `refresh: Option<String>`; parse it beside Mode::from_query at :45.
-     server/crates/mortar-wasm/src/lib.rs:88             feed_page gains the
-       argument.
-     web/src/service-worker.ts                           forward the parameter.
+5. server/crates/mortar-core/src/feed.rs:35
+     `pub fn refresh_from_query(raw: Option<&str>) -> bool`, beside
+     FeedIntent::from_query. Both fronts call it; neither parses the token
+     itself. This is what step 6's fixture assert checks against: contract.rs
+     binds each query token ONCE as a const and uses it for both the fixture key
+     and a parser assert (contract.rs:347 to :360), which is the mechanism that
+     makes a one-sided rename impossible. A rule spelled out inline in the axum
+     route would leave mortar-wasm carrying a second copy and leave contract.rs
+     with nothing to assert.
+
+6. Both fronts and the worker:
+     server/crates/mortar-server/src/routes/feed.rs:15   the struct is
+       `FeedParams`, NOT FeedQuery. It gains `refresh: Option<String>`, parsed
+       with refresh_from_query beside Mode::from_query at :45.
+     server/crates/mortar-wasm/src/lib.rs:88             feed_page gains
+       `refresh: Option<String>`, NOT a bool. wasm-bindgen emits an OPTIONAL d.ts
+       parameter for Option<String> and a REQUIRED one for bool, so a bool breaks
+       the service worker's existing four-argument call at service-worker.ts:260
+       until it is updated in the same commit. Option<String> also keeps the
+       token parse in one place, matching how mode and intent already cross that
+       boundary.
+     web/src/service-worker.ts:260                       forward the parameter.
 
 6. Regenerate the wire fixture for the new query vocabulary:
       UPDATE_FIXTURE=1 cargo test -p mortar-core --test contract
@@ -300,17 +346,27 @@ Most of the work is on the web side.
      ignore. api.test.ts gains a case for both.
 
 8. web/src/lib/state/feed.svelte.ts
-     refresh() per the state-machine block above. The one-shot flag is a private
-     field with a #takeRefresh() that returns and clears it; call it from #warm's
-     fetch (:97) and from freeze's fetch (:131). Delete the session-cache entry
-     (#cache, :41) before bumping the generation.
-     feed.test.ts: a refresh keeps the outgoing items until the first preview
-     lands, sends the flag exactly once across a preview-plus-freeze cycle, and
-     drops the session cache entry so a later reset does not rehydrate.
+     refresh() per the state-machine block above. TWO private fields, not one:
+     a pending flag read by #warm's fetch (:97) and freeze's fetch (:131) and
+     CLEARED WHEN A CURSORLESS RESPONSE IS ADOPTED (generation still matching),
+     not when a request is issued; and an in-flight marker set by refresh() so a
+     second cursorless request cannot go out under the same refresh. Clearing at
+     issue spends the flag on a request that may be discarded; clearing only on
+     adopt lets both requests carry it, which is two fan-outs. Delete the
+     session-cache entry (#cache, :41) before bumping the generation.
+     feed.test.ts, three cases: a refresh keeps the outgoing items until the
+     first preview lands; EXACTLY ONE cursorless request carries refresh=1 in
+     the freeze-beats-preview race; and the session cache entry is dropped so a
+     later reset does not rehydrate.
 
 9. web/src/lib/components/RefreshWall.svelte    (new)
-     A button; scrollTo then feed.refresh(). Mount it in
-     web/src/routes/+layout.svelte:126, beside LayoutPicker.
+     A button that calls feed.refresh() FIRST, then scrolls, and only when not
+     already at the top. The other order defeats itself: FeedGrid registers
+     one-shot wheel/touchmove/scroll freeze listeners whenever feed.warming
+     becomes true (FeedGrid.svelte:181 to :201) and refresh() sets warming
+     synchronously, so a scroll dispatched first freezes the wall the reader
+     just asked to re-lay. Mount it in web/src/routes/+layout.svelte:128
+     (:126 is the control row's opening div, :127 is LayoutPicker).
 
 10. just check
     pnpm changeset   (minor: a visible capability)
@@ -326,10 +382,15 @@ and whichever of these two change specs merges second owns writing it. The clien
 side needs nothing extra: the control and the flag are the same.
 
 The reader from [`2026-07-26-read_a_brick_in_place.md`](2026-07-26-read_a_brick_in_place.md)
-holds an index into `feed.items`, which a refresh replaces wholesale. Whichever
-merges second must make `refresh()` close an open reader, for the same reason
-`refresh()` refuses while warming: an index into a list that is being replaced is
-not an index.
+locates its brick in `feed.items` by id, and a refresh replaces that list
+wholesale. Whichever merges second must make `refresh()` close an open reader:
+the reader would otherwise survive with a brick that is no longer on the wall,
+and stepping from it would find nothing.
+
+Both of the above also touch `.specs/05-caching-and-persistence.md`'s cache
+table, which counts its own rows in prose. It carries eleven caches today; the
+feed spec adds `feed_pages` as a twelfth. Whichever merges second owns making the
+count in the bypass sentence agree with the table above it.
 
 ---
 
@@ -362,10 +423,17 @@ not an index.
 
 **Decisions**
 
-- *Refresh re-reads the two fast caches, and nothing else.* **`author_feed` and
-  `image_feed`.** They are where new posts live and they cost one rate-limited
-  burst. Blogs, streams and PDS endpoints move on a scale of days and cost a
-  hundred round trips to a hundred different hosts.
+- *Refresh re-reads the fast content caches, and nothing else.* **`author_feed`
+  and `image_feed` on a graph wall, `feed_pages` on a feed wall.** They are where
+  new posts live and they cost one rate-limited burst. Blogs, streams and PDS
+  endpoints move on a scale of days and cost a hundred round trips to a hundred
+  different hosts.
+- *The flag is cleared on adopt, and a marker stops the second request.* **Two
+  fields, not one.** Clearing at issue time spends the refresh on a request whose
+  result may be discarded, so the committed wall is never refreshed; clearing
+  only on adopt lets a preview and a freeze both carry it, which is two seeds,
+  two snapshots and two hundred-author fan-outs from one tap. Under
+  `prefers-reduced-motion` that pair is the default path, not a race.
 - *Refresh is a cursorless request only.* **Mid-scroll it is ignored.**
   Re-reading the cohort to serve page nine would re-fetch the source of bricks
   that were already admitted, to change nothing about the pages already laid.

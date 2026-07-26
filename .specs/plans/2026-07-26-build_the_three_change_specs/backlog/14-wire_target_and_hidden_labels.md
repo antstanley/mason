@@ -1,0 +1,27 @@
+# Task 14 · wire target and hidden labels
+
+**Plan:** [plan.md](../plan.md) · **Certificate:** [14-wire_target_and_hidden_labels-certificate.md](14-wire_target_and_hidden_labels-certificate.md)
+
+**Implements:** [`changes/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `06-wire-contract.md` → What the fixture covers, and the `HiddenLabel` fragment in §Type changes; implementation note 10. Targets [`06-wire-contract.md`](../../../06-wire-contract.md) §What the fixture covers.
+**Depends on:** 13
+**Produces:** the target vocabulary and mortar's hidden-label list are pinned on both sides of the wire by the same mechanism that already keeps the error codes and video sources in step. **This is wire regeneration 2 of 3.**
+**Pointers:** `sources/bluesky.rs:68` (`HIDDEN_LABELS`, a **private** const; `tests/contract.rs` is an integration test and can only see `pub` items). `sources/mod.rs:15` (the re-export line). `tests/contract.rs:347` (the `GLAZE`/`PREVIEW`/`FREEZE` const block, the pattern to copy), `:361` (the `query` object), `:386` (the `vocab` object, inside the closing `json!`; `:366` is only the comment above the `source_map` build). `web/src/lib/api.ts:34` (`FeedIntent`, the neighbour). `web/src/lib/contract-check.ts:79`-`:83` (the vocabulary assertions).
+
+## Steps
+
+- [ ] Make `HIDDEN_LABELS` `pub` and re-export it from `sources/mod.rs`, matching the rule task 08 already applied to `feedref`.
+- [ ] Add a `query.target` map to `contract.rs`, keyed by `actor` and `feed`, each token bound **once** as a const used for both the fixture key and an assert against `FeedTarget::kind()` on a real `FeedTarget::from_query` result, so a one-sided rename cannot stay green. Task 13 is what makes this possible: the parse lives in mortar-core, which is the only crate `tests/contract.rs` can reach. The assert is the exact shape of the `GLAZE`/`PREVIEW`/`FREEZE` block at `:347`, one line each: `assert_eq!(FeedTarget::from_query(Some("demo"), None).expect("an actor parses").kind(), ACTOR);` and the `feed` mirror.
+- [ ] Add a `vocab.hiddenLabels` map generated from `HIDDEN_LABELS` rather than retyped in the test.
+- [ ] Change `contract.rs`'s `errors()` instance to the `bad_request` literal task 13 shipped, so the fixture pins a message mortar still emits. This is the other half of task 13's split and it lands here because here is where the fixture is regenerated.
+- [ ] Rebase on main so the tree already carries task 10's fixture keys, then regenerate: `UPDATE_FIXTURE=1 cargo test -p mortar-core --test contract`.
+- [ ] Export `FeedTargetKind = "actor" | "feed"` from `api.ts` and `HiddenLabel` from `types.ts`; add two `Equal<>` assertions to `contract-check.ts`. **Not `FeedTarget` yet**: its first consumer is `fetchFeed`, which does not take one until task 15, and knip reports unused exported types (verified: `cd web && pnpm exec knip --include types` is clean today, and a probe export is reported), so exporting it a task early makes `just lint`, and therefore `just check`, red at this boundary. `FeedTargetKind` and `HiddenLabel` are both consumed by `contract-check.ts`, which is a knip entry.
+
+## Definition of done
+
+- [ ] `contract-check.ts` compares the fixture keys to `FeedTargetKind`, not to `FeedTarget`: `keyof` over a union type is `never`, so the obvious spelling would pass vacuously. `FeedTarget` itself is **not** exported in this task, because nothing consumes it until task 15 and knip fails an unused exported type.
+- [ ] The two `query.target` tokens each appear exactly once in `contract.rs`, as a const used for the fixture key **and** for an assert against `FeedTarget::kind()`, so a rename in mortar-core fails the Rust test and a rename in the fixture fails tsc.
+- [ ] `HiddenLabel` is compared to `keyof typeof contract.vocab.hiddenLabels` in both directions.
+- [ ] The committed `contract.json` diff contains **only** `query.target`, `vocab.hiddenLabels` and the reworded `errors.bad_request.message`, and still carries task 10's `errors.feed_not_found`, reviewed line by line.
+- [ ] A deliberate one-sided rename (for example dropping `porn` from the TS union) fails `pnpm check:ci`; checked by hand once and reverted.
+- [ ] Meets the repo definition of done (the wire changed, so `contract.json`, `types.ts` and this spec set agree, and both `cargo test` and `tsc` pass in the same commit).
+- [ ] Reviewable: `cd server && cargo nextest run` and `cd web && pnpm check:ci` are both green from one checkout, and the hidden-label list appears exactly once in Rust and once in TypeScript with a machine comparing them.
