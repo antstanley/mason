@@ -2,6 +2,8 @@
 //! feeds mapped into bricks. All URLs are built from `Config::appview_base`
 //! so wiremock tests can stand in for the real network.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 use crate::http::{Bucket, Http, HttpError};
@@ -14,6 +16,28 @@ use crate::sources::util::urlencode;
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AuthorYield {
     pub bricks: Vec<Brick>,
+}
+
+/// One page of a feed generator: what `get_feed` returned, ready to be cached
+/// and handed to more than one reader of the same page.
+///
+/// The cursor travels WITH the bricks, which is the whole reason this type
+/// exists rather than a bare `AuthorYield`. A feed wall has no snapshot, so the
+/// upstream cursor is the entirety of mason's position in the feed's order, and
+/// it belongs to the exact call that fetched these bricks: a page served from a
+/// cache without it could not be paged past, and a cursor cached apart from its
+/// page could be handed out beside a different one.
+///
+/// Not persisted, so it needs no `Serialize`: sixty seconds in memory is the
+/// whole of a page's life.
+#[derive(Clone)]
+pub struct FeedPage {
+    /// The page's bricks, mapped and moderated, in the feed generator's own
+    /// order.
+    pub yield_: Arc<AuthorYield>,
+    /// Where the page after this one starts. `None` is the end of the feed,
+    /// which is a feed wall's only end condition.
+    pub next: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

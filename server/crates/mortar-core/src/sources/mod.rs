@@ -13,7 +13,7 @@ pub mod standardsite;
 pub mod streamplace;
 pub mod util;
 
-pub use bluesky::{AuthorYield, Follow};
+pub use bluesky::{AuthorYield, FeedPage, Follow};
 pub use feedref::FeedRef;
 pub use standardsite::StdDocs;
 pub use streamplace::LiveStream;

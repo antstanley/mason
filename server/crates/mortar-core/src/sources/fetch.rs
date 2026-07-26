@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use futures::stream::{self, StreamExt};
 
-use super::{bluesky, pds, standardsite, streamplace};
+use super::{FeedPage, bluesky, pds, standardsite, streamplace};
 use crate::cache::TtlCache;
 use crate::error::AppError;
 use crate::http::HttpError;
@@ -235,6 +235,65 @@ pub async fn image_feed_cached(
         .insert(author_did.to_string(), Arc::clone(&yield_))
         .await;
     Some(yield_)
+}
+
+/// One page of a feed generator, cached for a minute.
+///
+/// The one CONTENT read on this seam that fails loudly. Every other one is a
+/// single author out of a hundred, so it degrades to an empty yield and the wall
+/// loses a few bricks; a feed wall's whole ingestion is this single call, so
+/// there is no quorum to degrade into and a failure here is the request failing.
+/// A 400 or a 404 is the AppView saying it has no such feed, which is the
+/// reader's reference to fix rather than an outage, so it is its own code.
+///
+/// The sixty second entry is what makes the preview-then-freeze pair one network
+/// read: the freeze arriving a few hundred milliseconds after the preview asks
+/// for the same page, as does a back gesture onto a page just left.
+pub async fn feed_page_cached(
+    state: &Arc<AppState>,
+    feed_uri: &str,
+    cursor: Option<&str>,
+    limit: u32,
+) -> Result<FeedPage, AppError> {
+    // The LIMIT is part of the key, not just the feed and the cursor: the mixed
+    // views ask getFeed for PAGE_SIZE and the glaze wall asks for 100, so a key
+    // of (uri, cursor) alone would serve a glaze request the 24-item page a
+    // mixed request cached a moment earlier and the image wall would silently
+    // run a quarter as deep. The unit separator is what keeps the three parts
+    // apart: the cursor is last and the limit is digits, so only a \u{1f} inside
+    // the feed uri itself could blur two keys into one, and a feed reference is
+    // parsed before it ever reaches here.
+    let key = format!(
+        "{feed_uri}\u{1f}{limit}\u{1f}{}",
+        cursor.unwrap_or_default()
+    );
+    if let Some(cached) = state.caches.feed_pages.get(&key).await {
+        return Ok(cached);
+    }
+    let (yield_, next) = bluesky::get_feed(
+        &state.http,
+        &state.config.appview_base,
+        feed_uri,
+        cursor,
+        limit,
+    )
+    .await
+    .map_err(|e| match e {
+        // an unknown or withdrawn generator 400s and a well-formed reference to
+        // nothing 404s; either way the feed is not there. Distinct from
+        // ActorNotFound because the web's repair for that one is a handle box,
+        // which is the wrong thing to hand somebody with a bad feed link.
+        HttpError::Status(400 | 404) => AppError::FeedNotFound(feed_uri.to_string()),
+        other => AppError::Upstream(other.to_string()),
+    })?;
+    let page = FeedPage {
+        yield_: Arc::new(yield_),
+        next,
+    };
+    // cloning a FeedPage clones an Arc and a short cursor, so the entry and the
+    // answer are the same page rather than two copies of it
+    state.caches.feed_pages.insert(key, page.clone()).await;
+    Ok(page)
 }
 
 /// Who is live on Streamplace, network-wide. Viewer-independent by
@@ -708,6 +767,260 @@ mod refresh_tests {
         assert!(
             state.caches.author_feed.is_dirty(),
             "a refreshed read must dirty the cache, or its newer posts are never persisted"
+        );
+    }
+}
+
+// The feed-page cache, driven against a wiremock AppView. A THIRD module for the
+// same reason there is a second one: wiremock and tokio's runtime are
+// `cfg(not(target_arch = "wasm32"))` dev dependencies, so a bare `#[cfg(test)]`
+// would break the wasm32 build of --all-targets without failing a single test,
+// and `just guard-wasm` is the only gate in the repo that would ever see it.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod feed_page_tests {
+    use super::*;
+    use crate::config::Config;
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// A feed generator's AT-URI, as a parsed reference hands one over.
+    const FEED: &str = "at://did:plc:gen/app.bsky.feed.generator/whats-hot";
+    /// What the mixed views ask a feed for (`PAGE_SIZE`) and what the glaze wall
+    /// asks the same feed for (getFeed's ceiling). The two limits are the reason
+    /// the key carries one.
+    const MIXED: u32 = 24;
+    const GLAZE: u32 = 100;
+
+    fn state_for(server: &MockServer) -> Arc<AppState> {
+        Arc::new(AppState::new(Config {
+            appview_base: server.uri(),
+            ..Default::default()
+        }))
+    }
+
+    /// A brick's id is its at-uri, so an rkey is how a test tells one fixture
+    /// page from another.
+    fn post_uri(rkey: &str) -> String {
+        format!("at://did:plc:aa/app.bsky.feed.post/{rkey}")
+    }
+
+    /// One post under `limit` (and, when `at` is given, only for that incoming
+    /// cursor), followed by `next`.
+    ///
+    /// `expect(1)` on every mock, verified when the server drops: a cache that
+    /// missed shows up here as a second request rather than as a passing
+    /// assertion about identical fixture content.
+    async fn answers(
+        server: &MockServer,
+        limit: u32,
+        at: Option<&str>,
+        rkey: &str,
+        next: Option<&str>,
+    ) {
+        let mut body = serde_json::json!({"feed": [{
+            "post": {
+                "uri": post_uri(rkey),
+                "author": {"did": "did:plc:aa", "handle": "a.test"},
+                "record": {"text": "hello wall", "createdAt": "2026-07-10T12:00:00Z"},
+                "likeCount": 0,
+                "repostCount": 0
+            }
+        }]});
+        if let Some(next) = next {
+            body["cursor"] = serde_json::json!(next);
+        }
+        let mut mock = Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .and(query_param("limit", limit.to_string()));
+        if let Some(at) = at {
+            mock = mock.and(query_param("cursor", at));
+        }
+        mock.respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    /// Every attempt answers `status`. `retry-after: 0` because a retryable
+    /// status (the 500 below) costs three attempts, and a real backoff in the
+    /// middle of a test buys nothing.
+    async fn always(server: &MockServer, status: u16) {
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .respond_with(ResponseTemplate::new(status).insert_header("retry-after", "0"))
+            .mount(server)
+            .await;
+    }
+
+    fn only_brick(page: &FeedPage) -> &str {
+        assert_eq!(
+            page.yield_.bricks.len(),
+            1,
+            "each fixture page carries one post"
+        );
+        page.yield_.bricks[0].id()
+    }
+
+    async fn upstream_reads(server: &MockServer) -> usize {
+        server
+            .received_requests()
+            .await
+            .expect("the mock server records what it was asked")
+            .len()
+    }
+
+    /// The whole point of the cache. A first screen is a preview poll and then a
+    /// freeze over the same page, and a back gesture is a third read of it, so
+    /// without an entry the cheapest wall mason lays would cost three AppView
+    /// calls to show one page.
+    #[tokio::test]
+    async fn the_second_read_of_a_page_never_reaches_the_appview() {
+        let server = MockServer::start().await;
+        answers(&server, MIXED, None, "1", Some("page2")).await;
+        let state = state_for(&server);
+
+        let first = feed_page_cached(&state, FEED, None, MIXED)
+            .await
+            .expect("the AppView answers");
+        let second = feed_page_cached(&state, FEED, None, MIXED)
+            .await
+            .expect("and the cache answers after it");
+
+        assert_eq!(only_brick(&first), post_uri("1"));
+        assert_eq!(
+            only_brick(&second),
+            post_uri("1"),
+            "the same page comes back"
+        );
+        assert_eq!(
+            second.next.as_deref(),
+            Some("page2"),
+            "cursor and all: a page served without its cursor could not be paged past"
+        );
+        assert_eq!(
+            upstream_reads(&server).await,
+            1,
+            "one page, one upstream read"
+        );
+    }
+
+    /// The limit is in the key because the two views read the same feed to
+    /// different depths. Without it the glaze wall is handed the mixed wall's
+    /// 24-item page, lays the three or four images in it, and runs a quarter as
+    /// deep with nothing anywhere saying so.
+    #[tokio::test]
+    async fn two_limits_of_one_page_do_not_collide() {
+        let server = MockServer::start().await;
+        answers(&server, MIXED, None, "mixed", None).await;
+        answers(&server, GLAZE, None, "glaze", None).await;
+        let state = state_for(&server);
+
+        let mixed = feed_page_cached(&state, FEED, None, MIXED)
+            .await
+            .expect("the mixed views ask for a page");
+        let glaze = feed_page_cached(&state, FEED, None, GLAZE)
+            .await
+            .expect("and the glaze wall asks the same feed deeper");
+
+        assert_eq!(only_brick(&mixed), post_uri("mixed"));
+        assert_eq!(
+            only_brick(&glaze),
+            post_uri("glaze"),
+            "the deep read must get its own page, not the shallow one cached a moment earlier"
+        );
+        assert_eq!(
+            upstream_reads(&server).await,
+            2,
+            "two depths of one feed are two upstream reads"
+        );
+    }
+
+    /// The cursor is in the key too, which is what lets a reader page: the
+    /// second page of a feed is a different entry from the first, not a hit on
+    /// it.
+    #[tokio::test]
+    async fn a_second_cursor_is_a_second_page() {
+        let server = MockServer::start().await;
+        // the cursor-bearing mock is mounted first: the general one would match
+        // a request carrying a cursor too, and wiremock takes the first match
+        answers(&server, MIXED, Some("page2"), "second", None).await;
+        answers(&server, MIXED, None, "first", Some("page2")).await;
+        let state = state_for(&server);
+
+        let first = feed_page_cached(&state, FEED, None, MIXED)
+            .await
+            .expect("a fresh feed wall starts with no cursor");
+        let second = feed_page_cached(&state, FEED, first.next.as_deref(), MIXED)
+            .await
+            .expect("and pages on the cursor the first page carried");
+
+        assert_eq!(only_brick(&first), post_uri("first"));
+        assert_eq!(
+            only_brick(&second),
+            post_uri("second"),
+            "paging must reach the next page, not re-serve the first"
+        );
+        assert!(second.next.is_none(), "and this feed has ended");
+    }
+
+    /// An unknown or withdrawn feed generator. `getFeed` 400s on one, and this
+    /// is the reader holding a reference to nothing rather than an outage, so it
+    /// is `FeedNotFound` and the web can offer the picker instead of a handle
+    /// box.
+    #[tokio::test]
+    async fn a_400_is_a_feed_that_is_not_there() {
+        let server = MockServer::start().await;
+        always(&server, 400).await;
+        let state = state_for(&server);
+
+        let failure = feed_page_cached(&state, FEED, None, MIXED)
+            .await
+            .err()
+            .expect("a 400 is a failure, not a page");
+        match failure {
+            AppError::FeedNotFound(uri) => assert_eq!(
+                uri, FEED,
+                "the error names the feed the reader actually asked for"
+            ),
+            other => panic!("a 400 must be a missing feed, got {other:?}"),
+        }
+    }
+
+    /// And a 404 the same, so a feed wall reports the same thing whichever of
+    /// the two an AppView chooses for a reference it cannot serve.
+    #[tokio::test]
+    async fn a_404_is_a_feed_that_is_not_there() {
+        let server = MockServer::start().await;
+        always(&server, 404).await;
+        let state = state_for(&server);
+
+        let failure = feed_page_cached(&state, FEED, None, MIXED)
+            .await
+            .err()
+            .expect("a 404 is a failure, not a page");
+        match failure {
+            AppError::FeedNotFound(uri) => assert_eq!(uri, FEED),
+            other => panic!("a 404 must be a missing feed, got {other:?}"),
+        }
+    }
+
+    /// The other side of that line. A feed generator is a third-party service
+    /// with its own uptime, and one falling over is not the reader's reference
+    /// being wrong: telling them "no such feed" would send them to fix a link
+    /// that is fine.
+    #[tokio::test]
+    async fn a_500_is_an_upstream_failure() {
+        let server = MockServer::start().await;
+        always(&server, 500).await;
+        let state = state_for(&server);
+
+        let failure = feed_page_cached(&state, FEED, None, MIXED)
+            .await
+            .err()
+            .expect("a 500 is a failure, not a page");
+        assert!(
+            matches!(failure, AppError::Upstream(_)),
+            "a server-side failure must not read as a missing feed, got {failure:?}"
         );
     }
 }

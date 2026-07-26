@@ -16,7 +16,7 @@ use crate::platform::Instant;
 // yield types (and the source-specific TTLs) come through the sources seam,
 // never a source submodule directly
 use crate::sources::fetch::{STD_DOCS_NEGATIVE_TTL, STREAMS_NEGATIVE_TTL};
-use crate::sources::{AuthorYield, Follow, LiveStream, StdDocs};
+use crate::sources::{AuthorYield, FeedPage, Follow, LiveStream, StdDocs};
 
 pub struct TtlCache<K, V> {
     entries: Mutex<HashMap<K, Entry<V>>>,
@@ -189,6 +189,18 @@ const HOUR: Duration = Duration::from_secs(3600);
 /// that "live" stays true.
 pub const LIVE_TTL: Duration = Duration::from_secs(60);
 
+/// Sixty seconds, the same deadline as the live list and for the same reason: a
+/// feed generator's page is a ranking with an expiry date. Long enough to make
+/// the preview-then-freeze pair one network read and to serve a back/forward
+/// from memory; short enough that reopening a feed wall shows the feed's
+/// current head rather than the one it had when the reader last looked.
+pub const FEED_PAGE_TTL: Duration = Duration::from_secs(60);
+
+/// Feed pages held at once. Every entry dies within `FEED_PAGE_TTL`, so this
+/// bounds concurrent readers rather than one reader's scroll: five hundred live
+/// pages is far more than a minute of paging, on a server as well as in a tab.
+const FEED_PAGES_MAX_ENTRIES: usize = 500;
+
 /// All in-memory state. TTLs per the plan; capacities keep a small
 /// deployment bounded.
 pub struct Caches {
@@ -224,6 +236,13 @@ pub struct Caches {
     pub snapshots: TtlCache<String, Arc<Snapshot>>,
     /// viewer did → authors that yielded content recently (24h)
     pub activity: TtlCache<String, Arc<Vec<String>>>,
+    /// `<feed uri>\u{1f}<limit>\u{1f}<upstream cursor>` → one page of a feed
+    /// generator and the cursor after it (60s). The limit is in the key because
+    /// the mixed views and the glaze wall ask the same feed for pages of
+    /// different depth, exactly as `author_feed` and `image_feed` are kept
+    /// apart. Never persisted: an hour-old ranking laid as though it were fresh
+    /// is the lie the persistence layer exists to avoid.
+    pub feed_pages: TtlCache<String, FeedPage>,
 }
 
 impl Default for Caches {
@@ -246,6 +265,7 @@ impl Caches {
             profiles: TtlCache::new(HOUR, 10_000),
             snapshots: TtlCache::new(Duration::from_secs(1800), 500),
             activity: TtlCache::new(24 * HOUR, 1_000),
+            feed_pages: TtlCache::new(FEED_PAGE_TTL, FEED_PAGES_MAX_ENTRIES),
         }
     }
 }
@@ -287,5 +307,48 @@ mod tests {
         }
         let entries = cache.entries.lock().await;
         assert!(entries.len() <= 3, "cache grew to {}", entries.len());
+    }
+
+    /// The Persisted column of the caches table, for the one cache whose answer
+    /// is no.
+    ///
+    /// A feed page is a ranking with a deadline, like the live list: imported
+    /// after a service worker was reaped it would be laid hours later as though
+    /// it were the feed's current head, which is exactly the lie the
+    /// persistence layer exists to avoid. Sixty seconds in memory is the whole
+    /// of a page's life, and one AppView call rebuilds it.
+    ///
+    /// The assertion lives here rather than in `persist.rs` on purpose: that
+    /// module must not name this cache at all, and a test asserting the absence
+    /// from inside it would be the one mention.
+    #[tokio::test]
+    async fn a_feed_page_is_never_persisted() {
+        use crate::persist::{CACHE_NAMES, dirty_cache_names, export_cache};
+
+        assert!(
+            !CACHE_NAMES.contains(&"feed_pages"),
+            "a feed page must never reach IndexedDB: an hour-old ranking laid as fresh is the lie persistence exists to avoid"
+        );
+
+        let caches = Caches::new();
+        caches
+            .feed_pages
+            .insert(
+                "at://did:plc:gen/app.bsky.feed.generator/x\u{1f}24\u{1f}".into(),
+                FeedPage {
+                    yield_: Arc::new(AuthorYield { bricks: vec![] }),
+                    next: None,
+                },
+            )
+            .await;
+
+        assert!(
+            dirty_cache_names(&caches).is_empty(),
+            "caching a feed page must not give the persist cycle anything to write"
+        );
+        assert!(
+            export_cache(&caches, "feed_pages").await.is_none(),
+            "and there is no exporter to reach it by name either"
+        );
     }
 }
