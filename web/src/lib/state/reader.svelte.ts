@@ -97,6 +97,15 @@ export class ReaderState {
     return feed.items.findIndex((b) => b.id === open.id);
   }
 
+  /** How many bricks the laid wall holds, so the reader can say where in it the
+   *  open brick sits ("4 of 60") without the dialog reaching for the feed
+   *  itself. It is the laid wall and not the whole feed on purpose: stepping
+   *  stops at the last brick the pump has laid, so that is the count a position
+   *  is honest against. */
+  get total(): number {
+    return feed.items.length;
+  }
+
   get canPrev(): boolean {
     return this.index > 0;
   }

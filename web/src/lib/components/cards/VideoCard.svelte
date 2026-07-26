@@ -3,6 +3,7 @@
 	import { player } from '$lib/state/player.svelte';
 	import { clientUrl } from '$lib/state/client.svelte';
 	import { reader } from '$lib/state/reader.svelte';
+	import { runtimeLabel } from '$lib/format';
 	import BrickShell from '../BrickShell.svelte';
 	import AuthorChip from '../AuthorChip.svelte';
 	import VideoPlayer from '../VideoPlayer.svelte';
@@ -28,16 +29,10 @@
 			: `video: ${brick.title || sourceName + ' video'}`
 	);
 
-	// Hours and minutes; a stream runs long enough that seconds are noise.
-	// Not every archived video is a long one though: clips of a few seconds
-	// exist, and rounding those to "0m" makes the card look broken.
-	function runtime(ms: number): string {
-		const seconds = Math.round(ms / 1000);
-		if (seconds < 60) return `${seconds}s`;
-		const minutes = Math.round(seconds / 60);
-		const hours = Math.floor(minutes / 60);
-		return hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
-	}
+	// hours and minutes, from $lib/format: the reader shows the same badge over
+	// the same brick, and a duration that read one way on the card and another
+	// in the reader would be a bug nothing in this repo could see
+	const runtime = $derived(runtimeLabel(brick.durationMs ?? 0));
 
 	const viewers = $derived(
 		brick.viewerCount === 1 ? '1 watching' : `${brick.viewerCount} watching`
@@ -119,11 +114,11 @@
 					{brick.source === 'streamplace' ? '📺 Streamplace' : '🦋 Bluesky'}
 				</span>
 			{/if}
-			{#if brick.durationMs}
+			{#if runtime}
 				<span
 					class="pointer-events-none absolute right-2 bottom-2 rounded-full bg-kiln/75 px-2 py-0.5 text-[0.7rem] font-bold text-chalk tabular-nums"
 				>
-					{runtime(brick.durationMs)}
+					{runtime}
 				</span>
 			{/if}
 		{/if}

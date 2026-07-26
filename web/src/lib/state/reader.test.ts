@@ -228,6 +228,18 @@ describe("stepping", () => {
     expect(opened.brick?.id).toBe("b");
   });
 
+  it("counts the laid wall, so the reader can say where it is in it", () => {
+    const opened = new ReaderState();
+    opened.open(middle);
+    expect(opened.total).toBe(3);
+
+    // the pump lays more behind an open reader, and the position has to follow
+    // the wall rather than the wall it was opened over
+    feed.items = [...wall, brick("d")];
+    expect(opened.total).toBe(4);
+    expect(opened.index).toBe(1);
+  });
+
   it("stops at the last laid brick rather than paginating", () => {
     const loadMore = vi.spyOn(feed, "loadMore");
     const opened = new ReaderState();
@@ -303,6 +315,9 @@ describe("the singleton", () => {
     expect(reader).toBeInstanceOf(ReaderState);
     expect(reader.brick).toBeNull();
     expect(reader.index).toBe(-1);
+    // and therefore no position to show: a shut reader is nowhere on the wall
+    expect(reader.canPrev).toBe(false);
+    expect(reader.canNext).toBe(false);
     expect(reader.showing).toBeNull();
     expect(reader.isOpen).toBe(false);
   });
