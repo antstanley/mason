@@ -54,14 +54,21 @@ pub async fn handle_feed(
     // wasm, so there is nothing to warm: a preview reports itself already
     // settled, and the client freezes to the real page at once.
     if actor == "demo" {
-        let offset = decoded.map(|c| c.offset).unwrap_or(0);
+        // a feed cursor names a position in a generator's ordering, which the
+        // compiled-in fixtures are no part of. It is attacker-writable and the
+        // demo wall is the one wall reachable without an actor, so meeting one
+        // lays from the top like no cursor at all rather than failing the wall.
+        let offset = match decoded {
+            Some(Cursor::Wall { offset, .. }) => offset,
+            Some(Cursor::Feed { .. }) | None => 0,
+        };
         let mut page = demo_page(offset, mode);
         if intent == FeedIntent::Preview {
             page.warming = Some(false);
             // a preview's cursor points at the CURRENT screen (not the next
             // page), so the freeze that follows commits from here. Demo warms
             // instantly, so the client freezes on the first poll either way.
-            page.cursor = Some(cursor::encode(&Cursor { seed: 0, offset }));
+            page.cursor = Some(cursor::encode(&Cursor::Wall { seed: 0, offset }));
         }
         return Ok(page);
     }
@@ -74,8 +81,11 @@ pub async fn handle_feed(
     let did = resolve_and_gate(state, actor).await?;
 
     let (seed, offset) = match decoded {
-        Some(c) => (c.seed, c.offset),
-        None => (snapshot::fresh_seed(&did), 0),
+        Some(Cursor::Wall { seed, offset }) => (seed, offset),
+        // a feed cursor carries a stranger's ordering and names no position in
+        // this snapshot, so the graph path treats it exactly as it treats
+        // garbage: a fresh wall, never an error.
+        Some(Cursor::Feed { .. }) | None => (snapshot::fresh_seed(&did), 0),
     };
 
     // A preview never commits and never waits: it lays the current best first
@@ -87,7 +97,7 @@ pub async fn handle_feed(
         let (items, warming) = snapshot::preview_page(&snap, PAGE_SIZE).await;
         return Ok(FeedResponse {
             items,
-            cursor: Some(cursor::encode(&Cursor { seed, offset: 0 })),
+            cursor: Some(cursor::encode(&Cursor::Wall { seed, offset: 0 })),
             warming: Some(warming),
         });
     }
@@ -100,7 +110,7 @@ pub async fn handle_feed(
     let wait_for_mix = intent == FeedIntent::Normal;
     let (items, has_more) = snapshot::get_page(state, &snap, offset, PAGE_SIZE, wait_for_mix).await;
     let next = has_more.then(|| {
-        cursor::encode(&Cursor {
+        cursor::encode(&Cursor::Wall {
             seed,
             // saturating: the offset came off an attacker-writable cursor
             offset: offset.saturating_add(items.len()),
@@ -199,7 +209,7 @@ fn demo_page(offset: usize, mode: Mode) -> FeedResponse {
     let items: Vec<_> = pool.iter().skip(offset).take(PAGE_SIZE).cloned().collect();
     let next_offset = offset.saturating_add(items.len());
     let cursor = (next_offset < pool.len()).then(|| {
-        cursor::encode(&Cursor {
+        cursor::encode(&Cursor::Wall {
             seed: 0,
             offset: next_offset,
         })
@@ -218,6 +228,120 @@ mod tests {
     use crate::state::AppState;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// A cursor is attacker-writable and a feed cursor is now a legal thing for
+    /// one to hold, so the demo wall has to survive meeting one. It lays from
+    /// the top, exactly as it does with no cursor, and the preview it hands back
+    /// is a graph cursor so the freeze that follows resumes on the demo wall's
+    /// own terms rather than echoing a stranger's ordering.
+    #[tokio::test]
+    async fn a_feed_cursor_on_the_demo_wall_lays_from_the_top() {
+        let state = Arc::new(AppState::new(Config::default()));
+        let feed_cursor = cursor::encode(&Cursor::Feed {
+            feed: "3lqk2hj4xyz2t".to_string(),
+        });
+
+        let fresh = handle_feed(&state, "demo", None, Mode::Wall, FeedIntent::Normal)
+            .await
+            .expect("the demo wall always lays");
+        let with_feed_cursor = handle_feed(
+            &state,
+            "demo",
+            Some(&feed_cursor),
+            Mode::Wall,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect("a feed cursor must not fail the demo wall");
+        assert!(!fresh.items.is_empty(), "the fixture pool is not empty");
+        let laid: Vec<&str> = with_feed_cursor.items.iter().map(Brick::id).collect();
+        let from_the_top: Vec<&str> = fresh.items.iter().map(Brick::id).collect();
+        assert_eq!(laid, from_the_top, "a feed cursor means offset 0 here");
+
+        let preview = handle_feed(
+            &state,
+            "demo",
+            Some(&feed_cursor),
+            Mode::Wall,
+            FeedIntent::Preview,
+        )
+        .await
+        .expect("a preview must lay too");
+        let echoed = cursor::decode(
+            preview
+                .cursor
+                .as_deref()
+                .expect("a demo preview always hands back its own screen"),
+        )
+        .expect("and that cursor decodes");
+        assert_eq!(echoed, Cursor::Wall { seed: 0, offset: 0 });
+    }
+
+    /// The same wrong-shape case on the real path. A graph wall meeting a feed
+    /// cursor has no position to resume from, so it lays a fresh wall the way a
+    /// tampered cursor already does, rather than 500ing or panicking on a shape
+    /// it cannot read.
+    #[tokio::test]
+    async fn a_feed_cursor_on_the_graph_wall_lays_a_fresh_wall() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "did": "did:plc:viewer",
+                "handle": "viewer.test"
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.graph.getFollows"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "follows": [{"did": "did:plc:friend", "handle": "friend.test"}]
+            })))
+            .mount(&server)
+            .await;
+        let created = (chrono::Utc::now() - chrono::TimeDelta::hours(1)).to_rfc3339();
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"feed": [{
+                    "post": {
+                        "uri": "at://did:plc:friend/app.bsky.feed.post/1",
+                        "author": {"did": "did:plc:friend", "handle": "friend.test"},
+                        "record": {"text": "hi", "createdAt": created},
+                        "likeCount": 0, "repostCount": 0
+                    }
+                }]})),
+            )
+            .mount(&server)
+            .await;
+
+        let state = Arc::new(AppState::new(Config {
+            appview_base: server.uri(),
+            ..Default::default()
+        }));
+
+        let feed_cursor = cursor::encode(&Cursor::Feed {
+            feed: "3lqk2hj4xyz2t".to_string(),
+        });
+        let page = handle_feed(
+            &state,
+            "did:plc:viewer",
+            Some(&feed_cursor),
+            Mode::Wall,
+            FeedIntent::Normal,
+        )
+        .await
+        .expect("a feed cursor must not fail a graph wall");
+        assert_eq!(
+            page.items.iter().map(Brick::id).collect::<Vec<_>>(),
+            vec!["at://did:plc:friend/app.bsky.feed.post/1"],
+            "the wall is laid from the top, not from a borrowed offset"
+        );
+        // a one-author graph is spent the moment its single post is laid, so
+        // the wall honestly ends rather than echoing back the feed cursor it
+        // was handed and inviting a page that can never come.
+        assert!(page.cursor.is_none(), "a spent graph ends the wall");
+    }
 
     /// A wall owner who opted out of logged-out visibility gets a login-required
     /// error, and no snapshot is built. A `did:` actor skips handle resolution,

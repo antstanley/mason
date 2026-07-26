@@ -1,0 +1,170 @@
+# Done Certificate · Task 09: cursor two shapes
+
+**Task:** [09-cursor_two_shapes.md](09-cursor_two_shapes.md) · **Plan:** [plan.md](../plan.md)
+**State:** Validated 2026-07-26
+
+> Verification protocol for Task 09. A validating agent discharges it: collect each obligation's
+> evidence, run its checks, set the Status, then derive the Conclusion by the rubric.
+
+## Definition
+
+DONE(Task 09) is every obligation O1 to O5 below holding, each backed by the evidence it names.
+
+## Premises
+
+- **P1 · Goal.** A feed cursor round-trips, and every cursor mason has ever issued still decodes to
+  the graph shape.
+- **P2 · Obligations.** Done iff O1 to O5 all hold; O5 is the Reviewable item.
+- **P3 · Invariants.** Must not break mid-scroll readers across the deploy: a cursor issued before
+  this change carries `{seed, offset}` and possibly a stray `snapshot` key, and must still land the
+  reader at their offset rather than on a fresh wall.
+
+## Obligations
+
+- **O1 · All three pre-existing cursor tests still pass, and their data is unchanged.**
+  - *Claim:* the file holds **three** tests, not two: `roundtrip` (`cursor.rs:32`),
+    `a_cursor_carrying_the_removed_snapshot_key_still_decodes_to_its_seed_and_offset` (`:46`) and
+    `garbage_is_none` (`:59`). All three pass. `garbage_is_none` is unchanged in full. The other two
+    keep their inputs and their expected `(seed, offset)` of `(42, 96)`, and their **only** edit is
+    respelling `Cursor { .. }` as `Cursor::Wall { .. }`.
+  - *Evidence to collect:* run `cd server && cargo nextest run -p mortar-core cursor`. Diff
+    `algo/cursor.rs`'s test module against the previous revision. Confirm `garbage_is_none` has a
+    zero-line diff, and that the diffs on the other two are the constructor spelling and nothing
+    else: the base64 literal in the legacy test and both `42` / `96` values must be untouched.
+  - *Checks:* do **not** read a zero-line diff on `roundtrip` or the legacy test as success. Both
+    write struct expressions (`:33` and `:51`), which cannot compile against an enum, so an unedited
+    body means either the change was not made or `Cursor` was contorted (a struct wrapping an enum,
+    a type alias, a `Default`) to keep them compiling. Separately: an untagged enum decodes
+    structurally, so `{"seed":42}` must still be `None`, which it is only because `Wall` requires
+    both fields and `Feed` requires `feed`. Confirm neither variant gained a `#[serde(default)]`
+    that would make a partial object match.
+  - *Status:* SATISFIED. `cargo nextest run -p mortar-core cursor` → 10 tests run, 10 passed, 92
+    skipped; the three pre-existing bodies (`roundtrip`, the legacy stray-key test,
+    `garbage_is_none`) are among the passes. `jj diff` against `@-` shows `garbage_is_none` with a
+    zero-line diff (its `{"seed":42}` case is byte-for-byte the old one, confirmed by reading
+    `jj file show -r @- .../cursor.rs` beside the working copy). The other two bodies gained exactly
+    `::Wall` on their constructor: the legacy test still encodes the byte string
+    `{"snapshot":"wall-0123456789abcdef","seed":42,"offset":96}` (`cursor.rs:107`) and still expects
+    `seed: 42, offset: 96` (`:111`); `roundtrip` still round-trips 42 and 96 (`:64`). Checks: the
+    two diffs are non-empty, as the type change requires, and no `Cursor` alias, wrapper struct or
+    `Default` was introduced (`cursor.rs:22-39` is the enum itself). `grep -rn
+    "deny_unknown_fields\|serde(default)" server/crates/` finds neither on `Cursor` (the only
+    `cursor.rs` hit is the prose word in a doc comment at `:102`), so a partial object still fails
+    both variants.
+
+- **O2 · Both shapes round-trip and the demo re-encode still produces a graph cursor.**
+  - *Claim:* a `Feed` cursor round-trips through encode and decode; a `Wall` cursor still does; the
+    demo preview re-encode at `feed.rs:64` still produces a `Wall` cursor.
+  - *Evidence to collect:* run the named round-trip tests. Read `feed.rs` around `:57` and `:64` and
+    confirm the demo branch reads an offset from the `Wall` arm and re-encodes a `Wall`.
+  - *Checks:* `Feed` is declared first in the enum, which is load-bearing for the untagged decode.
+    Confirm the declaration order and the comment saying so.
+  - *Status:* SATISFIED. `algo::cursor::tests::a_feed_cursor_roundtrips` and
+    `algo::cursor::tests::roundtrip` both PASS, as does `neither_shape_decodes_as_the_other`.
+    `feed.rs:61-64` reads the offset from the `Wall` arm (`Some(Cursor::Wall { offset, .. }) =>
+    offset`) and `feed.rs:71` re-encodes `Cursor::Wall { seed: 0, offset }`;
+    `feed::tests::a_feed_cursor_on_the_demo_wall_lays_from_the_top` decodes that preview cursor and
+    asserts it equals `Cursor::Wall { seed: 0, offset: 0 }` (PASS). Checks: `Feed` is declared first
+    (`cursor.rs:27`, `Wall` at `:33`) and the doc comment at `:11-17` says the order is load-bearing
+    and why. The reasoning was tested rather than read: an out-of-tree probe crate carrying a
+    verbatim copy of the enum, plus a variant-order-reversed twin, shows raw
+    `{"snapshot":...,"seed":42,"offset":96}` → `Wall` and raw `{"feed":"3lqk"}` → `Feed` under either
+    order (so no legacy cursor depends on the order), while a payload carrying *both* shapes' fields
+    decodes as `Feed` under the declared order and as `Wall` when reversed. `Wall` also serialises
+    with no tag, byte-identical to the old struct's wire format (`{"seed":42,"offset":96}`).
+
+- **O3 · The wrong shape on the wrong path degrades rather than panics.**
+  - *Claim:* a `Feed` cursor arriving on the graph path yields a fresh wall, not a panic and not a
+    500; on the demo path it yields offset 0.
+  - *Evidence to collect:* find and run the two negative-space tests by name. Read `feed.rs:76` and
+    `feed.rs:57` and confirm both match on the arm rather than unwrapping a field.
+  - *Status:* SATISFIED. Both negative-space tests exist and PASS:
+    `feed::tests::a_feed_cursor_on_the_graph_wall_lays_a_fresh_wall` (wiremock getProfile +
+    getFollows + getAuthorFeed; the wall is laid from the top, `Ok` not `Err`, no panic) and
+    `feed::tests::a_feed_cursor_on_the_demo_wall_lays_from_the_top` (the items are identical to the
+    no-cursor call, i.e. offset 0). Both call sites match on the arm and never unwrap a field:
+    `feed.rs:83-89` is `Some(Cursor::Wall { seed, offset }) => (seed, offset)` with
+    `Some(Cursor::Feed { .. }) | None => (snapshot::fresh_seed(&did), 0)`, and `feed.rs:61-64` is the
+    same shape for the demo offset. The graph arm reaches `snapshot::fresh_seed`, the identical
+    expression the `None` (garbage) arm has always used, so a feed cursor is degraded exactly as
+    garbage is.
+
+- **O4 · `Cursor` is named only where it should be.**
+  - *Claim:* no module outside `algo/cursor.rs` and `feed.rs` names `Cursor`.
+  - *Evidence to collect:* run `grep -rn 'Cursor' server/crates/mortar-core/src --include=*.rs` and
+    confirm every hit is in one of the two files (or is an unrelated identifier such as a `cursor`
+    field on a response type).
+  - *Status:* SATISFIED. `grep -rn "Cursor" server/crates --include="*.rs"` returns hits only in
+    `algo/cursor.rs` and `feed.rs`; filtering those two out leaves nothing. Widened to
+    `grep -rn -w "Cursor" server web` over `*.rs`, `*.ts`, `*.svelte`, `*.js`, `*.json` (excluding
+    `node_modules`, `target/`, the generated `mortar-wasm/pkg`): same two files, nothing in `web`.
+    The client treats the cursor as an opaque string (`web/src/lib/types.ts:121`,
+    `web/src/lib/api.ts:38-46`, `web/src/service-worker.ts:243`), so no front parses the payload.
+
+- **O5 · Meets the repo definition of done, and reviewable: the same bytes still decode to the same wall.**
+  - *Claim:* negative-space tests cover the wrong-shape cases, the gates are green, and the proof of
+    backward compatibility is that the legacy test still feeds
+    `{"snapshot":"wall-0123456789abcdef","seed":42,"offset":96}` and still expects seed 42 and
+    offset 96.
+  - *Evidence to collect:* run `just guard-wasm` and `just check`. Then read the diff of
+    `algo/cursor.rs` and confirm the changes are the enum, the signatures, `::Wall` on two
+    constructor spellings, and new tests. Nothing else.
+  - *Checks:* the obligation is on the data, not on the diff being empty. A reviewer who requires an
+    untouched test module here is asking for something the type change makes impossible; a reviewer
+    who accepts a changed base64 literal or a changed expected offset has lost the guarantee that a
+    reader mid-scroll survives the deploy.
+  - *Status:* SATISFIED. `just guard-wasm` → exit 0 (`cargo check -p mortar-core -p mortar-wasm
+    --target wasm32-unknown-unknown --all-targets`). `just check` → exit 0: guard-dashes,
+    guard-autoplay, guard-toolchain silent, fmt-check clean, guard-wasm clean, oxlint (four warnings,
+    all pre-existing and in `web` files this diff does not touch), knip clean, `cargo clippy
+    --workspace --all-targets -- -D warnings` clean, 102 Rust tests passed 0 skipped, `tsc --noEmit`
+    clean, 39 vitest passed. `jj st` shows exactly two modified files, both Rust. The `cursor.rs`
+    diff is the enum plus its doc comments, the `decode` doc note, `::Wall` on two constructor
+    spellings, and three new tests, and nothing else; `feed.rs` is six constructor respellings, two
+    `match` arms and two new tests. Reviewable action exercised: `cd server && cargo nextest run -p
+    mortar-core cursor` → 10 passed, then the test-module diff read line by line. The byte string
+    `{"snapshot":"wall-0123456789abcdef","seed":42,"offset":96}` and the expected `42` / `96` are
+    untouched.
+
+## Regression check
+
+- `feed.rs:51` decodes an incoming cursor. Trace: a base64url of
+  `{"snapshot":"wall-0123456789abcdef","seed":42,"offset":96}` still yields seed 42 and offset 96 :
+  **PRESERVED**. base64 decodes, the untagged decode tries `Feed` (no `feed` key, fails) then `Wall`
+  (`seed: 42`, `offset: 96`, the unknown `snapshot` key ignored for want of `deny_unknown_fields`),
+  so `feed.rs:83` binds `(42, 96)` and the reader resumes at 96 rather than at 0. Evidenced by
+  `a_cursor_carrying_the_removed_snapshot_key_still_decodes_to_its_seed_and_offset` (PASS) and
+  independently by the raw-bytes probe.
+- `feed.rs:190 demo_page` and `feed.rs:102` both encode cursors (now `:212` and `:113` after the
+  file grew). Trace: both still produce a `Wall` shape, so a reader mid-scroll on a graph wall is
+  unaffected : **PRESERVED**. An untagged enum serialises its variant's fields with no discriminator,
+  so `Cursor::Wall { seed, offset }` still writes the byte string `{"seed":..,"offset":..}` the old
+  struct wrote (probe-confirmed), and the demo, preview and next-page encodes all pass through the
+  `Wall` arm. The whole `mortar-core` suite (102 tests, including `the_scroll_extends_past_the_first
+  _cohort` and the `contract` wire fixture) passes.
+- Beyond the certificate's two: no consumer outside these two modules exists (O4), `encode` and
+  `decode` keep their signatures, and the web treats the cursor as an opaque string : **PRESERVED**.
+
+## Residue
+
+- A future field added to either shape could make one start matching the other. Not an obligation
+  here; the plan records the mitigation (keep `feed` required, keep `Feed` first, add a round-trip
+  test for both shapes with any new field).
+
+## Conclusion
+
+VERDICT: DONE
+CONFIDENCE: high
+SUMMARY: O1 to O5 are all SATISFIED on evidence collected here (10 cursor tests and 102 suite tests
+run green, the test-module diff read against `@-` with `garbage_is_none` byte-identical and the
+legacy byte string and its 42 / 96 untouched, `just guard-wasm` and `just check` both exit 0, the
+`Cursor` grep clean outside the two modules), and both named regression traces are PRESERVED,
+including the wire format, which an out-of-tree probe confirms is byte-identical for the `Wall`
+shape.
+
+Notes outside the obligations, for the merge and feed-wall tasks rather than this one: the change
+spec's `CursorPayload` `$def` gives both shapes `additionalProperties: false` and the feed string
+`minLength: 1`, neither of which the Rust enforces. The first is a contradiction inside the spec (its
+own implementation note 6 and the graph shape's backward-compatibility guarantee require the absence
+of `deny_unknown_fields`), and the second has no consumer until the feed wall lands; an empty feed
+string decodes today and degrades to a fresh wall on both paths.
