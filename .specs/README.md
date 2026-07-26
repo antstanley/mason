@@ -44,14 +44,33 @@ spec is folded back in; a change proposed and shipped together goes straight to
 A merged spec moves to [`changes/merged/`](changes/merged/) and is kept as dated
 history, including any claim it turned out to get wrong, annotated in place.
 
-No change spec is pending. Every one proposed so far has been merged into the
-pages above and moved to [`changes/merged/`](changes/merged/).
+Three change specs are pending, all proposed on 2026-07-26 from the same batch of
+feature requests. They are independent and can land in any order, but each names
+what it owes the other two if it merges second.
+
+| Pending change spec | Proposes |
+|---|---|
+| [2026-07-26-read_a_brick_in_place.md](changes/2026-07-26-read_a_brick_in_place.md) | An in-place brick reader, so a card no longer has to be a link out. No wire change; one Rust fixture field, so the reveal has something to reveal |
+| [2026-07-26-lay_a_bluesky_feed.md](changes/2026-07-26-lay_a_bluesky_feed.md) | Split a wall into a source and a view: `?feed=<at-uri>` lays any Bluesky feed generator in its own order with no snapshot behind it, all three views apply to either source, and a feed picker becomes the second front door |
+| [2026-07-26-refresh_the_wall.md](changes/2026-07-26-refresh_the_wall.md) | A refresh control and a `refresh=1` flag that re-reads the fast content caches: two of them on a graph wall, one on a feed wall |
 
 | Merged change spec | Merged | Shipped |
 |---|---|---|
 | [2026-07-25-honest_native_user_agent.md](changes/merged/2026-07-25-honest_native_user_agent.md) | 2026-07-25 | A native user agent derived from the crate version, with a real contact URL |
 | [2026-07-25-drop_snapshot_from_cursor.md](changes/merged/2026-07-25-drop_snapshot_from_cursor.md) | 2026-07-25 | Removed the `snapshot` field the cursor carried and never read |
 | [2026-07-25-tighten_typescript_and_add_a_prepush_gate.md](changes/merged/2026-07-25-tighten_typescript_and_add_a_prepush_gate.md) | 2026-07-25 | `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and `just push` as the local gate |
+
+## Plans
+
+An implementation plan decomposes one or more specs into a dependency-ordered
+graph of reviewable task packages, each with a definition of done and a done
+certificate a validator later discharges. Plans live under
+[`plans/`](plans/); a plan's folder is a kanban board, so a task's status is the
+subfolder it sits in.
+
+| Plan | Covers |
+|---|---|
+| [2026-07-26-build_the_three_change_specs](plans/2026-07-26-build_the_three_change_specs/plan.md) | All three pending change specs as one ordered build: 28 tasks in four milestones, sequenced so each shared surface is touched once in its final shape and the wire fixture is regenerated three times in a fixed order |
 
 ## Related documents
 
