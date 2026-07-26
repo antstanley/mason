@@ -228,11 +228,13 @@ async fn fan_out_authors(
         async move {
             // glaze reads the author's media deep (posts_with_media); the full
             // wall skims their last thirty posts. Separate caches, so neither
-            // read clobbers the other's.
+            // read clobbers the other's. The `false` is the refresh bypass:
+            // nothing asks a fan-out for a re-read yet, so both reads are
+            // content to be served from the five-minute content caches.
             let yield_ = if deep_media {
-                fetch::image_feed_cached(&state, &author.did).await
+                fetch::image_feed_cached(&state, &author.did, false).await
             } else {
-                fetch::author_feed_cached(&state, &author.did).await
+                fetch::author_feed_cached(&state, &author.did, false).await
             };
             (author, yield_)
         }
