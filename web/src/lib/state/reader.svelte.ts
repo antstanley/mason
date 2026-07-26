@@ -35,13 +35,14 @@ function focusable(target: EventTarget | null): Focusable | null {
 
 /** The brick reader: one brick read in place, over the wall it came from.
  *
- *  `page.state.brick` is the single source of truth for whether the reader is up
- *  (`App.PageState` in `app.d.ts`), which is what makes the back gesture close
- *  it. This rune holds the `Brick` itself, because page state carries an id and
- *  mason has no way to fetch one brick by id: the wall is the only place it
- *  exists. Every decision the reader makes lives here rather than in the dialog,
- *  since a `.svelte.ts` rune module is typechecked and tested and a `.svelte`
- *  component body is neither.
+ *  `page.state.brick` (`App.PageState` in `app.d.ts`) is what opens and shuts
+ *  it, which is what makes the back gesture close it. This rune holds the
+ *  `Brick` itself, because page state carries an id and mason has no way to
+ *  fetch one brick by id: the wall is the only place it exists. So the id alone
+ *  is not the answer to "is the reader up"; `showing` below is, and it is the
+ *  ONE place `page.state.brick` is read. Every decision the reader makes lives
+ *  here rather than in the dialog, since a `.svelte.ts` rune module is
+ *  typechecked and tested and a `.svelte` component body is neither.
  *
  *  Exported for the unit tests, which build throwaway instances; the app only
  *  ever uses the `reader` singleton below. */
@@ -55,12 +56,34 @@ export class ReaderState {
   /** Whether the history entry the reader is sitting on is ours to pop. */
   #pushed = false;
 
-  /** Whether the reader is up. `page.state` decides that and `brick` does not:
-   *  the back gesture clears the state without ever calling `close`, and the
-   *  brick is deliberately still held afterwards so a dialog on its way out
-   *  never reads a null one mid-teardown. */
+  /** The brick the reader is actually showing, or null when it is showing
+   *  nothing. Two things have to agree before a reader is up: `page.state` names
+   *  a brick, which is what the back gesture clears, AND this rune is holding
+   *  that same brick, which is what a reload drops. They can disagree, because a
+   *  history entry outlives the rune that pushed it: open the reader, go back,
+   *  reload, then go forward, and the entry returns with its id while the rune
+   *  is empty. It is `brick` narrowed and never a lookup, since mason has no way
+   *  to fetch one brick by id: the wall is the only place a brick exists.
+   *
+   *  The predicate lives here, once, because the dialog is not the only thing
+   *  that asks it. The layout dims and freezes the wall behind the reader, and a
+   *  wall made inert on a wider condition than the reader renders on is a page
+   *  frozen under nothing at all. */
+  get showing(): Brick | null {
+    const id = page.state.brick;
+    const held = this.brick;
+    return id !== undefined && held?.id === id ? held : null;
+  }
+
+  /** Whether the reader is up, which is exactly "there is a brick to show".
+   *  Defined off `showing` rather than beside it, so the boolean the layout
+   *  reads and the brick the dialog renders can never drift apart.
+   *
+   *  Note which half goes empty on close: the back gesture clears `page.state`
+   *  without ever calling `close`, and `brick` is deliberately still held after
+   *  that, so nothing mid-teardown reads a null one. */
   get isOpen(): boolean {
-    return page.state.brick !== undefined;
+    return this.showing !== null;
   }
 
   /** Where the open brick sits on the wall, located by id on every read rather

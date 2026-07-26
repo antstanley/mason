@@ -1,8 +1,9 @@
 // Every decision the brick reader makes: which clicks it takes, the freeze that
 // has to land before the history push, where a step lands on a wall it locates
-// by id, and which of the two ways it shuts. The dialog that renders all this is
-// a `.svelte` file and no lane in this repo typechecks one, which is exactly why
-// the decisions live in a rune module and are pinned here.
+// by id, whether it is up at all, and which of the two ways it shuts. The dialog
+// that renders all this is a `.svelte` file and no lane in this repo typechecks
+// one, which is exactly why the decisions live in a rune module and are pinned
+// here.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pushState, replaceState } from "$app/navigation";
 import { fetchFeed } from "$lib/api";
@@ -176,10 +177,34 @@ describe("opening", () => {
     opened.open(brick("a"));
     pageState.brick = "a"; // the router's own update, once the push lands
     expect(opened.isOpen).toBe(true);
+    expect(opened.showing?.id).toBe("a");
 
     delete pageState.brick; // the back gesture, which never calls close()
     expect(opened.isOpen).toBe(false);
-    expect(opened.brick?.id).toBe("a"); // still held, so a closing dialog can render
+    expect(opened.showing).toBeNull();
+    expect(opened.brick?.id).toBe("a"); // it is showing that empties, never brick
+  });
+
+  it("shows nothing for an entry whose brick it is not holding", () => {
+    const opened = new ReaderState();
+    // a history entry outlives the rune that pushed it: open the reader, go
+    // back, reload, then go forward, and the entry returns with its id while
+    // this rune is brand new and empty. There is no lookup that could save it,
+    // because the wall is the only place a brick exists.
+    pageState.brick = "a";
+    expect(opened.brick).toBeNull();
+    expect(opened.showing).toBeNull();
+    // and therefore not up, which is what keeps the wall behind it from going
+    // inert and scroll-locked under an overlay that renders nothing
+    expect(opened.isOpen).toBe(false);
+  });
+
+  it("shows nothing while the entry and the held brick name different bricks", () => {
+    const opened = new ReaderState();
+    opened.open(first);
+    pageState.brick = "c"; // an entry from an earlier life of this tab
+    expect(opened.showing).toBeNull();
+    expect(opened.isOpen).toBe(false);
   });
 });
 
@@ -278,6 +303,7 @@ describe("the singleton", () => {
     expect(reader).toBeInstanceOf(ReaderState);
     expect(reader.brick).toBeNull();
     expect(reader.index).toBe(-1);
+    expect(reader.showing).toBeNull();
     expect(reader.isOpen).toBe(false);
   });
 });

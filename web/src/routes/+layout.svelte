@@ -4,13 +4,25 @@
 	import { beforeNavigate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { localMode } from '$lib/api';
+	import BrickReader from '$lib/components/BrickReader.svelte';
 	import ClientPicker from '$lib/components/ClientPicker.svelte';
 	import LayoutPicker from '$lib/components/LayoutPicker.svelte';
 	import SwitchWall from '$lib/components/SwitchWall.svelte';
+	import { reader } from '$lib/state/reader.svelte';
 
 	let { children } = $props();
 
 	const actor = $derived(page.url.searchParams.get('actor'));
+
+	// Everything under the wrapper below goes inert while an overlay covers the
+	// wall, which is what traps focus inside the overlay: the wrapper rather
+	// than the wall itself, because on the wall the header's pickers would stay
+	// tabbable behind it. One disjunct per in-place surface, and each disjunct
+	// asks that surface itself whether it is up rather than re-deriving the
+	// answer here. Page state alone is wider than the reader (see
+	// reader.showing), and a wrapper made inert on a wider condition than the
+	// overlay renders on leaves the wall frozen under nothing at all.
+	const overlayOpen = $derived(reader.isOpen);
 
 	// local mode: the wasm service worker IS the feed server.
 	// Always type module: the wasm-bindgen glue contains `import.meta`,
@@ -107,7 +119,10 @@
 	/>
 </svelte:head>
 
-<div class="mx-auto min-h-screen max-w-[1800px] px-4 sm:px-6 {actor ? 'pb-24 md:pb-0' : ''}">
+<div
+	inert={overlayOpen}
+	class="mx-auto min-h-screen max-w-[1800px] px-4 sm:px-6 {actor ? 'pb-24 md:pb-0' : ''}"
+>
 	{#if actor}
 		<a
 			href="#wall"
@@ -132,3 +147,8 @@
 	{/if}
 	{@render children()}
 </div>
+
+<!-- OUTSIDE the wrapper above, deliberately: that wrapper is the element made
+     inert, and inert covers every descendant, so a reader mounted inside it
+     would open unfocusable and invisible to assistive tech -->
+<BrickReader />
