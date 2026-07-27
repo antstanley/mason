@@ -683,7 +683,13 @@ mod tests {
 
         let state = Arc::new(AppState::new(Config {
             appview_base: server.uri(),
-            ..Default::default()
+            // Pin plc too, as the other graph-wall tests in this file do. The
+            // fill resolves a friend's PDS through it, so a default base leaves
+            // the test reaching for the real plc.directory: green while the
+            // machine is online, and an eight second hang that flips this
+            // assertion the moment it is not.
+            plc_base: server.uri(),
+            streamplace_base: server.uri(),
         }));
 
         let feed_cursor = cursor::encode(&Cursor::Feed {
