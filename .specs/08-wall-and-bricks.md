@@ -1,6 +1,6 @@
 # 08 - The Wall and Its Bricks
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley
 
 This page covers what a reader sees and touches: the three wall layouts, the card
 components that render each brick kind, the video player, and the states a wall
@@ -18,6 +18,7 @@ can be in. The state machine driving it is in
 3. Keep the endless scroll moving, and say so honestly when it cannot.
 4. Play video only on an explicit click, one at a time.
 5. Keep DOM order equal to feed order, whatever the visual packing does.
+6. Open any brick in place, at full size, without leaving the wall.
 
 ---
 
@@ -121,9 +122,26 @@ Details worth pinning:
 - **Icons are inline SVG, never glyphs.** Glyph characters sit on a font baseline
   and render unevenly across platforms; `Icon.svelte` holds every lucide path the
   app draws.
-- **Outbound links** are `target="_blank" rel="noopener noreferrer"` and go
-  through `clientUrl`, which rewrites `bsky.app` to the reader's chosen client and
-  passes everything else through.
+- **Every outbound anchor stays a real link, and the anchor that stands for the
+  brick opens the reader on a plain click.** Anchors keep `target="_blank"` and
+  `rel="noopener noreferrer"`, and the Bluesky ones keep their `clientUrl`
+  rewrite, so middle-click, cmd-click and "copy link address" all still reach
+  the source. A blog anchor points at the publication directly and always did:
+  `clientUrl` rewrites `bsky.app` hostnames and nothing else, so a blog card has
+  never had one to keep. A plain unmodified left click is intercepted
+  (`preventDefault`) and opens the brick reader. Keeping the anchor rather than
+  swapping it for a button is what preserves the browser's own affordances.
+
+  `GlazeCard`'s existing rule that a tap opens the post while a drag scrolls
+  the strip still holds; the tap now opens the reader instead.
+
+  **Which anchor stands for the brick differs by card, and there are three of
+  them.** Only post and blog cards hand `BrickShell` an `href`, so only they
+  have a card-wide link: a video card's one anchor is its watch-at-source link,
+  and a glaze card's are per image. All three call the same
+  `reader.activate(event, brick)`, so the modifier-key rule lives in one place.
+  Intercepting `BrickShell` alone would leave the entire glaze wall and every
+  video brick with no way into the reader.
 
 ### GlazeCard
 
@@ -142,14 +160,80 @@ a 140 ms debounced fallback, and both defer to an in-flight programmatic
 correction. A live region announces "image N of M".
 
 Each image is its own link and the controls sit outside them, so a tap opens the
-post while a drag scrolls the strip and the arrows never trip navigation. At rest
-the card is just the picture; on hover an author pill and the caption fade in.
-Touch has no hover, so there they stay shown.
+brick in the reader while a drag scrolls the strip and the arrows never trip
+navigation. At rest the card is just the picture; on hover an author pill and
+the caption fade in. Touch has no hover, so there they stay shown.
 
 When any image carries a description, the caption bar gains an **ALT** button.
 Opening it behaves like a small dialog: focus moves to the close control, Escape
 or the close button returns focus to the trigger, and the covered strip is
 `inert` while it is up.
+
+---
+
+## The brick reader
+
+`BrickReader` renders one brick at reading width over a dimmed wall. It is
+mounted once in `+layout.svelte`, so the header dims with everything else, and
+it renders nothing at all unless the reader is showing a brick: `page.state.brick`
+naming one the `reader` rune is still holding (see
+[07-web-client.md](07-web-client.md)).
+
+It shows what the card had to leave out. Nothing here is fetched: the reader is
+the same `Brick` the card was given.
+
+It shows that brick and nothing around it. No replies, no thread context, no
+parent post: the reader is one brick, larger. That boundary is what keeps it a
+rendering change rather than a new surface, and it is stated here because a
+reader-shaped overlay is exactly where somebody will assume a conversation
+lives.
+
+| Kind | What the reader adds over the card |
+|---|---|
+| Post | Every image, each at its own aspect ratio, rather than the first one; the full text unclamped; the external embed with its whole description; the timestamp |
+| Post (from glaze) | The same reader. A glaze brick is a post brick, so its filmstrip becomes a stack and every alt text is readable |
+| Video | The poster with a play button that mounts `VideoPlayer` exactly as the card does; title, activity or viewer count, runtime, author |
+| Blog | The cover at full width, the publication chip, the whole description, every tag rather than four, the published date, and "read at <publication>" as the primary control |
+
+A blog's article body is still not rendered, and the reader is where that
+limit is most visible: the content union of `site.standard.document` is
+platform-specific and mason never parses it (see
+[00-overview.md](00-overview.md)). The reader answers that by making the
+outbound link the primary action on a blog rather than a footnote.
+
+### Dialog behaviour
+
+The reader is a modal dialog in the same language as `SwitchWall`:
+`role="dialog"` with `aria-modal="true"`, labelled by the brick's own heading
+or its author line.
+
+- Focus moves into the reader on open and returns to the card that opened it
+  on close, so a keyboard reader lands back where they were on the wall.
+- Escape closes. So does the close control, a click on the scrim, and the back
+  gesture (the reader is a history entry).
+- The layout's content wrapper is `inert` while the reader is up, which is what
+  traps focus. The reader is mounted as that wrapper's **sibling**, not inside
+  it, because `inert` applies to an element and all of its descendants: a reader
+  nested in the wrapper it dims would be unfocusable and invisible to assistive
+  tech the moment it opened.
+- `document.documentElement` gets `overflow: hidden`, which stops the wall
+  scrolling behind the reader. It does not stop the pump: the sentinel's
+  observer stays connected, so bricks may still be appended behind an open
+  reader. That is harmless, because an append never moves a laid brick and the
+  reader locates its own brick by id.
+- Left and right arrows step to the previous and next brick on the wall, and
+  two visible controls do the same. Stepping stops at the ends of the laid
+  wall; the reader never triggers pagination. A step swaps the whole panel, so
+  it keeps focus inside the reader and announces the brick's new position
+  politely.
+- One video plays at a time, network-wide, unchanged, but the reader must claim
+  the player under **its own id** (`reader:<brick.id>`). A card collapses back
+  to its poster only when `player.activeId` stops matching its own brick id, so
+  a reader claiming the same id would leave the card mounted and playing behind
+  the scrim, two elements and two audio streams. Claiming a distinct id makes
+  the card a loser of the claim and tears it down through the path that already
+  exists. `VideoPlayer` remains the only sanctioned `.play(`, and
+  `just guard-autoplay` still holds over the reader.
 
 ---
 
@@ -198,8 +282,18 @@ it. The hidden tier never reaches the wall at all (see
 [04](04-sources-and-moderation.md)), so anything that gets here can always be
 revealed.
 
-The choice is per brick and forgotten on reload, by design: no storage, no
-lingering "show everything" switch.
+The choice is per brick and keyed by brick id in the `revealed` session set, so
+a brick uncovered on the card is still uncovered in the reader and on a
+re-place. It is forgotten on reload, by design: the set lives in a rune, never
+in storage, so there is no lingering "show everything" switch.
+
+On the post card and on the glaze card's single and grid branches the reveal
+button sits *inside* the card's own anchor, so it stops the click twice:
+`stopPropagation` keeps it away from the reader's activation handler on that
+anchor, and `preventDefault` keeps the anchor's `href` from opening the source,
+which propagation alone cannot reach because the browser gates that navigation
+on `defaultPrevented` rather than on the listener chain. Together they keep
+"show anyway" a reveal and only a reveal.
 
 ---
 
@@ -288,6 +382,17 @@ live in components.
   switcher.
 - **Touch targets are at least 44px** (`min-h-11`) on every control, including
   the ones that shrink to icons on mobile.
+- **The reader is a real dialog.** `role="dialog"`, `aria-modal="true"`, an
+  accessible name from the brick, focus in on open and back to the opening card
+  on close, Escape and click-away, and `inert` on everything behind it (with the
+  reader mounted outside the inert subtree). Left and right arrows step along
+  the wall from inside it, and they cannot collide with the wall's own
+  navigation-key freeze handler because the two key sets are disjoint: that
+  handler matches the vertical set (`ArrowDown`, `ArrowUp`, `PageDown`,
+  `PageUp`, `Home`, `End`, space) and never the horizontal one. The disjointness
+  is what carries this, not the freeze: `feed.freeze()` is async and does not
+  clear `warming` until its fetch resolves, so the wall's listeners are still
+  attached while the reader mounts.
 - **Motion is gated.** Hover transforms are `motion-safe:` at every call site;
   the brick entrance becomes a crossfade under reduced motion; the layout thumb
   and the filmstrip both stop animating.
@@ -307,6 +412,7 @@ web/src/lib/
     BrickShell.svelte        shared card chrome and accent
     AuthorChip.svelte        avatar, display name, handle
     Sensitive.svelte         the !warn reveal
+    BrickReader.svelte       one brick at reading width, over the wall
     VideoPlayer.svelte       the ONE sanctioned .play()
     LandingWall.svelte       the inert demo wall behind the handle form
     HandleForm.svelte        the front door

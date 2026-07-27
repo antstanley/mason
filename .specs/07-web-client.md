@@ -1,6 +1,6 @@
 # 07 - Web Client
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley
 
 `web/` is a SvelteKit SPA built with Svelte 5 runes and Tailwind v4, shipped as a
 fully static site. This page covers its shape: routes, reactive state, the feed
@@ -18,6 +18,8 @@ state machine, and the service-worker lifecycle. What the wall looks like is in
 3. Register and manage the service worker that *is* the feed engine in local
    mode, including what happens to an open tab when a deploy lands.
 4. Hold reader preferences (layout, client, last handle) locally.
+5. Hold the open brick as history state, so a reader opens one in place and the
+   back gesture closes it.
 
 The client does **not** own: feed composition, ordering, dedup within a page, or
 moderation. Those are all mortar's, and the client re-implements none of them.
@@ -92,8 +94,9 @@ network fan-out. It is a no-op in server mode and best-effort always.
 
 ## Reactive state
 
-Five singletons, each a class holding `$state` fields, exported as a module
-instance. Preferences persist to `localStorage`; nothing else does.
+Rune singletons, each a class holding `$state` fields and exported as a module
+instance, apart from `revealed`, which is a reactive set. Preferences persist to
+`localStorage`; nothing else does.
 
 | Module | Singleton | Holds | Storage key |
 |---|---|---|---|
@@ -103,6 +106,8 @@ instance. Preferences persist to `localStorage`; nothing else does.
 | `state/handle.svelte.ts` | `lastHandle` | The last handle typed, to prefill forms | `mason:handle` |
 | `state/profile.svelte.ts` | `profile` | The wall owner's avatar and opt-out, for the header | none |
 | `state/player.svelte.ts` | `player` | The id of the one video allowed to play | none |
+| `state/reader.svelte.ts` | `reader` | The brick being read in place; its position on the wall is derived by id | none (history state) |
+| `state/sensitive.svelte.ts` | `revealed` | Brick ids whose `!warn` media the reader uncovered | none (session set) |
 
 Two of these are worth naming:
 
@@ -120,6 +125,52 @@ Two of these are worth naming:
 only when the chosen client is not `bsky.app`. Blog links and stream.place pages
 are not Bluesky posts and no other client knows how to show them, so they pass
 through untouched. Anything that is not `http(s)` returns empty.
+
+### The reader is history, not a URL
+
+**The reader is history state, not a URL.** Opening a brick calls SvelteKit's
+`pushState('', { brick: id })`, so the address bar keeps showing `?actor=` and
+the back button (and the phone's back gesture) closes the reader instead of
+leaving the wall. `page.state.brick` is the half of that answer history owns,
+declared as `App.PageState` in `app.d.ts`; `reader` holds the brick itself and
+derives its position on the wall from it when it needs to step.
+
+A URL parameter was the alternative and it cannot be honest here. A
+`?brick=<at-uri>` link would be shareable and would not work: the recipient's
+wall is built from a different seed, that brick is almost certainly not on it,
+and mason has no way to fetch one brick by id. History state promises exactly
+what it delivers, and leaves `?actor=` as the only thing a shared link carries.
+
+**Open is page state and the held brick agreeing.** `ReaderState.showing` is the
+one predicate, and it answers with a brick only when `page.state.brick` names one
+*and* the rune is holding that same brick; `isOpen` is that answer as a boolean.
+The two halves can disagree, because a history entry outlives the rune that
+pushed it: open a reader, go back, reload, then go forward, and the entry returns
+with its id while the rune is empty. Page state alone would then make the
+layout's content wrapper `inert` under a reader rendering nothing, which is a
+wall frozen under nothing at all, so `+layout.svelte` and the dialog both read
+the one predicate.
+
+**Opening the reader freezes the wall.** A click is engagement, so
+`reader.open` calls `feed.freeze()` before anything else. That is not only
+consistency with the wheel, touch and focus signals: while the wall is warming
+the arrangement reorders between preview polls, so a position on the wall would
+go stale under an open reader.
+
+**The reader holds the brick, and locates it by id.** `reader` stores the
+`Brick` itself and derives its position with
+`feed.items.findIndex(b => b.id === id)` when it needs to step. Threading an
+index down from the wall was the alternative and it is worse in every direction:
+`FeedGrid`'s `brick` snippet takes `(item, priority)` and nothing else, so an
+index would mean editing that signature, both layout components' prop types,
+both render call sites, all four cards and `BrickShell`, none of which any lane
+typechecks. Locating by id is O(n) once per click on a list of hundreds, it
+keeps `FeedGrid` out of this change entirely, and a replaced or reordered
+`feed.items` returns -1 rather than silently pointing at the wrong brick.
+
+Page state does not survive a reload, so reloading with a reader open reopens
+the wall without it. That is the intended behaviour rather than a gap to work
+around: the reader is a view of a brick on a wall that is itself being rebuilt.
 
 ---
 
@@ -316,6 +367,21 @@ somebody working on a component reaches for first.
 - *Warm from the landing form.* **Fire and discard a feed request.** It moves the
   wasm compile and the cache import off the critical path; the caches are
   DID-keyed and seed-independent, so the real wall reuses them.
+- *The reader is history state, not a URL.* **`pushState('', { brick })`.** The
+  back gesture has to close an overlay on a phone, and a `?brick=` link would
+  advertise a deep link mason cannot serve: a single brick is not fetchable, so
+  the recipient would get the wall and a dropped parameter.
+- *Opening the reader freezes the wall.* **A click is engagement.** The reader
+  locates its brick in `feed.items` by id, and a warming wall reorders between
+  polls.
+- *No index is threaded down to the cards.* **The reader locates the brick by
+  id.** An index would edit the snippet signature, both layouts, all four cards
+  and `BrickShell` to save a `findIndex` over a few hundred items, and every one
+  of those files is invisible to `tsc`.
+- *The reveal choice follows the brick.* **A session set of brick ids, shared
+  by the card and the reader.** Uncovering a brick on the wall and finding it
+  covered again one click later reads as a bug. It is still forgotten on
+  reload: the set lives in a rune, not in storage.
 
 **Open questions**
 

@@ -1,6 +1,6 @@
 # mason - Design Overview
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley · **Scope:** Repo-wide
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley · **Scope:** Repo-wide
 
 **mason** is an atproto discovery app: one masonry wall that mixes Bluesky
 posts, standard.site blog documents, and video (Bluesky clips plus Streamplace
@@ -51,6 +51,9 @@ reader's own browser, so a wall is a link you can hand to somebody.
 7. Keep the shipped artifact one thing at one version: root `package.json` is
    the source of truth and merging the release PR bumps, tags, releases and
    deploys together.
+8. Let a reader read a brick without leaving the wall: an in-place reader
+   renders the brick's own content at full size, and the trip to the source
+   becomes a choice rather than the only option.
 
 ## Non-goals
 
@@ -62,9 +65,11 @@ reader's own browser, so a wall is a link you can hand to somebody.
   it in CI.
 - **No server-side rendering.** The SPA is fully client-rendered; the shell in
   `web/src/app.html` carries the crawler-visible metadata.
-- **No blog content rendering.** A blog brick is metadata plus a link out; the
-  `site.standard.document` content union is platform-specific and is never
-  parsed.
+- **No blog content rendering.** A blog brick is metadata plus a link out,
+  on the wall and in the reader alike. The `site.standard.document` content
+  union is platform-specific (Leaflet, pckt.blog, Offprint and WordPress all
+  differ) and is never parsed, so the reader shows a blog's metadata at full
+  size and makes the publication the primary destination.
 - **No cross-kind score comparison.** Kinds compete only with themselves; the
   mixer decides the ratio.
 

@@ -50,7 +50,6 @@ what it owes the other two if it merges second.
 
 | Pending change spec | Proposes |
 |---|---|
-| [2026-07-26-read_a_brick_in_place.md](changes/2026-07-26-read_a_brick_in_place.md) | An in-place brick reader, so a card no longer has to be a link out. No wire change; one Rust fixture field, so the reveal has something to reveal |
 | [2026-07-26-lay_a_bluesky_feed.md](changes/2026-07-26-lay_a_bluesky_feed.md) | Split a wall into a source and a view: `?feed=<at-uri>` lays any Bluesky feed generator in its own order with no snapshot behind it, all three views apply to either source, and a feed picker becomes the second front door |
 | [2026-07-26-refresh_the_wall.md](changes/2026-07-26-refresh_the_wall.md) | A refresh control and a `refresh=1` flag that re-reads the fast content caches: two of them on a graph wall, one on a feed wall |
 
@@ -59,6 +58,7 @@ what it owes the other two if it merges second.
 | [2026-07-25-honest_native_user_agent.md](changes/merged/2026-07-25-honest_native_user_agent.md) | 2026-07-25 | A native user agent derived from the crate version, with a real contact URL |
 | [2026-07-25-drop_snapshot_from_cursor.md](changes/merged/2026-07-25-drop_snapshot_from_cursor.md) | 2026-07-25 | Removed the `snapshot` field the cursor carried and never read |
 | [2026-07-25-tighten_typescript_and_add_a_prepush_gate.md](changes/merged/2026-07-25-tighten_typescript_and_add_a_prepush_gate.md) | 2026-07-25 | `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and `just push` as the local gate |
+| [2026-07-26-read_a_brick_in_place.md](changes/merged/2026-07-26-read_a_brick_in_place.md) | 2026-07-27 | The brick reader: a plain click opens the brick mason already holds, at full size over an inert wall, and the back gesture closes it. The `!warn` reveal became a shared session set |
 
 ## Plans
 

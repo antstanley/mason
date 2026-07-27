@@ -1,6 +1,6 @@
 # Change: Read a brick without leaving the wall
 
-**Status:** Proposed · **Date:** 2026-07-26 · **Owner:** Ant Stanley · **Target:** Repo-wide
+**Status:** Merged · **Date:** 2026-07-26 · **Merged:** 2026-07-27 · **Owner:** Ant Stanley · **Target:** Repo-wide
 
 Every brick on the wall is a link out. A card is a summary by design (a post card
 renders its first image and nothing more, a blog card clamps its description to
@@ -41,10 +41,10 @@ otherwise the shared-reveal half of this change has nothing that can observe it.
 
 | Canonical page | Nature of change |
 |---|---|
-| [`.specs/07-web-client.md`](../07-web-client.md) | A `reader` rune singleton, shallow-routing history state, and the freeze-on-open rule |
-| [`.specs/08-wall-and-bricks.md`](../08-wall-and-bricks.md) | Cards activate the reader; a new `BrickReader` section; the `Sensitive` reveal becomes shared; implementation layout |
-| [`.specs/09-design-system.md`](../09-design-system.md) | The reader's motion and its reduced-motion alternative |
-| [`.specs/00-overview.md`](../00-overview.md) | Goals gain reading in place; the blog-content non-goal is restated precisely |
+| [`.specs/07-web-client.md`](../../07-web-client.md) | A `reader` rune singleton, shallow-routing history state, and the freeze-on-open rule |
+| [`.specs/08-wall-and-bricks.md`](../../08-wall-and-bricks.md) | Cards activate the reader; a new `BrickReader` section; the `Sensitive` reveal becomes shared; implementation layout |
+| [`.specs/09-design-system.md`](../../09-design-system.md) | The reader's motion and its reduced-motion alternative |
+| [`.specs/00-overview.md`](../../00-overview.md) | Goals gain reading in place; the blog-content non-goal is restated precisely |
 
 ---
 
@@ -118,6 +118,16 @@ Add two rows to the table:
 > Page state does not survive a reload, so reloading with a reader open reopens
 > the wall without it. That is the intended behaviour rather than a gap to work
 > around: the reader is a view of a brick on a wall that is itself being rebuilt.
+
+**Merged as:** everything above landed except the claim that `page.state.brick`
+is *the single source of truth for whether the reader is open*, which the build
+proved wrong. A history entry outlives the rune that pushed it (open, back,
+reload, forward, and the entry comes back with its id while the rune is empty),
+so what shipped is `ReaderState.showing`: page state naming a brick **and** the
+rune holding that same brick, with `isOpen` as its boolean. Page state alone
+would make the layout's wrapper `inert` under a reader rendering nothing, which
+is the wall frozen under nothing at all. The canonical page carries the shipped
+predicate instead of this clause.
 
 ### `.specs/07-web-client.md` → Decisions (Add)
 
@@ -229,6 +239,15 @@ Replace the **Outbound links** bullet with:
 >   exists. `VideoPlayer` remains the only sanctioned `.play(`, and
 >   `just guard-autoplay` still holds over the reader.
 
+**Merged as:** two edits inside this block. "Renders nothing at all unless
+`page.state.brick` is set" became "unless the reader is showing a brick", for
+the reason annotated on the Reactive state block above, and the stepping bullet
+gained the two things a step actually does beyond moving: it keeps focus inside
+the panel (a control that runs out of wall goes `disabled`, and one that only
+exists on the old brick's kind unmounts, both of which drop focus on `<body>`
+outside the dialog) and announces the new position politely, since the whole
+panel swaps under a reader who cannot see it.
+
 ### `.specs/08-wall-and-bricks.md` → Sensitive media (Modify)
 
 > `Sensitive` covers a brick's media behind a reveal when a `!warn` blur rides on
@@ -240,6 +259,15 @@ Replace the **Outbound links** bullet with:
 > a brick uncovered on the card is still uncovered in the reader and on a
 > re-place. It is forgotten on reload, by design: the set lives in a rune, never
 > in storage, so there is no lingering "show everything" switch.
+
+**Merged as:** written, plus a paragraph this block did not carry and step 4 of
+the implementation notes only half did. "Show anyway" sits inside the card's
+anchor on the post card and on the glaze card's single and grid branches, and it
+has to stop the click **twice**: `stopPropagation` for the reader's activation
+handler, and `preventDefault` for the anchor's own `href`, which propagation
+cannot reach because the browser gates that navigation on `defaultPrevented`
+rather than on the listener chain. Measured while building, and it belongs on
+the canonical page, since a reveal that navigates is the exact regression.
 
 ### `.specs/08-wall-and-bricks.md` → Accessibility behaviours (Add)
 
@@ -457,7 +485,7 @@ locates its own brick by id.
   content, and nothing else.** `app.bsky.feed.getPostThread` is readable
   unauthenticated, so a conversation is reachable; it is not cheap. It would make
   mason a two-endpoint app, which retires the claim
-  [06-wire-contract.md](../06-wire-contract.md) opens with; it would render the
+  [06-wire-contract.md](../../06-wire-contract.md) opens with; it would render the
   first content on the wall from outside the reader's follow graph, so the label
   tiers have to run in mortar rather than in the client, where the cohort filter
   cannot reach; and the offline demo wall would need a fixture thread compiled in

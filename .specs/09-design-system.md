@@ -1,6 +1,6 @@
 # 09 - Design System
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley
 
 mason's visual system is a Tailwind v4 `@theme` block in `web/src/app.css` plus a
 short base layer. There is no component library and no token package: the theme
@@ -173,6 +173,7 @@ the dark kiln, and transitions are disabled so a focus ring never animates in.
 | Layout picker thumb | 300ms `cubic-bezier(0.16, 1, 0.3, 1)` | `transition-none` |
 | Skeleton pulse | Tailwind's `animate-pulse` | Static at 0.7 opacity |
 | Glaze filmstrip | `scroll-behavior: smooth` | `scroll-auto` |
+| Brick reader open | Scrim fade 200ms `linear`; panel `0.24s cubic-bezier(0.16, 1, 0.3, 1)` from `translateY(8px) scale(0.99)` | Scrim fade only, `0.15s linear`; the panel does not move |
 | The warming reflow | Continuous, until frozen | Frozen before it moves at all |
 
 A brick is **tapped down and stays down**: fast, decelerating, no rebound. The
