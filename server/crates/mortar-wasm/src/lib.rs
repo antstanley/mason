@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use mortar_core::config::Config;
 use mortar_core::error::ErrorEnvelope;
-use mortar_core::feed::{FeedIntent, FeedTarget, handle_feed};
+use mortar_core::feed::{FeedIntent, FeedTarget, handle_feed, refresh_from_query};
 use mortar_core::mode::Mode;
 use mortar_core::state::AppState;
 use wasm_bindgen::prelude::*;
@@ -82,9 +82,16 @@ fn throw(envelope: ErrorEnvelope) -> JsValue {
 /// two wall sources and exactly one of them is needed (`feed` wins if both
 /// arrive); `mode` is the wall variant ("glaze" for the image wall; anything
 /// else is the full wall); `intent` is "preview" or "freeze" for the
-/// warm-then-commit first screen, absent for a normal committed page. Errors
-/// throw the ErrorEnvelope JSON `{"error": code, "message": ..., "status": u16}`
-/// so the service worker can build a Response with the right status.
+/// warm-then-commit first screen, absent for a normal committed page;
+/// `refresh` is "1" for a wall the reader asked for on purpose, which re-reads
+/// the fast content caches instead of trusting them. Errors throw the
+/// ErrorEnvelope JSON `{"error": code, "message": ..., "status": u16}` so the
+/// service worker can build a Response with the right status.
+///
+/// `refresh` is an optional string rather than the `bool` mortar reads it as,
+/// matching how `mode` and `intent` already cross this boundary: the token and
+/// its fallback direction stay in `refresh_from_query`, which is the one copy
+/// of that rule both fronts and the contract fixture read.
 ///
 /// **The argument order is the whole contract on this call.** Every parameter
 /// is an optional string, so a transposed pair typechecks on the JS side and
@@ -97,6 +104,7 @@ pub async fn feed_page(
     cursor: Option<String>,
     mode: Option<String>,
     intent: Option<String>,
+    refresh: Option<String>,
 ) -> Result<String, JsValue> {
     let state = state();
     // the precedence rule and the missing-parameter error are mortar's, not
@@ -105,7 +113,8 @@ pub async fn feed_page(
         .map_err(|e| throw(e.envelope_with_status()))?;
     let mode = Mode::from_query(mode.as_deref());
     let intent = FeedIntent::from_query(intent.as_deref());
-    match handle_feed(&state, target, cursor.as_deref(), mode, intent).await {
+    let refresh = refresh_from_query(refresh.as_deref());
+    match handle_feed(&state, target, cursor.as_deref(), mode, intent, refresh).await {
         Ok(response) => serde_json::to_string(&response).map_err(|e| {
             // even a serializer failure speaks the envelope, so the service
             // worker never sees a bare non-JSON message on this channel

@@ -171,7 +171,7 @@ test("a request naming no wall answers 400 without touching the network", async 
 	expect(notAFeed.body.error).toBe("bad_request");
 });
 
-// `feed_page` is five optional strings in a row, so a transposed pair
+// `feed_page` is six optional strings in a row, so a transposed pair
 // typechecks on both sides and still lays the wrong wall. The tsc project over
 // the worker counts the arguments; it cannot read their order, and this is the
 // only lane that can.
@@ -181,13 +181,23 @@ test("a request naming no wall answers 400 without touching the network", async 
 //   - every brick is a post          the `mode` slot (glaze filters the fixture
 //                                    pool, which is 70/15/15 post/blog/video)
 //   - warming is false               the `intent` slot (only a demo preview
-//                                    sets it)
+//                                    sets it), and equally the `refresh` slot
+//                                    beside it: transposed, `intent` reads "1"
+//                                    and parses as a normal committed page,
+//                                    which reports no warming at all
 //   - the cursor comes back verbatim the `cursor` slot (the demo preview
 //                                    re-encodes the INCOMING offset, so a
 //                                    cursor read from the wrong slot decodes to
-//                                    nothing and returns as offset 0)
+//                                    nothing and returns as offset 0), and the
+//                                    same intent/refresh swap, whose committed
+//                                    page hands back the NEXT screen instead
 // The actor/feed pair needs no assertion of its own: transposed, `feed` would
 // be "demo", which parses as no feed at all, and the first fetch would be a 400.
+//
+// The demo wall ignores `refresh` itself (its bricks are fixtures compiled into
+// the wasm, and there is nothing behind them to re-read), so what the parameter
+// proves here is the BINDING and not the re-read: the engine's own tests own
+// what a refresh does once it arrives.
 test("the service worker binds every positional slot", async ({ page }) => {
 	await underServiceWorker(page);
 
@@ -200,7 +210,7 @@ test("the service worker binds every positional slot", async ({ page }) => {
 
 	const preview = await apiFeed(
 		page,
-		`/api/feed?actor=demo&mode=glaze&intent=preview&cursor=${encodeURIComponent(cursor)}`,
+		`/api/feed?actor=demo&mode=glaze&intent=preview&refresh=1&cursor=${encodeURIComponent(cursor)}`,
 	);
 	expect(preview.status).toBe(200);
 

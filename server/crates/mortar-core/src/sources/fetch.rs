@@ -249,11 +249,21 @@ pub async fn image_feed_cached(
 /// The sixty second entry is what makes the preview-then-freeze pair one network
 /// read: the freeze arriving a few hundred milliseconds after the preview asks
 /// for the same page, as does a back gesture onto a page just left.
+///
+/// `refresh` is the reader asking for this wall on purpose, and on a feed wall
+/// this entry is the whole of what "new posts" means: there is no author-feed
+/// cache behind a generator's ordering, so the two fast content reads a graph
+/// wall bypasses have no counterpart here. The entry is skipped and the fresh
+/// answer overwrites it, so the freeze behind a refreshed preview is still one
+/// network read. Unlike the author feeds this one has no cached fallback: a feed
+/// wall's whole ingestion is this single call, so there is no quorum to degrade
+/// into and a failure is the request failing, refreshed or not.
 pub async fn feed_page_cached(
     state: &Arc<AppState>,
     feed_uri: &str,
     cursor: Option<&str>,
     limit: u32,
+    refresh: bool,
 ) -> Result<FeedPage, AppError> {
     // The LIMIT is part of the key, not just the feed and the cursor: the mixed
     // views ask getFeed for PAGE_SIZE and the glaze wall asks for 100, so a key
@@ -267,7 +277,9 @@ pub async fn feed_page_cached(
         "{feed_uri}\u{1f}{limit}\u{1f}{}",
         cursor.unwrap_or_default()
     );
-    if let Some(cached) = state.caches.feed_pages.get(&key).await {
+    // a refresh steps over the entry rather than serving it: a minute of cached
+    // page is precisely what the reader asked to get past
+    if !refresh && let Some(cached) = state.caches.feed_pages.get(&key).await {
         return Ok(cached);
     }
     let (yield_, next) = bluesky::get_feed(
@@ -879,10 +891,10 @@ mod feed_page_tests {
         answers(&server, MIXED, None, "1", Some("page2")).await;
         let state = state_for(&server);
 
-        let first = feed_page_cached(&state, FEED, None, MIXED)
+        let first = feed_page_cached(&state, FEED, None, MIXED, false)
             .await
             .expect("the AppView answers");
-        let second = feed_page_cached(&state, FEED, None, MIXED)
+        let second = feed_page_cached(&state, FEED, None, MIXED, false)
             .await
             .expect("and the cache answers after it");
 
@@ -915,10 +927,10 @@ mod feed_page_tests {
         answers(&server, GLAZE, None, "glaze", None).await;
         let state = state_for(&server);
 
-        let mixed = feed_page_cached(&state, FEED, None, MIXED)
+        let mixed = feed_page_cached(&state, FEED, None, MIXED, false)
             .await
             .expect("the mixed views ask for a page");
-        let glaze = feed_page_cached(&state, FEED, None, GLAZE)
+        let glaze = feed_page_cached(&state, FEED, None, GLAZE, false)
             .await
             .expect("and the glaze wall asks the same feed deeper");
 
@@ -947,10 +959,10 @@ mod feed_page_tests {
         answers(&server, MIXED, None, "first", Some("page2")).await;
         let state = state_for(&server);
 
-        let first = feed_page_cached(&state, FEED, None, MIXED)
+        let first = feed_page_cached(&state, FEED, None, MIXED, false)
             .await
             .expect("a fresh feed wall starts with no cursor");
-        let second = feed_page_cached(&state, FEED, first.next.as_deref(), MIXED)
+        let second = feed_page_cached(&state, FEED, first.next.as_deref(), MIXED, false)
             .await
             .expect("and pages on the cursor the first page carried");
 
@@ -973,7 +985,7 @@ mod feed_page_tests {
         always(&server, 400).await;
         let state = state_for(&server);
 
-        let failure = feed_page_cached(&state, FEED, None, MIXED)
+        let failure = feed_page_cached(&state, FEED, None, MIXED, false)
             .await
             .err()
             .expect("a 400 is a failure, not a page");
@@ -994,7 +1006,7 @@ mod feed_page_tests {
         always(&server, 404).await;
         let state = state_for(&server);
 
-        let failure = feed_page_cached(&state, FEED, None, MIXED)
+        let failure = feed_page_cached(&state, FEED, None, MIXED, false)
             .await
             .err()
             .expect("a 404 is a failure, not a page");
@@ -1014,7 +1026,7 @@ mod feed_page_tests {
         always(&server, 500).await;
         let state = state_for(&server);
 
-        let failure = feed_page_cached(&state, FEED, None, MIXED)
+        let failure = feed_page_cached(&state, FEED, None, MIXED, false)
             .await
             .err()
             .expect("a 500 is a failure, not a page");

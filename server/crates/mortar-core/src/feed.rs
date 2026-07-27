@@ -116,12 +116,31 @@ impl FeedIntent {
     }
 }
 
+/// Read `?refresh=`: the reader asked for this wall on purpose, so its fill
+/// re-reads the fast content caches instead of trusting them.
+///
+/// Exactly the token `1` is a refresh. Anything else, including absent, is not,
+/// which is the same fallback direction `mode` and `intent` take and is
+/// load-bearing here rather than tidy: the unsafe direction costs a hundred
+/// upstream reads out of the reader's own rate-limit budget, so a hand-edited
+/// URL must not be able to spend it by accident.
+///
+/// A named function rather than a comparison inlined into each front, for the
+/// reason `FeedTarget::from_query` is one: `tests/contract.rs` is a mortar-core
+/// integration test and can reach neither front, so a rule spelled out in the
+/// axum route would leave mortar-wasm carrying a second copy of it and leave the
+/// fixture with nothing to assert against.
+pub fn refresh_from_query(raw: Option<&str>) -> bool {
+    raw == Some("1")
+}
+
 pub async fn handle_feed(
     state: &Arc<AppState>,
     target: FeedTarget<'_>,
     cursor: Option<&str>,
     mode: Mode,
     intent: FeedIntent,
+    refresh: bool,
 ) -> Result<FeedResponse, AppError> {
     // A feed generator is an algorithm somebody else published, so its wall is
     // laid in FRONT of the snapshot machinery rather than inside it: none of
@@ -129,16 +148,32 @@ pub async fn handle_feed(
     // the mixer) has anything to do for a feed.
     let actor = match target {
         FeedTarget::Feed(reference) => {
-            return feed_wall(state, reference, cursor, mode, intent).await;
+            return feed_wall(state, reference, cursor, mode, intent, refresh).await;
         }
         FeedTarget::Actor(actor) => actor,
     };
 
     let decoded = cursor.and_then(cursor::decode);
 
+    // A refresh is always a FIRST page, so a cursor turns the flag off rather
+    // than failing the request. Mid-scroll it would re-read a hundred author
+    // feeds to serve page nine, whose bricks were admitted from the old ones
+    // anyway. A cursor that does not decode leaves the flag alone, because that
+    // request is already laying a fresh wall from a fresh seed.
+    //
+    // Shadowed rather than branched on further down: everything below reads
+    // this one binding, so no later path can be added that honours the flag
+    // mid-scroll by forgetting to check.
+    let refresh = refresh && decoded.is_none();
+
     // offline demo wall, kept from M0. Its bricks are fixtures compiled into the
     // wasm, so there is nothing to warm: a preview reports itself already
     // settled, and the client freezes to the real page at once.
+    //
+    // It ignores `refresh` for the same reason: the fixtures are compiled into
+    // the binary, so there is no cache to step over and no newer answer to
+    // step onto. This arm returns before the flag reaches anything, which is
+    // what "ignores" means here rather than a flag passed as false.
     if actor == "demo" {
         // a feed cursor names a position in a generator's ordering, which the
         // compiled-in fixtures are no part of. It is attacker-writable and the
@@ -179,9 +214,11 @@ pub async fn handle_feed(
     // way. The cursor it hands back carries the same seed, so the next poll (and
     // the freeze) land on this very snapshot rather than rolling a new one.
     if intent == FeedIntent::Preview {
-        // the `false` is the refresh flag: no front parses `?refresh=` yet, so
-        // every wall is still laid from the warm content caches
-        let snap = snapshot::ensure_snapshot(state, &did, seed, mode, false).await;
+        // the flag reaches the snapshot from HERE too, not only from the
+        // committing path below: a refresh in the wasm front begins with a
+        // preview poll, and a preview that dropped it would build the wall
+        // unrefreshed and leave the freeze behind it landing on that wall
+        let snap = snapshot::ensure_snapshot(state, &did, seed, mode, refresh).await;
         let (items, warming) = snapshot::preview_page(&snap, PAGE_SIZE).await;
         return Ok(FeedResponse {
             items,
@@ -190,8 +227,9 @@ pub async fn handle_feed(
         });
     }
 
-    // the `false` is the refresh flag, as above
-    let snap = snapshot::get_or_build(state, &did, seed, mode, false).await;
+    // a refresh that never previewed (server mode, or a freeze that beat its
+    // preview home) builds the refreshing snapshot right here
+    let snap = snapshot::get_or_build(state, &did, seed, mode, refresh).await;
     // Freeze commits the first screen immediately: the preview loop already gave
     // the reader the warming reflow, so re-paying the mix wait here is the exact
     // stall reflow exists to remove. Normal (server mode, no preview loop) still
@@ -218,12 +256,21 @@ pub async fn handle_feed(
 /// the view, answer. There is no snapshot to build, no pool to admit into, no
 /// cohort to sample and no mixer to run, because the feed already published an
 /// order and mason's job here is to lay it rather than to re-rank it.
+///
+/// `refresh` therefore means one thing here rather than the two it means on a
+/// graph wall: there are no author feeds to re-read, so it bypasses the
+/// `feed_pages` entry for the page being asked for and nothing else. It is
+/// forwarded as it arrived, WITHOUT the graph wall's cursorless rule: that rule
+/// exists because re-reading a hundred rate-limited author feeds to serve page
+/// nine changes nothing about the pages already laid, and a feed page is one
+/// AppView call whichever page it is.
 async fn feed_wall(
     state: &Arc<AppState>,
     reference: &str,
     cursor: Option<&str>,
     mode: Mode,
     intent: FeedIntent,
+    refresh: bool,
 ) -> Result<FeedResponse, AppError> {
     let uri = feed_uri(state, reference).await?;
 
@@ -242,7 +289,7 @@ async fn feed_wall(
         Mode::Wall => PAGE_SIZE_LIMIT,
         Mode::Glaze => GLAZE_FEED_LIMIT,
     };
-    let page = fetch::feed_page_cached(state, &uri, upstream.as_deref(), limit).await?;
+    let page = fetch::feed_page_cached(state, &uri, upstream.as_deref(), limit, refresh).await?;
 
     let items: Vec<Brick> = match mode {
         // upstream was asked for exactly a page and the mapper only ever drops
@@ -494,6 +541,43 @@ mod target_tests {
     }
 }
 
+/// The `?refresh=` token. A plain `#[cfg(test)]` module for the same reason
+/// `target_tests` is one: pure string work, no wiremock and no tokio runtime,
+/// so it runs on wasm32 too, which is where one of the two callers lives.
+#[cfg(test)]
+mod refresh_query_tests {
+    use super::*;
+
+    /// The whole rule, and the negative space that is the point of it. Only the
+    /// literal `1` is a refresh: every plausible near miss reads as no refresh,
+    /// because the fallback direction here costs a hundred upstream reads out
+    /// of the reader's own rate-limit budget rather than a slightly wrong wall.
+    ///
+    /// `"1 "` is in the list on purpose: nothing trims the query value, and a
+    /// front that decided to would be spending somebody's budget on a URL that
+    /// arrived with a stray space in it.
+    #[test]
+    fn only_the_literal_token_asks_for_a_refresh() {
+        assert!(
+            refresh_from_query(Some("1")),
+            "the one token that is a refresh"
+        );
+        for raw in [
+            None,
+            Some("true"),
+            Some("yes"),
+            Some("0"),
+            Some(""),
+            Some("1 "),
+        ] {
+            assert!(
+                !refresh_from_query(raw),
+                "{raw:?} must not spend a hundred upstream reads"
+            );
+        }
+    }
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -520,6 +604,7 @@ mod tests {
             None,
             Mode::Wall,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect("the demo wall always lays");
@@ -529,6 +614,7 @@ mod tests {
             Some(&feed_cursor),
             Mode::Wall,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect("a feed cursor must not fail the demo wall");
@@ -543,6 +629,7 @@ mod tests {
             Some(&feed_cursor),
             Mode::Wall,
             FeedIntent::Preview,
+            false,
         )
         .await
         .expect("a preview must lay too");
@@ -608,6 +695,7 @@ mod tests {
             Some(&feed_cursor),
             Mode::Wall,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect("a feed cursor must not fail a graph wall");
@@ -649,6 +737,7 @@ mod tests {
             None,
             Mode::Wall,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect_err("an opted-out owner must not lay a wall");
@@ -733,6 +822,7 @@ mod tests {
                 cursor.as_deref(),
                 Mode::Wall,
                 FeedIntent::Normal,
+                false,
             )
             .await
             .expect("every page must lay");
@@ -820,6 +910,7 @@ mod tests {
             None,
             Mode::Wall,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect("the first page must lay");
@@ -842,6 +933,7 @@ mod tests {
             Some(&cursor),
             Mode::Wall,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect("the last page must answer");
@@ -919,6 +1011,7 @@ mod tests {
             None,
             Mode::Glaze,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect("a glaze wall must lay");
@@ -1050,6 +1143,17 @@ mod feed_wall_tests {
             .collect()
     }
 
+    /// How many times the generator itself was read. A cache bypass is
+    /// invisible in the answer and visible only in the traffic, so this count
+    /// is the whole claim of the refresh case at the end of this module.
+    async fn feed_reads(server: &MockServer) -> usize {
+        upstream_paths(server)
+            .await
+            .iter()
+            .filter(|path| path.as_str() == "/xrpc/app.bsky.feed.getFeed")
+            .count()
+    }
+
     /// The whole claim of a feed wall: the generator published an order and
     /// mason lays it in that order. The three surviving posts arrive
     /// oldest-first and least-liked-first, which is precisely the order grout
@@ -1084,6 +1188,7 @@ mod feed_wall_tests {
             None,
             Mode::Wall,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect("a feed wall must lay");
@@ -1151,6 +1256,7 @@ mod feed_wall_tests {
             None,
             Mode::Wall,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect("the first page lays");
@@ -1162,6 +1268,7 @@ mod feed_wall_tests {
             Some(&carried),
             Mode::Wall,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect("and the page after it lays too");
@@ -1203,6 +1310,7 @@ mod feed_wall_tests {
             Some(&incoming),
             Mode::Wall,
             FeedIntent::Preview,
+            false,
         )
         .await
         .expect("a preview must lay");
@@ -1248,6 +1356,7 @@ mod feed_wall_tests {
             Some(&graph_cursor),
             Mode::Wall,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect("a graph cursor must not fail a feed wall");
@@ -1261,6 +1370,7 @@ mod feed_wall_tests {
             Some(&graph_cursor),
             Mode::Wall,
             FeedIntent::Preview,
+            false,
         )
         .await
         .expect("a preview must lay too");
@@ -1294,6 +1404,7 @@ mod feed_wall_tests {
             None,
             Mode::Glaze,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect("a glaze feed wall must lay");
@@ -1353,6 +1464,7 @@ mod feed_wall_tests {
             None,
             Mode::Wall,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect("a published feed lays whatever its creator set on their own profile");
@@ -1380,6 +1492,7 @@ mod feed_wall_tests {
             None,
             Mode::Wall,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect_err("an unresolvable creator is a failure, not a wall");
@@ -1420,6 +1533,7 @@ mod feed_wall_tests {
                 None,
                 Mode::Wall,
                 FeedIntent::Normal,
+                false,
             )
             .await
             .expect_err("a reference that names no feed cannot lay one");
@@ -1435,7 +1549,7 @@ mod feed_wall_tests {
         // actor's wall
         let both = FeedTarget::from_query(Some("did:plc:viewer"), Some("nonsense"))
             .expect("two parameters still name one wall");
-        let failure = handle_feed(&state, both, None, Mode::Wall, FeedIntent::Normal)
+        let failure = handle_feed(&state, both, None, Mode::Wall, FeedIntent::Normal, false)
             .await
             .expect_err("mason must not quietly lay somebody's graph instead");
         assert_eq!(failure.status_and_code(), (400, "bad_request"));
@@ -1477,6 +1591,7 @@ mod feed_wall_tests {
             None,
             Mode::Wall,
             FeedIntent::Normal,
+            false,
         )
         .await
         .expect_err("a reference that names no feed cannot lay one");
@@ -1489,5 +1604,472 @@ mod feed_wall_tests {
                  absence, got {message:?}"
             );
         }
+    }
+
+    /// A refresh over a feed wall means one thing rather than the two it means
+    /// on a graph wall: there are no author feeds behind a generator's
+    /// ordering, so the `feed_pages` entry for the page being asked for is what
+    /// it steps over, and nothing else here is cached at all.
+    ///
+    /// Four requests, and the count of upstream reads after each is the claim.
+    /// The second answer carries a different rkey, so the refreshed page is
+    /// provably the one the AppView just gave rather than the one that was
+    /// sitting in the cache.
+    #[tokio::test]
+    async fn a_refresh_over_a_feed_wall_steps_over_the_cached_page() {
+        let server = MockServer::start().await;
+        // the warm entry the refresh has to step over, exhausted after one
+        // answer, and then the newer page that only a re-read can see
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"feed": [post("cached", CREATED, 0)]})),
+            )
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"feed": [post("newer", CREATED, 0)]})),
+            )
+            .mount(&server)
+            .await;
+        let state = state_for(&server);
+
+        let cold = handle_feed(
+            &state,
+            FeedTarget::Feed(FEED),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+            false,
+        )
+        .await
+        .expect("the first page lays");
+        assert_eq!(laid(&cold), vec![post_uri("cached")]);
+        assert_eq!(feed_reads(&server).await, 1, "the cold read");
+
+        let served = handle_feed(
+            &state,
+            FeedTarget::Feed(FEED),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+            false,
+        )
+        .await
+        .expect("and the same page lays again");
+        assert_eq!(laid(&served), vec![post_uri("cached")]);
+        assert_eq!(
+            feed_reads(&server).await,
+            1,
+            "without the flag the second read of a page never reaches the AppView, \
+             which is what makes the refresh below provable"
+        );
+
+        let refreshed = handle_feed(
+            &state,
+            FeedTarget::Feed(FEED),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+            true,
+        )
+        .await
+        .expect("the refreshed page lays");
+        assert_eq!(
+            feed_reads(&server).await,
+            2,
+            "a refresh reaches the AppView"
+        );
+        assert_eq!(
+            laid(&refreshed),
+            vec![post_uri("newer")],
+            "and lays what it just read, not the entry it stepped over"
+        );
+
+        let after = handle_feed(
+            &state,
+            FeedTarget::Feed(FEED),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+            false,
+        )
+        .await
+        .expect("and the page after it lays from the cache again");
+        assert_eq!(
+            feed_reads(&server).await,
+            2,
+            "the refreshed answer was inserted as usual, so the freeze behind a \
+             refreshed preview is still one network read rather than two"
+        );
+        assert_eq!(
+            laid(&after),
+            vec![post_uri("newer")],
+            "and the entry it overwrote is gone rather than sitting beside it"
+        );
+    }
+}
+
+// Where the refresh flag is honoured and where it is dropped, driven against a
+// wiremock AppView. A THIRD gated module rather than cases in the two above,
+// because every test here is a count of upstream reads rather than a claim
+// about what a wall lays: a cache bypass is invisible in the answer and visible
+// only in the traffic, and keeping them together is what makes that idiom
+// readable. Gated `not(target_arch = "wasm32")` because wiremock and tokio's
+// runtime are dev-dependencies of the native build only.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod refresh_tests {
+    use super::*;
+    use crate::config::Config;
+    use std::time::Duration;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+    const VIEWER: &str = "did:plc:viewer";
+    /// The first author in the follow graph, and the whole of it wherever a
+    /// test asks for one follow.
+    const AUTHOR: &str = "did:plc:a0";
+    const AUTHOR_FEED: &str = "/xrpc/app.bsky.feed.getAuthorFeed";
+    /// Enough follows that the pool outlasts page one. A snapshot admits at
+    /// most four bricks per author, so a wall with a genuine second page needs
+    /// seven authors at the very least; ten leaves room for the mixer's
+    /// diversity window without the count becoming the thing under test.
+    const DEEP_FOLLOWS: usize = 10;
+
+    fn state_for(server: &MockServer) -> Arc<AppState> {
+        // every base points at the mock, so a read a test does not expect fails
+        // against a mount that is not there rather than leaving the test
+        // machine's network to decide
+        Arc::new(AppState::new(Config {
+            appview_base: server.uri(),
+            plc_base: server.uri(),
+            streamplace_base: server.uri(),
+        }))
+    }
+
+    /// A brick's id is its at-uri, so an rkey is how a test tells the answer a
+    /// refresh went and got from the one it was handed out of the cache.
+    fn post_uri(rkey: &str) -> String {
+        format!("at://{AUTHOR}/app.bsky.feed.post/{rkey}")
+    }
+
+    fn laid(page: &FeedResponse) -> Vec<&str> {
+        page.items.iter().map(Brick::id).collect()
+    }
+
+    /// The viewer resolves and has not opted out, and follows `count` authors,
+    /// `did:plc:a0` first. A cohort holds a hundred, so every follow mounted
+    /// here is one the fill really does fan out to.
+    async fn wall_answers(server: &MockServer, count: usize) {
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.actor.getProfile"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "did": VIEWER,
+                "handle": "viewer.test"
+            })))
+            .mount(server)
+            .await;
+        let follows: Vec<serde_json::Value> = (0..count)
+            .map(|n| serde_json::json!({"did": format!("did:plc:a{n}"), "handle": format!("a{n}.test")}))
+            .collect();
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.graph.getFollows"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "follows": follows })),
+            )
+            .mount(server)
+            .await;
+    }
+
+    /// One fresh post from the author per rkey. `times` is how many reads this
+    /// answer serves before the next mount takes over, which is how a test
+    /// hands the first wall one set of posts and whatever reaches the AppView
+    /// after it a newer one.
+    async fn author_feed_answers(server: &MockServer, rkeys: &[&str], times: Option<u64>) {
+        let created = (chrono::Utc::now() - chrono::TimeDelta::hours(1)).to_rfc3339();
+        let feed: Vec<serde_json::Value> = rkeys
+            .iter()
+            .map(|rkey| {
+                serde_json::json!({"post": {
+                    "uri": post_uri(rkey),
+                    "author": {"did": AUTHOR, "handle": "a.test"},
+                    "record": {"text": "hello wall", "createdAt": created},
+                    "likeCount": 0,
+                    "repostCount": 0
+                }})
+            })
+            .collect();
+        let body = serde_json::json!({ "feed": feed });
+        let mock = Mock::given(method("GET"))
+            .and(path(AUTHOR_FEED))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body));
+        match times {
+            Some(times) => mock.up_to_n_times(times).mount(server).await,
+            None => mock.mount(server).await,
+        }
+    }
+
+    /// An author's whole contribution to a pool: the snapshot admits at most
+    /// `MAX_BRICKS_PER_AUTHOR` (four) bricks from any one of them, so asking
+    /// for more per author would deepen the answer and not the wall.
+    const POSTS_PER_AUTHOR: usize = 4;
+
+    /// Every author answers with posts of their OWN, tagged so a test can tell
+    /// the wall a fill laid from the wall a re-read would have laid. Needed
+    /// wherever a test has more than one follow: a fixed body would hand every
+    /// author the same post uris, and the snapshot's `seen` set would collapse
+    /// the whole graph into one author's four bricks.
+    struct PostsTagged(&'static str);
+
+    impl Respond for PostsTagged {
+        fn respond(&self, request: &Request) -> ResponseTemplate {
+            let actor = request
+                .url
+                .query_pairs()
+                .find(|(key, _)| key == "actor")
+                .map(|(_, value)| value.to_string())
+                .unwrap_or_default();
+            let created = (chrono::Utc::now() - chrono::TimeDelta::hours(1)).to_rfc3339();
+            let feed: Vec<serde_json::Value> = (0..POSTS_PER_AUTHOR)
+                .map(|n| {
+                    serde_json::json!({"post": {
+                        "uri": format!("at://{actor}/app.bsky.feed.post/{}{n}", self.0),
+                        "author": {"did": actor, "handle": "a.test"},
+                        "record": {"text": "hello wall", "createdAt": created},
+                        "likeCount": 0,
+                        "repostCount": 0
+                    }})
+                })
+                .collect();
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "feed": feed }))
+        }
+    }
+
+    /// How many times the AppView's author feed was actually read.
+    async fn author_feed_reads(server: &MockServer) -> usize {
+        server
+            .received_requests()
+            .await
+            .expect("the mock server records what it was asked")
+            .iter()
+            .filter(|request| request.url.path() == AUTHOR_FEED)
+            .count()
+    }
+
+    /// The flag's whole route on a graph wall, end to end through the entry
+    /// point: a cursorless request carrying it lays a wall whose fill re-reads
+    /// the author feed rather than serving the entry that is sitting right
+    /// there. Both walls are laid inside the five minute `author_feed` TTL, so
+    /// the second read happens because the flag asked for it and for no other
+    /// reason.
+    #[tokio::test]
+    async fn a_cursorless_refresh_re_reads_the_author_feed_inside_its_ttl() {
+        let server = MockServer::start().await;
+        wall_answers(&server, 1).await;
+        // the warm entry the refresh has to step over, and then the newer post
+        // that only a re-read can see
+        author_feed_answers(&server, &["1"], Some(1)).await;
+        author_feed_answers(&server, &["2"], None).await;
+        let state = state_for(&server);
+
+        let first = handle_feed(
+            &state,
+            FeedTarget::Actor(VIEWER),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+            false,
+        )
+        .await
+        .expect("the first wall lays");
+        assert_eq!(laid(&first), vec![post_uri("1")]);
+        assert_eq!(author_feed_reads(&server).await, 1, "the cold read");
+
+        // `fresh_seed` is derived from the wall clock in whole milliseconds, so
+        // two walls laid inside one millisecond are one wall: the second
+        // request would find the first's snapshot in the cache and never build
+        // (or fill) its own, and this test would be asserting the clock.
+        tokio::time::sleep(Duration::from_millis(2)).await;
+
+        let refreshed = handle_feed(
+            &state,
+            FeedTarget::Actor(VIEWER),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+            true,
+        )
+        .await
+        .expect("and the refreshed wall lays over it");
+
+        assert_eq!(
+            author_feed_reads(&server).await,
+            2,
+            "a refresh must reach the AppView inside the TTL, or the wall it lays \
+             is the one it replaced with its bricks in a different order"
+        );
+        assert_eq!(
+            laid(&refreshed),
+            vec![post_uri("2")],
+            "and the newer post is what the reader who asked for it gets"
+        );
+    }
+
+    /// The other half of the rule: a refresh is always a first page, so a
+    /// cursor drops the flag rather than failing the request.
+    ///
+    /// Two cursors, because page two of a wall that is still in the snapshot
+    /// cache cannot prove it on its own: `ensure_snapshot` builds a snapshot
+    /// once, so a flag honoured there would reach nothing anyway. The second
+    /// cursor names a seed no snapshot exists under, which is what an expired
+    /// or evicted wall looks like from here, and that request really does build
+    /// and fill a snapshot: honoured, it would re-fan the cohort mid-scroll.
+    #[tokio::test]
+    async fn a_cursored_refresh_is_ignored() {
+        let server = MockServer::start().await;
+        // a graph deep enough to outlast page one on purpose: a wall whose pool
+        // runs dry inside its first page has no page two to ask for, and the
+        // case would never arise
+        wall_answers(&server, DEEP_FOLLOWS).await;
+        // the wall's own fill, exhausted by exactly the reads that fill costs,
+        // and then the newer posts that only a re-read can see. The second
+        // mount is what makes a dropped flag provable rather than merely
+        // unmocked: a refresh honoured here would succeed and be caught by the
+        // tag it laid.
+        Mock::given(method("GET"))
+            .and(path(AUTHOR_FEED))
+            .respond_with(PostsTagged("old"))
+            .up_to_n_times(DEEP_FOLLOWS as u64)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(AUTHOR_FEED))
+            .respond_with(PostsTagged("new"))
+            .mount(&server)
+            .await;
+        let state = state_for(&server);
+
+        let first = handle_feed(
+            &state,
+            FeedTarget::Actor(VIEWER),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+            false,
+        )
+        .await
+        .expect("page one lays");
+        assert_eq!(
+            author_feed_reads(&server).await,
+            DEEP_FOLLOWS,
+            "the cold fill, one read per author in the cohort"
+        );
+        assert_eq!(first.items.len(), PAGE_SIZE, "and it lays a full page");
+        let cursor = first
+            .cursor
+            .expect("a pool with bricks still in it hands back a cursor");
+
+        let page_two = handle_feed(
+            &state,
+            FeedTarget::Actor(VIEWER),
+            Some(&cursor),
+            Mode::Wall,
+            FeedIntent::Normal,
+            true,
+        )
+        .await
+        .expect("page two lays");
+        assert!(!page_two.items.is_empty(), "page two lays the pool's tail");
+        assert_eq!(
+            author_feed_reads(&server).await,
+            DEEP_FOLLOWS,
+            "mid-scroll the flag is dropped, not honoured"
+        );
+        assert!(
+            laid(&page_two).iter().all(|id| id.contains("/old")),
+            "and every brick on it came from the wall's own fill, got {:?}",
+            laid(&page_two)
+        );
+
+        let stranded = cursor::encode(&Cursor::Wall {
+            seed: 4242,
+            offset: 0,
+        });
+        let rebuilt = handle_feed(
+            &state,
+            FeedTarget::Actor(VIEWER),
+            Some(&stranded),
+            Mode::Wall,
+            FeedIntent::Normal,
+            true,
+        )
+        .await
+        .expect("a cursor into a wall that is no longer cached still lays one");
+        assert_eq!(
+            author_feed_reads(&server).await,
+            DEEP_FOLLOWS,
+            "a request that really does fill a snapshot must still fill it from \
+             the content caches when a cursor came with it"
+        );
+        assert!(
+            laid(&rebuilt).iter().all(|id| id.contains("/old")),
+            "and the bricks it lays are the cached ones, not the newer answer, \
+             got {:?}",
+            laid(&rebuilt)
+        );
+    }
+
+    /// The demo wall ignores the flag. Its bricks are fixtures compiled into
+    /// the binary, so there is no cache to step over and no newer answer to
+    /// step onto, and the assertion that nothing was asked of the network is
+    /// the whole claim: a refreshed demo wall must not go looking for a source
+    /// it does not have.
+    #[tokio::test]
+    async fn the_demo_wall_ignores_a_refresh() {
+        // nothing is mounted, so any read at all fails against an absent mount
+        // rather than reaching the test machine's network
+        let server = MockServer::start().await;
+        let state = state_for(&server);
+
+        let plain = handle_feed(
+            &state,
+            FeedTarget::Actor("demo"),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+            false,
+        )
+        .await
+        .expect("the demo wall always lays");
+        let refreshed = handle_feed(
+            &state,
+            FeedTarget::Actor("demo"),
+            None,
+            Mode::Wall,
+            FeedIntent::Normal,
+            true,
+        )
+        .await
+        .expect("and it lays under a refresh too");
+
+        assert!(!plain.items.is_empty(), "the fixture pool is not empty");
+        assert_eq!(
+            laid(&refreshed),
+            laid(&plain),
+            "the same fixtures, because there is nothing behind them to re-read"
+        );
+        assert!(
+            server
+                .received_requests()
+                .await
+                .expect("the mock server records what it was asked")
+                .is_empty(),
+            "a refreshed demo wall must not reach for a network it has no source on"
+        );
     }
 }

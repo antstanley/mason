@@ -5,7 +5,7 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mortar_core::error::AppError;
-use mortar_core::feed::{FeedIntent, FeedTarget, handle_feed};
+use mortar_core::feed::{FeedIntent, FeedTarget, handle_feed, refresh_from_query};
 use mortar_core::mode::Mode;
 use mortar_core::model::FeedResponse;
 use mortar_core::state::AppState;
@@ -25,6 +25,12 @@ pub struct FeedParams {
     /// a normal committed page. Server mode serves the same SPA, so it honours
     /// these exactly as the wasm front does.
     pub intent: Option<String>,
+    /// "1" lays a new wall from re-read content caches; anything else, absent
+    /// included, is no refresh. A string rather than a `bool` so the token, and
+    /// the fallback direction that keeps a hand-edited URL from spending a
+    /// hundred upstream reads, stay in `refresh_from_query` where both fronts
+    /// and the contract fixture read the one copy.
+    pub refresh: Option<String>,
 }
 
 pub struct ErrorResponse(AppError);
@@ -50,8 +56,16 @@ pub async fn feed(
         .map_err(ErrorResponse)?;
     let mode = Mode::from_query(params.mode.as_deref());
     let intent = FeedIntent::from_query(params.intent.as_deref());
-    handle_feed(&state, target, params.cursor.as_deref(), mode, intent)
-        .await
-        .map(Json)
-        .map_err(ErrorResponse)
+    let refresh = refresh_from_query(params.refresh.as_deref());
+    handle_feed(
+        &state,
+        target,
+        params.cursor.as_deref(),
+        mode,
+        intent,
+        refresh,
+    )
+    .await
+    .map(Json)
+    .map_err(ErrorResponse)
 }

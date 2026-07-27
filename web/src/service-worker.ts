@@ -248,6 +248,10 @@ async function serveFeed(request: Request): Promise<Response> {
   // "preview" / "freeze" drive the warm-then-commit first screen; absent is a
   // normal committed page (every page after the first).
   const intent = url.searchParams.get("intent") ?? undefined;
+  // "1" is the reader asking for this wall on purpose: mortar re-reads the fast
+  // content caches instead of trusting them. The token is not read here, only
+  // forwarded, so the rule lives in one place in the engine.
+  const refresh = url.searchParams.get("refresh") ?? undefined;
   if (!actor && !feed) {
     return json(
       {
@@ -264,7 +268,7 @@ async function serveFeed(request: Request): Promise<Response> {
   try {
     // positional, and every slot is an optional string, so the ORDER here is
     // the contract: see feed_page's doc comment in mortar-wasm
-    const body = await feed_page(actor, feed, cursor, mode, intent);
+    const body = await feed_page(actor, feed, cursor, mode, intent, refresh);
     return new Response(body, {
       status: 200,
       headers: { "content-type": "application/json" },
