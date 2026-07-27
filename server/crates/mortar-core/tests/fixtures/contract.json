@@ -394,6 +394,9 @@
     "mode": {
       "glaze": true
     },
+    "refresh": {
+      "1": true
+    },
     "target": {
       "actor": true,
       "feed": true

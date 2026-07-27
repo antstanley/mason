@@ -5,10 +5,10 @@
 //! TS. This test pins the contract in one committed fixture,
 //! `tests/fixtures/contract.json`: a canonical instance of every `Brick` kind,
 //! the `FeedResponse` shapes, every `AppError` envelope in both build modes,
-//! the query vocabulary (mode / intent / target), and the hidden moderation
-//! tier, which the feed picker holds a client-side copy of. The web side
-//! re-checks the same file at type level in `web/src/lib/contract-check.ts`,
-//! so:
+//! the query vocabulary (mode / intent / target / refresh), and the hidden
+//! moderation tier, which the feed picker holds a client-side copy of. The web
+//! side re-checks the same file at type level in
+//! `web/src/lib/contract-check.ts`, so:
 //!
 //! - a Rust-side rename changes the serialization, and this test fails until
 //!   the fixture is regenerated (which then fails tsc until types.ts follows);
@@ -28,7 +28,7 @@
 use std::path::Path;
 
 use mortar_core::error::AppError;
-use mortar_core::feed::{FeedIntent, FeedTarget};
+use mortar_core::feed::{FeedIntent, FeedTarget, refresh_from_query};
 use mortar_core::mode::Mode;
 use mortar_core::model::{
     AspectRatio, Author, BlogBrick, Blur, Brick, CaptionTrack, ExternalEmbed, FeedResponse,
@@ -349,21 +349,28 @@ fn contract() -> Value {
 
     // the query vocabulary: `?mode=` names only glaze (anything else is the
     // default full wall), `?intent=` names preview and freeze (absent is a
-    // normal committed page), and `target` names the two parameters that pick a
-    // wall source, exactly one of which a request carries. Each token is bound
-    // ONCE and used for both the parser assert and the fixture key, so a
-    // one-sided rename cannot stay green: the parser assert fails on a Rust
-    // rename, and the changed key fails tsc on the web side.
+    // normal committed page), `target` names the two parameters that pick a
+    // wall source, exactly one of which a request carries, and `?refresh=` names
+    // the one token that asks for a new wall. Each token is bound ONCE and used
+    // for both the parser assert and the fixture key, so a one-sided rename
+    // cannot stay green: the parser assert fails on a Rust rename, and the
+    // changed key fails tsc on the web side.
     const GLAZE: &str = "glaze";
     const PREVIEW: &str = "preview";
     const FREEZE: &str = "freeze";
     const ACTOR: &str = "actor";
     const FEED: &str = "feed";
+    const REFRESH: &str = "1";
     assert_eq!(Mode::from_query(Some(GLAZE)), Mode::Glaze);
     assert_eq!(Mode::from_query(None), Mode::Wall);
     assert_eq!(FeedIntent::from_query(Some(PREVIEW)), FeedIntent::Preview);
     assert_eq!(FeedIntent::from_query(Some(FREEZE)), FeedIntent::Freeze);
     assert_eq!(FeedIntent::from_query(None), FeedIntent::Normal);
+    // both directions, because `refresh` is the one token whose fallback is the
+    // load-bearing half: the token asks for a refresh, and absent must not, or a
+    // hand-edited URL could spend a reader's rate-limit budget by accident
+    assert!(refresh_from_query(Some(REFRESH)));
+    assert!(!refresh_from_query(None));
     // `kind()` is asked of a real parse rather than of a hand-built variant, so
     // the token, the parameter it was read from and the arm it selects are all
     // one assertion
@@ -392,10 +399,16 @@ fn contract() -> Value {
     for target in [ACTOR, FEED] {
         target_map.insert(target.to_string(), Value::Bool(true));
     }
+    // a one-token map like `mode`, and a map rather than a bare string for the
+    // same reason: a JSON string value widens to `string` on the web side, an
+    // object KEY stays the literal `"1"` that `keyof` can be pinned against
+    let mut refresh_map = serde_json::Map::new();
+    refresh_map.insert(REFRESH.to_string(), Value::Bool(true));
     let query = json!({
         "mode": Value::Object(mode_map),
         "intent": Value::Object(intent_map),
         "target": Value::Object(target_map),
+        "refresh": Value::Object(refresh_map),
     });
 
     // enum string values that ride INSIDE bricks, keyed so keyof sees them

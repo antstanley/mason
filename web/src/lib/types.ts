@@ -129,6 +129,14 @@ export interface FeedResponse {
  *  server/crates/mortar-core/src/mode.rs; pinned by the contract fixture. */
 export type FeedMode = "glaze";
 
+/** The one token `?refresh=` takes: the reader asked for this wall on purpose,
+ *  so mortar lays a new one and re-reads the fast content caches. Anything
+ *  else, including absent, is no refresh, and it is honoured only on a
+ *  cursorless request because a refresh is always a first page. Mirrors
+ *  refresh_from_query in server/crates/mortar-core/src/feed.rs; pinned by the
+ *  contract fixture. */
+export type FeedRefresh = "1";
+
 /** The hidden moderation tier: a subject carrying any of these never reaches
  *  the wall. Mirrors HIDDEN_LABELS in
  *  server/crates/mortar-core/src/sources/bluesky.rs; pinned by the contract

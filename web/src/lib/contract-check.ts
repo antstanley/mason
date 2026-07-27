@@ -33,6 +33,7 @@ import type {
   CaptionTrack,
   ErrorEnvelope,
   FeedMode,
+  FeedRefresh,
   FeedResponse,
   HiddenLabel,
   MortarErrorCode,
@@ -79,6 +80,13 @@ export type BrickKindsMatch = Assert<Equal<keyof typeof contract.bricks, Brick["
 export type ErrorCodesMatch = Assert<Equal<keyof typeof contract.errors, MortarErrorCode>>;
 export type IntentVocabularyMatches = Assert<Equal<keyof typeof contract.query.intent, FeedIntent>>;
 export type ModeVocabularyMatches = Assert<Equal<keyof typeof contract.query.mode, FeedMode>>;
+// the fixture key is the numeric-looking `"1"`, and it is the one place that
+// could have made an Equal<> vacuous. JSON object keys are strings, so tsc
+// types this one as the literal `"1"` rather than widening it to `number` or
+// `string`, and the assertion bites: renaming FeedRefresh fails check:ci here.
+export type RefreshVocabularyMatches = Assert<
+  Equal<keyof typeof contract.query.refresh, FeedRefresh>
+>;
 // FeedTargetKind, not `keyof FeedTarget`: `keyof` across a union of object
 // types yields only the keys they share, so an `{actor} | {feed}` union keyofs
 // to `never` and this assertion would hold vacuously.
