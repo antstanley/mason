@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import type { FeedResponse } from "../src/lib/types";
 
 // The brick reader, driven in a real browser against the real static build.
 //
@@ -671,4 +672,90 @@ test("the stepper counts nothing, and still says where a step landed", async ({ 
 	await expect(readout(page)).toHaveText(`brick ${opened.at + 1} of ${opened.total}`);
 	// still nothing on screen saying so
 	await expect(stepper).not.toContainText("/");
+});
+
+// A blog whose publication record would not load, which is a state the engine
+// reaches on its own rather than a hypothetical: `fetch_publication` falls back
+// to a publication named "blog" with an empty url on any failed `getRecord`, and
+// `canonical_url` then answers "" for the document (sources/standardsite.rs). One
+// transient PDS hiccup is enough.
+//
+// The wall already degrades correctly, because `BrickShell` renders no anchor at
+// all when its href is falsy. The reader is the surface that did not: it is
+// reachable for such a brick by stepping to it from a neighbour, and its "read at
+// <publication>" call to action is the biggest control on the panel.
+//
+// The demo wall cannot show this, since every fixture blog carries a real url, so
+// these cases block the service worker and answer /api/feed themselves, the same
+// way link-preview.test.ts does. Still offline: nothing leaves the machine.
+test.describe("a blog with nowhere to send you", () => {
+	test.use({ serviceWorkers: "block" });
+
+	const blogAuthor = {
+		did: "did:plc:b",
+		handle: "blogger.test",
+		displayName: "Blogger",
+		avatar: null,
+	};
+
+	const blog = (id: string, url: string, title: string) => ({
+		kind: "blog" as const,
+		id,
+		url,
+		author: blogAuthor,
+		title,
+		description: "a paragraph about what the article says",
+		coverImage: null,
+		// the name mortar falls back to is literally "blog", which is what makes
+		// the broken control read as "read at blog"
+		publication: { name: url ? "Example" : "blog", url, icon: null },
+		tags: [],
+		publishedAt: "1970-01-01T00:00:00.000Z",
+	});
+
+	const BLOG_WALL = {
+		items: [
+			blog("1", "", "the publication record would not load"),
+			blog("2", "https://example.com/post", "a blog that knows where it lives"),
+		],
+		cursor: null,
+		warming: false,
+	} as unknown as FeedResponse;
+
+	test.beforeEach(async ({ context, page }) => {
+		await context.route("**/api/feed*", (route) =>
+			route.fulfill({
+				status: 200,
+				contentType: "application/json",
+				body: JSON.stringify(BLOG_WALL),
+			}),
+		);
+		await page.goto("/?actor=demo");
+		await cards(page).first().waitFor();
+	});
+
+	test("shows no way out rather than one that reopens mason", async ({ page }) => {
+		// the wall's own guard, asserted first so the reader's is not confused for
+		// it: a blog with no url is a card with no anchor at all
+		await expect(cards(page).nth(0).locator("a")).toHaveCount(0);
+
+		// which is also why the reader for that brick is only reachable by stepping
+		// to it, from the neighbour that does have a link
+		await cards(page).nth(1).locator("a").first().click();
+		await expect(panel(page)).toBeVisible();
+		await expect(panel(page)).toContainText("a blog that knows where it lives");
+		// the neighbour's control, which is what makes the absence below a finding
+		// about this brick rather than about the snippet
+		const outward = panel(page).getByRole("link", { name: "read at Example" });
+		await expect(outward).toBeVisible();
+		await expect(outward).toHaveAttribute("href", "https://example.com/post");
+
+		await page.keyboard.press("ArrowLeft");
+		await expect(panel(page)).toContainText("the publication record would not load");
+
+		// no control, rather than a large pink button that opens a second copy of
+		// mason in a new tab and calls it the article
+		await expect(panel(page).getByRole("link", { name: /^read at/ })).toHaveCount(0);
+		await expect(panel(page).locator('a[href=""]')).toHaveCount(0);
+	});
 });

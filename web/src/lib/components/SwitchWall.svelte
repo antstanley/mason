@@ -75,6 +75,42 @@
 		if (returnFocus) trigger?.focus();
 	}
 
+	// A link inside the panel has been taken, so the panel comes down with it.
+	//
+	// The panel's openness is local state and a client-side navigation does not
+	// touch it: without this, the dialog and its full-viewport scrim stay mounted
+	// over the wall that has just laid, dimming it and swallowing every click,
+	// and a screen-reader reader is left inside a dialog called "Switch wall"
+	// over a wall that already switched. The submit path never had that problem
+	// because it closes before it navigates, and the door to the picker closes
+	// first for its own reason; these links are the two that did not.
+	//
+	// Nothing here calls preventDefault. They stay real links, so a middle click
+	// or a cmd click still opens a wall in a new tab, and that is exactly why a
+	// MODIFIED click leaves the panel up: it opened a wall somewhere else and
+	// this one has not moved, so closing would shut the switcher on somebody who
+	// is reaching for a second feed. Same rule, same spelling as the reader's own
+	// activation (state/reader.svelte.ts).
+	//
+	// A middle click never reaches here at all, because no browser dispatches
+	// `click` for a non-primary button: it fires auxclick, which only the recents
+	// link listens for and only to remember the feed. So the panel stays up for
+	// that one through absence rather than through the button clause, and the
+	// clause is kept anyway so this predicate is the reader's rule spelled once
+	// rather than a subset of it.
+	//
+	// And it closes without taking focus back. The trigger is where focus belongs
+	// after a DISMISSAL, which changes nothing behind the panel, but this is a
+	// navigation: SvelteKit resets focus to the top of the page it has just laid,
+	// so grabbing the trigger first is a move undone a moment later, announcing a
+	// control the reader is leaving rather than the wall they asked for.
+	function closeOnNavigation(event: MouseEvent) {
+		if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+			return;
+		}
+		closePanel(false);
+	}
+
 	// Tab out of the dialog and it closes, so focus never walks into the dimmed
 	// wall behind (mirrors the Escape and click-away dismissals). Only a move that
 	// lands outside the whole switcher counts; hops between the fields do not.
@@ -190,6 +226,7 @@
 				{#if actor !== 'demo'}
 					<a
 						href="/?actor=demo"
+						onclick={closeOnNavigation}
 						class="text-center text-xs font-semibold text-brick-post-ink hover:underline dark:text-brick-post"
 					>
 						or wander the demo wall
@@ -204,10 +241,20 @@
 
 			     Real links with real hrefs, in the same language as a brick's and as
 			     FeedCard's, so a middle click or a cmd click opens a wall in a new tab
-			     instead of being swallowed. `remember` on activation moves the feed
-			     back to the front of the list, exactly as choosing one in the picker
-			     does; without it, opening the same feed from here would leave the
-			     order it was in. -->
+			     instead of being swallowed. Remembering the feed moves it back to the
+			     front of the list, exactly as choosing one in the picker does; without
+			     it, opening the same feed from here would leave the order it was in.
+			     It runs on EVERY activation the browser reports, modified or not, for
+			     the same reason FeedCard's does: a feed opened in a background tab is
+			     still a feed this reader opened. That takes TWO listeners rather than
+			     one, because a middle click dispatches auxclick and no click at all;
+			     `feeds.rememberFromLink` holds the rule for which buttons count, so
+			     this link and the picker's cards cannot drift apart on it.
+
+			     Taking the panel down is the half that is only right for the click
+			     which replaces this wall, so that half lives in closeOnNavigation and
+			     hangs off the click alone: a middle click opened the feed elsewhere
+			     and this wall has not moved. -->
 			{#if panelRecent.length > 0}
 				<div class="mt-4 border-t border-ink/10 pt-4 dark:border-chalk/10">
 					<h2 class="text-xs font-semibold opacity-75">recent feeds</h2>
@@ -216,7 +263,11 @@
 							<li>
 								<a
 									href="/?feed={encodeURIComponent(feed.uri)}"
-									onclick={() => feeds.remember(feed)}
+									onclick={(event) => {
+										feeds.rememberFromLink(event, feed);
+										closeOnNavigation(event);
+									}}
+									onauxclick={(event) => feeds.rememberFromLink(event, feed)}
 									class="flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm font-semibold transition-colors hover:bg-ink/5 dark:hover:bg-chalk/10"
 								>
 									{#if feed.avatar}

@@ -251,6 +251,40 @@ describe("recents", () => {
   });
 });
 
+// Both feed links (the picker's cards and the switcher panel's recents) hang
+// `rememberFromLink` off `onclick` AND `onauxclick`, because the buttons those
+// two events carry do not overlap: no browser dispatches `click` for a
+// non-primary button. Which of them is worth remembering is decided here, once,
+// so the two links cannot drift apart on it; `web/tests/navbar.test.ts` drives
+// the real events in a real browser, which is the only lane that can.
+describe("which activations remember a feed", () => {
+  it("remembers a plain click, which lays the wall right here", () => {
+    const picker = new FeedsState();
+    picker.rememberFromLink({ button: 0 }, feedListing("at://a"));
+    expect(picker.recent.map((f) => f.uri)).toEqual(["at://a"]);
+  });
+
+  it("remembers a middle click, which opens the wall in a background tab", () => {
+    // the case the click listener could never see: a middle click dispatches
+    // auxclick and no click at all, so a reader who opens feeds in background
+    // tabs built no recents list while the same reader cmd-clicking built one
+    const picker = new FeedsState();
+    picker.rememberFromLink({ button: 1 }, feedListing("at://a"));
+    expect(picker.recent.map((f) => f.uri)).toEqual(["at://a"]);
+  });
+
+  it("ignores the right button, which opens a menu and no wall", () => {
+    // auxclick fires for button 2 as well, and nothing has been opened yet:
+    // remembering here would file a feed the reader only right-clicked, and
+    // shove it to the head of the list if it was already there
+    const picker = new FeedsState();
+    picker.remember(feedListing("at://a"));
+    picker.rememberFromLink({ button: 2 }, feedListing("at://b"));
+    expect(picker.recent.map((f) => f.uri)).toEqual(["at://a"]);
+    expect(stored.get(STORAGE_KEY)).toBe(JSON.stringify([feedListing("at://a")]));
+  });
+});
+
 describe("the three questions", () => {
   it("asks the popular endpoint for the resting state", async () => {
     fetchMock.mockResolvedValue(answer([view()]));
@@ -705,5 +739,45 @@ describe("feeds mason cannot lay a wall from", () => {
     expect(new FeedsState().recent.map((f) => f.uri)).toEqual(["at://ok"]);
     // filtered on the way out, not deleted on the way in
     expect(stored.get(STORAGE_KEY)).toBe(raw);
+  });
+
+  it("carries a denied entry through a remember, which is the only path that writes", () => {
+    // reading `mason:feeds` never writes, so the case above passes even when the
+    // very next open deletes the entry for good. `remember` is the one writer,
+    // and this is the round trip the promise above actually rests on.
+    stored.set(
+      STORAGE_KEY,
+      JSON.stringify([
+        { ...feedListing("at://viewer", "For You"), creator: "bsky.app" },
+        feedListing("at://ok", "Science"),
+      ]),
+    );
+    const picker = new FeedsState();
+    expect(picker.recent.map((f) => f.uri)).toEqual(["at://ok"]);
+
+    picker.remember(feedListing("at://new", "Astronomy"));
+
+    // still hidden from the picker
+    expect(picker.recent.map((f) => f.uri)).toEqual(["at://new", "at://ok"]);
+    // and still in storage, so dropping the entry from UNLAYABLE_FEEDS is all it
+    // would take to bring the card back
+    const written = JSON.parse(stored.get(STORAGE_KEY) ?? "[]") as FeedListing[];
+    expect(written.map((f) => f.uri)).toEqual(["at://new", "at://viewer", "at://ok"]);
+  });
+
+  it("does not let a denied entry outlive the cap it counts against", () => {
+    // the flip side of keeping it: a denied entry holds one of the twelve slots
+    // rather than being deleted to make room, and it ages off the end like any
+    // other. The cap is how much mason remembers, not how many cards it draws.
+    stored.set(
+      STORAGE_KEY,
+      JSON.stringify([{ ...feedListing("at://viewer", "Mutuals"), creator: "bsky.app" }]),
+    );
+    const picker = new FeedsState();
+    for (let i = 0; i < MAX_RECENT_FEEDS; i++) picker.remember(feedListing(`at://${i}`));
+
+    const written = JSON.parse(stored.get(STORAGE_KEY) ?? "[]") as FeedListing[];
+    expect(written).toHaveLength(MAX_RECENT_FEEDS);
+    expect(written.map((f) => f.uri)).not.toContain("at://viewer");
   });
 });

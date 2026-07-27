@@ -19,6 +19,19 @@ function generator(view: Record<string, unknown>) {
   return { ok: true, json: () => Promise.resolve({ view }) };
 }
 
+/** An answer whose landing this file decides rather than the microtask queue.
+ *  `fetch` is handed a promise that stays pending until `land()` is called,
+ *  which is the only way to make a SUPERSEDED request answer after the request
+ *  that superseded it: two already-resolved mocks have identical `.then` chains
+ *  and drain in issue order, so the stale one always lands first. */
+function heldAnswer(view: Record<string, unknown>) {
+  let land!: () => void;
+  const answer = new Promise<unknown>((resolve) => {
+    land = () => resolve(generator(view));
+  });
+  return { answer, land };
+}
+
 /** An unknown or withdrawn generator: the AppView 400s or 404s, and `res.ok`
  *  is the whole of what the module inspects. */
 const miss = { ok: false, json: () => Promise.resolve({ error: "UnknownFeed" }) };
@@ -129,15 +142,40 @@ describe("a miss never blocks the wall", () => {
 
   it("drops an answer that lands after the reader moved to another feed", async () => {
     const info = new FeedInfoState();
-    fetchMock
-      .mockResolvedValueOnce(
-        generator({ displayName: "What's Hot", avatar: "https://cdn.test/hot.jpg" }),
-      )
-      .mockResolvedValueOnce(generator({ displayName: "Quiet Posters" }));
+    // The first feed's answer is HELD, so it lands after the second's. That is
+    // the ordering the case is named after and the only one in which the guard
+    // does any work: with both answers resolved up front they drain in issue
+    // order, the stale one lands first, and the fresh one overwrites it whether
+    // or not the guard is there.
+    const held = heldAnswer({
+      displayName: "What's Hot",
+      avatar: "https://cdn.test/hot.jpg",
+      creator: { handle: "bsky.app" },
+    });
+    // and the second feed brings a face and a creator of its own, so a stale
+    // write cannot hide behind the fresh handler's unconditional assignment: a
+    // fixture with no avatar clears that field either way, which is how this
+    // case used to pass by accident.
+    fetchMock.mockReturnValueOnce(held.answer).mockResolvedValueOnce(
+      generator({
+        displayName: "Quiet Posters",
+        avatar: "https://cdn.test/quiet.jpg",
+        creator: { handle: "quiet.test" },
+      }),
+    );
+
     info.load(WHATS_HOT);
     info.load("at://did:plc:other/app.bsky.feed.generator/quiet"); // switched mid-flight
     await settle();
+    expect(info.name).toBe("Quiet Posters"); // the feed the reader is on now
+
+    held.land();
+    await settle();
+
+    // all three fields, because the header wears all three: the button's name,
+    // its face, and the creator its aria-label names the feed by
     expect(info.name).toBe("Quiet Posters");
-    expect(info.avatar).toBeNull(); // the first feed's face never lands on the second
+    expect(info.avatar).toBe("https://cdn.test/quiet.jpg");
+    expect(info.creator).toBe("quiet.test");
   });
 });

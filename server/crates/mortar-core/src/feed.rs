@@ -1043,7 +1043,7 @@ mod feed_wall_tests {
     use crate::config::Config;
     use crate::state::AppState;
     use serde_json::{Value, json};
-    use wiremock::matchers::{method, path, query_param};
+    use wiremock::matchers::{method, path, query_param, query_param_is_missing};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     /// A feed generator's AT-URI in the DID form, which owes no resolution hop.
@@ -1113,6 +1113,14 @@ mod feed_wall_tests {
     /// ignored, so a wall that asked for the wrong depth or paged from the wrong
     /// place finds no mock at all and fails loudly instead of quietly reading
     /// this page.
+    ///
+    /// `at: None` means the HEAD of the feed, and it is matched as the ABSENCE
+    /// of a cursor rather than left unsaid. `query_param` is presence-only, so a
+    /// mock that merely omitted it would answer a request carrying any cursor at
+    /// all, and a wall that forwarded one it should have dropped would read this
+    /// page and look right. That is the whole claim of the graph-cursor case
+    /// below, and it was carried by a second assertion rather than by this mock
+    /// until the matcher was spelled.
     async fn feed_answers(
         server: &MockServer,
         limit: u32,
@@ -1127,8 +1135,9 @@ mod feed_wall_tests {
         let mut mock = Mock::given(method("GET"))
             .and(path("/xrpc/app.bsky.feed.getFeed"))
             .and(query_param("limit", limit.to_string()));
-        if let Some(at) = at {
-            mock = mock.and(query_param("cursor", at));
+        match at {
+            Some(at) => mock = mock.and(query_param("cursor", at)),
+            None => mock = mock.and(query_param_is_missing("cursor")),
         }
         mock.respond_with(ResponseTemplate::new(200).set_body_json(body))
             .mount(server)
@@ -1236,8 +1245,9 @@ mod feed_wall_tests {
     #[tokio::test]
     async fn a_feed_wall_ends_when_the_generator_does() {
         let server = MockServer::start().await;
-        // the cursor-bearing mock goes up first: the general one would match a
-        // request carrying a cursor too, and wiremock takes the first match
+        // two mocks that cannot answer for each other: one demands `cursor=page2`
+        // and the other forbids a cursor outright, so serving page one twice is a
+        // failure to match rather than a passing assertion about identical pages
         feed_answers(
             &server,
             PAGE_SIZE_LIMIT,
@@ -1337,8 +1347,9 @@ mod feed_wall_tests {
     /// A graph cursor names a position in a snapshot a feed wall has none of, so
     /// it is treated exactly as garbage is: the feed from its head, never an
     /// error, and never a page fetched under somebody else's cursor. The mock
-    /// matches on the ABSENCE of a cursor parameter, so a wall that forwarded
-    /// this one would find no mock at all.
+    /// matches on the ABSENCE of a cursor parameter (`feed_answers` above), so a
+    /// wall that forwarded this one finds no mock at all and fails on the page
+    /// rather than only on the cursor echoed back below.
     #[tokio::test]
     async fn a_graph_cursor_on_a_feed_wall_lays_from_the_head() {
         let server = MockServer::start().await;

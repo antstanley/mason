@@ -271,8 +271,19 @@ Two classes of untrusted string leave `sources/`, and both are vetted here.
 `is_http_url` accepts only `http://` and `https://`, case-insensitively and after
 trimming. Third-party records carry arbitrary strings in their url fields, and
 `javascript:`, `data:` and `vbscript:` must never survive the trip to the anchor.
-A blog's canonical URL falls back to empty and a live stream's record URL falls
-back to the stream.place watch page.
+A blog's canonical URL falls back to empty, a live stream's record URL falls back
+to the stream.place watch page, and a post's external embed is dropped **whole**
+(`external_embed` in `sources/bluesky.rs`): a link card with nowhere to go is a
+headline for a page nobody can open, and a post carrying nothing else then fails
+the wall-worthiness check and never reaches the wall at all.
+
+That embed's `thumb` is vetted by the same rule for a different reason, since it
+reaches an `<img src>` rather than an anchor and no browser runs script from an
+image source. The AppView resolves that picture itself and hands back its own CDN
+link every time, so anything else is either a picture mason cannot draw or bytes
+carried inline past the page's own network rules. The thumb alone is dropped and
+the embed stays, through the fallback a link that brought no picture already
+takes.
 
 `urlencode` percent-encodes everything outside the RFC 3986 unreserved set for
 any value interpolated into a query string, so a handle, DID or cursor containing

@@ -43,6 +43,34 @@ const post = (id: string, text: string, over: Record<string, unknown>) => ({
   ...over,
 });
 
+/** A brick carrying a link mortar would never have let out of `sources/`.
+ *
+ *  `external_embed` in sources/bluesky.rs drops the WHOLE embed when its uri is
+ *  not http(s), so this shape reaches the client only from a mortar the SPA was
+ *  not built with, which is a real state: in server mode the SPA calls a native
+ *  binary that deploys on its own clock. The client's own vetting is the second
+ *  line, and this is the only lane in the repo that can see it. No picture, so
+ *  the one-preview count below still holds. */
+const unvettable = {
+  ...external,
+  uri: "javascript:document.title='PWNED'",
+  thumb: null,
+};
+
+/** A link card whose address happens to be a bsky.app one, and a route no
+ *  client but bsky.app serves.
+ *
+ *  `external.uri` is a stranger's link, not a url mason built, so it is vetted
+ *  and never rewritten: only `/profile/` and `/post/<rkey>` were ever checked
+ *  against the other clients. No picture, so the one-preview count below still
+ *  holds. */
+const strangersBskyLink = {
+  ...external,
+  uri: "https://bsky.app/starter-pack/alice.test/3abc",
+  title: "A starter pack somebody linked to",
+  thumb: null,
+};
+
 const WALL = {
   items: [
     post("1", "a link with a picture on the other end", { external }),
@@ -51,6 +79,8 @@ const WALL = {
       external,
     }),
     post("3", "a link with no picture", { external: { ...external, thumb: null } }),
+    post("4", "a link nobody should be handed", { external: unvettable }),
+    post("5", "a link card pointing back at bluesky", { external: strangersBskyLink }),
   ],
   cursor: null,
   warming: false,
@@ -119,6 +149,79 @@ test("exactly one brick on this wall shows a link preview", async ({ page }) => 
   // the guard against the precedence rule inverting: if the attached image ever
   // stopped winning, this would be two
   await expect(page.locator("#wall figure")).toHaveCount(1);
+});
+
+test("a link that is not http(s) reaches no href, on the wall or in the reader", async ({
+  page,
+}) => {
+  const brick = page.locator("#wall article").nth(3);
+  // the card still says what the link said; only the way to it is gone
+  await expect(brick.locator("div.rounded-xl p.truncate")).toHaveText(
+    "A headline from the linked page",
+  );
+  await expect(page.locator('a[href^="javascript:"]')).toHaveCount(0);
+
+  // the reader is where external.uri reaches an anchor at all, so it is the
+  // place this has to hold
+  await brick.locator("a").first().click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("A headline from the linked page");
+  await expect(page.locator('a[href^="javascript:"]')).toHaveCount(0);
+
+  // an anchor with no href is not a link: the accessibility tree reports none,
+  // it takes no click and no Tab. href="" would still be a link, and one that
+  // reopens mason, which is why the empty answer drops the attribute instead.
+  await expect(
+    dialog.getByRole("link", { name: /A headline from the linked page/ }),
+  ).toHaveCount(0);
+  await expect(dialog.locator('a[href=""]')).toHaveCount(0);
+
+  // and the post's own way out is untouched, so this is the embed being vetted
+  // rather than the reader losing its links
+  await expect(dialog.getByRole("link", { name: "open in Bluesky" })).toBeVisible();
+});
+
+// Every case above runs on the default client, which is bsky.app, and on that
+// setting `clientUrl` rewrites nothing at all: that is exactly why the reader
+// reusing it on a link card went unnoticed. This describe is the one that sets
+// a different client, which is what the setting is for.
+test.describe("a link card carries a stranger's address, whatever client is set", () => {
+  test.beforeEach(async ({ page }) => {
+    // planted before the app boots, which is the same shape settings writes and
+    // the state module reads on construction
+    await page.addInitScript(() => localStorage.setItem("mason:client", "twinkl.social"));
+    await page.goto("/?actor=demo");
+    await page.locator("#wall article").first().waitFor();
+  });
+
+  test("a bsky.app link card is not rewritten, and its href is the address it shows", async ({
+    page,
+  }) => {
+    const brick = page.locator("#wall article").nth(4);
+    await brick.locator("a").first().click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    // the setting really is live, which is what makes this the embed being
+    // exempted rather than the client picker being ignored: the post's OWN way
+    // out is rewritten, host and profile spelling both
+    const out = dialog.getByRole("link", { name: "open in Twinkl" });
+    await expect(out).toBeVisible();
+    await expect(out).toHaveAttribute("href", /^https:\/\/twinkl\.social\/@/);
+
+    // and the link card goes where the link card says it goes
+    const embed = dialog.getByRole("link", { name: /A starter pack somebody linked to/ });
+    await expect(embed).toHaveAttribute(
+      "href",
+      "https://bsky.app/starter-pack/alice.test/3abc",
+    );
+    // the address under the headline is the same string as the href. A control
+    // is named after where it lands, and /starter-pack/ is a route twinkl does
+    // not serve, so the rewrite would have been a promise the link cannot keep
+    await expect(embed).toContainText("https://bsky.app/starter-pack/alice.test/3abc");
+    await expect(page.locator('a[href^="https://twinkl.social/starter-pack/"]')).toHaveCount(0);
+  });
 });
 
 test("the reader shows the link's picture under the post's own", async ({ page }) => {

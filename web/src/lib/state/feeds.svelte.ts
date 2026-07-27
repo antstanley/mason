@@ -182,6 +182,15 @@ export interface FeedListing {
   likeCount: number;
 }
 
+/** The whole of a click that a feed link reads: which button took it.
+ *
+ *  Structural rather than `MouseEvent`, for the same reason `reader.activate`'s
+ *  own activation type is structural: the unit tests build one as a plain object
+ *  and the node environment they run in has no DOM at all. */
+interface LinkActivation {
+  button: number;
+}
+
 /** One label as the AppView reports it. Only `val` matters here; the rest of the
  *  object (src, uri, cts, ...) is discarded, exactly as mortar discards it. */
 interface Label {
@@ -246,34 +255,50 @@ function listing(view: GeneratorView): FeedListing | null {
   };
 }
 
-/** The recents rule, in one place: most recent first, one entry per feed, and
- *  never more than `MAX_RECENT_FEEDS` of them. Keeping the FIRST of a repeated
- *  uri is what makes reopening yesterday's feed move it to the front instead of
- *  listing it twice, because the caller puts the newest at the head.
+/** The shape of the stored list, in one place: most recent first, one entry per
+ *  feed, and never more than `MAX_RECENT_FEEDS` of them. Keeping the FIRST of a
+ *  repeated uri is what makes reopening yesterday's feed move it to the front
+ *  instead of listing it twice, because the caller puts the newest at the head.
  *
  *  Applied on the way in from storage as well as on every open: `mason:feeds` is
  *  a string a reader can edit, so its length and its contents are the picker's
  *  problem rather than a past version's promise.
  *
- *  `UNLAYABLE_FEEDS` is applied here too, and this is the only place recents
- *  meet it. A feed opened before it was denied, or before mason knew it could
- *  not be laid, is already sitting in somebody's `mason:feeds`, and a recent
- *  card is the one a reader is most likely to tap. Filtering on the way out
- *  rather than deleting on the way in means the stored list is left alone: if an
- *  entry here turns out to be wrong, or a feed starts working logged out,
- *  removing it from the list above brings the card straight back rather than
- *  asking a reader to find the feed again. */
+ *  This is what gets written back, and it deliberately says nothing about
+ *  `UNLAYABLE_FEEDS`; `layable` below is the half that does. */
 function ordered(feeds: FeedListing[]): FeedListing[] {
   const seen = new Set<string>();
   const kept: FeedListing[] = [];
   for (const feed of feeds) {
     if (seen.has(feed.uri)) continue;
-    if (unlayable(feed.name, feed.creator)) continue;
     seen.add(feed.uri);
     kept.push(feed);
     if (kept.length === MAX_RECENT_FEEDS) break;
   }
   return kept;
+}
+
+/** The stored list minus the feeds mason cannot lay a wall from, which is the
+ *  only place recents meet `UNLAYABLE_FEEDS`.
+ *
+ *  A feed opened before it was denied, or before mason knew it could not be
+ *  laid, is already sitting in somebody's `mason:feeds`, and a recent card is
+ *  the one a reader is most likely to tap.
+ *
+ *  It is kept apart from `ordered` so the denial really is a filter on the way
+ *  out and not a delete on the way in: `ordered` is what `remember` persists,
+ *  this is what the picker renders, and the two are never the same array. If an
+ *  entry in the list above turns out to be wrong, or a feed starts working
+ *  logged out, removing it brings the card straight back rather than asking a
+ *  reader to find the feed again. Folding this back into `ordered` would put a
+ *  filtered list on the write path and permanently delete the entry the first
+ *  time any other feed was opened, which is exactly the recovery this promises.
+ *
+ *  A denied entry still costs one of the twelve slots, which is the accepted
+ *  price of keeping it: the cap is how much mason remembers, not how many cards
+ *  it draws. */
+function layable(feeds: FeedListing[]): FeedListing[] {
+  return feeds.filter((feed) => !unlayable(feed.name, feed.creator));
 }
 
 /** One stored entry, validated field by field.
@@ -354,9 +379,23 @@ function store(feeds: FeedListing[]): void {
 /** Exported for the unit tests, which build throwaway instances; the app only
  *  ever uses the `feeds` singleton below. */
 export class FeedsState {
-  /** The feeds this reader has opened, most recent first. The one section of
-   *  the picker that owes the network nothing. */
-  recent = $state<FeedListing[]>(readRecent());
+  /** The recents list exactly as `mason:feeds` holds it, denied entries and
+   *  all. Private, because nothing renders this: it is the write path, and the
+   *  only reason it is separate from `recent` is that the two must not be the
+   *  same list (see `layable`). */
+  #stored = $state<FeedListing[]>(readRecent());
+
+  /** The feeds this reader has opened, most recent first, minus the ones mason
+   *  cannot lay a wall from. The one section of the picker that owes the
+   *  network nothing.
+   *
+   *  A getter over the stored list rather than a field of its own, so there is
+   *  one list and one filter and no second copy to fall out of step with what
+   *  was written. It reads `#stored`, which is `$state`, so the picker still
+   *  re-renders on a `remember`. */
+  get recent(): FeedListing[] {
+    return layable(this.#stored);
+  }
 
   /** Which question `results` answers. */
   question = $state<Question>("popular");
@@ -482,10 +521,36 @@ export class FeedsState {
     await this.#ask(this.question, this.term, this.#cursor);
   }
 
-  /** Remember a feed the reader opened, most recent first. */
+  /** Remember a feed the reader opened, most recent first.
+   *
+   *  Prepended to the STORED list, not to the rendered one: reading `recent`
+   *  here and writing the result back is what used to delete a denied entry the
+   *  first time a reader opened anything else. */
   remember(feed: FeedListing) {
-    this.recent = ordered([feed, ...this.recent]);
-    store(this.recent);
+    this.#stored = ordered([feed, ...this.#stored]);
+    store(this.#stored);
+  }
+
+  /** Remember a feed whose link is being taken, whichever button took it.
+   *
+   *  Both of mason's feed links (the picker's cards and the switcher panel's
+   *  recents) hang this off `onclick` AND `onauxclick`, because those two events
+   *  do not overlap: a browser dispatches NO `click` for a non-primary button,
+   *  so a middle click, which opens the wall in a background tab, arrives as
+   *  `auxclick` alone. With the click listener on its own, a reader who
+   *  middle-clicks built no recents list at all, while the same reader
+   *  cmd-clicking built one, because a modified PRIMARY click does dispatch
+   *  `click`. Two listeners rather than a listener each way, so the two links
+   *  cannot drift apart on the rule.
+   *
+   *  `auxclick` also fires for the RIGHT button, which opens a context menu and
+   *  no wall, so the primary and the middle buttons are the two that count. The
+   *  activation neither listener can see is "open link in new tab" chosen from
+   *  that menu: the browser dispatches nothing at all for it, so that feed is
+   *  remembered the next time it is opened from a link rather than then. */
+  rememberFromLink(event: LinkActivation, feed: FeedListing) {
+    if (event.button !== 0 && event.button !== 1) return;
+    this.remember(feed);
   }
 
   /** Ask one question and take its answer, unless the reader has asked another

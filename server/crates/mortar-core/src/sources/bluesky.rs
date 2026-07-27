@@ -10,7 +10,7 @@ use crate::http::{Bucket, Http, HttpError};
 use crate::model::{
     AspectRatio, Author, Blur, Brick, ExternalEmbed, ImageEmbed, PostBrick, VideoBrick, VideoSource,
 };
-use crate::sources::util::urlencode;
+use crate::sources::util::{is_http_url, urlencode};
 
 /// One author's recent posts, videos among them.
 #[derive(Serialize, Deserialize, Clone)]
@@ -443,6 +443,40 @@ fn bsky_url(handle: &str, uri: &str) -> String {
     format!("https://bsky.app/profile/{handle}/post/{rkey}")
 }
 
+/// A post's link card, vetted, or nothing at all. Both fields on it are
+/// somebody else's record string and both reach the browser's DOM, so both are
+/// answered here rather than at the far end, where every other third-party URL
+/// in this engine is already answered.
+///
+/// `uri` reaches an `<a href>` in the reader, and an href is a navigation. That
+/// is the exact trip "Outbound safety" says `javascript:`, `data:` and
+/// `vbscript:` must never survive, so a link that is not http(s) takes the
+/// WHOLE embed with it rather than emptying one field: a link card with nowhere
+/// to go is a headline for a page nobody can open, and both renderers already
+/// draw nothing at all for a post with no embed. It also lets the
+/// wall-worthiness check below drop a post that carried nothing else, which is
+/// what a post consisting of one dead link is.
+///
+/// `thumb` reaches an `<img src>`, which is NOT a navigation: no browser runs
+/// script from an image source, so the anchor's reason is not this field's. Its
+/// reason is that the AppView resolves this picture itself and hands back its
+/// own CDN link every time, so anything else is either a picture mason cannot
+/// draw (a blank 1.91:1 hole where a link card should be) or bytes carried
+/// inline past every network rule the page has. The thumb alone goes and the
+/// embed stays: the words and the link are the substance, and card and reader
+/// both already fall back to the text block when a link brought no picture.
+fn external_embed(external: ExternalView) -> Option<ExternalEmbed> {
+    if !is_http_url(&external.uri) {
+        return None;
+    }
+    Some(ExternalEmbed {
+        uri: external.uri,
+        title: external.title,
+        description: external.description,
+        thumb: external.thumb.filter(|thumb| is_http_url(thumb)),
+    })
+}
+
 /// Map a post view to a brick. Posts whose media is a native video become
 /// video bricks; everything else is a post brick.
 fn post_to_brick(post: PostView) -> Option<Brick> {
@@ -494,15 +528,7 @@ fn post_to_brick(post: PostView) -> Option<Brick> {
                         .collect(),
                     None,
                 ),
-                Some(EmbedView::External { external }) => (
-                    Vec::new(),
-                    Some(ExternalEmbed {
-                        uri: external.uri,
-                        title: external.title,
-                        description: external.description,
-                        thumb: external.thumb,
-                    }),
-                ),
+                Some(EmbedView::External { external }) => (Vec::new(), external_embed(external)),
                 _ => (Vec::new(), None),
             };
             // text-only posts with no media and no text are not wall-worthy
@@ -1035,5 +1061,111 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(profile.did, "did:plc:aa");
+    }
+
+    /// One `app.bsky.embed.external#view` as the AppView would report it, with
+    /// whichever of the two strings a case is about.
+    fn external_view(uri: &str, thumb: Option<&str>) -> ExternalView {
+        ExternalView {
+            uri: uri.into(),
+            title: "a headline from the linked page".into(),
+            description: "what the page advertises".into(),
+            thumb: thumb.map(Into::into),
+        }
+    }
+
+    /// One post through the real mapping path, so these cases pin what reaches
+    /// a brick rather than what one helper returns in isolation.
+    fn bricks_from(text: &str, embed: serde_json::Value) -> Vec<Brick> {
+        let mut item = post_json("at://did:plc:aa/app.bsky.feed.post/1", embed);
+        item["post"]["record"]["text"] = serde_json::json!(text);
+        let feed: AuthorFeed = serde_json::from_value(serde_json::json!({"feed": [item]})).unwrap();
+        map_feed_page(feed)
+    }
+
+    fn external_embed_json(uri: &str) -> serde_json::Value {
+        serde_json::json!({
+            "$type": "app.bsky.embed.external#view",
+            "external": {"uri": uri, "title": "click me", "description": ""}
+        })
+    }
+
+    /// The reader renders this uri as an `<a href>`, so a scheme that is not
+    /// http(s) must not get out of `sources/` at all.
+    #[test]
+    fn a_link_that_is_not_http_takes_the_whole_embed_with_it() {
+        for uri in [
+            "javascript:alert(document.domain)",
+            "  JavaScript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "vbscript:msgbox",
+            "intent://evil#Intent;scheme=https;end",
+            "//example.com/no-scheme-at-all",
+            "",
+        ] {
+            assert!(
+                external_embed(external_view(uri, Some("https://cdn.test/thumb.jpg"))).is_none(),
+                "{uri} reached a brick"
+            );
+        }
+    }
+
+    #[test]
+    fn an_http_link_arrives_whole() {
+        let embed = external_embed(external_view(
+            "https://example.com/story?utm=1",
+            Some("https://cdn.bsky.app/img/feed_thumbnail/x@jpeg"),
+        ))
+        .expect("an https link is the ordinary case");
+        assert_eq!(embed.uri, "https://example.com/story?utm=1");
+        assert_eq!(embed.title, "a headline from the linked page");
+        assert_eq!(embed.description, "what the page advertises");
+        assert_eq!(
+            embed.thumb.as_deref(),
+            Some("https://cdn.bsky.app/img/feed_thumbnail/x@jpeg")
+        );
+    }
+
+    /// The picture is decoration and the link is the substance, so a thumb that
+    /// is not an AppView CDN link goes on its own and the card still renders,
+    /// through the same path a link that brought no picture already takes.
+    #[test]
+    fn a_thumb_that_is_not_http_goes_without_the_embed() {
+        for thumb in [
+            "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+            "javascript:alert(1)",
+            "//cdn.example.com/og.png",
+        ] {
+            let embed = external_embed(external_view("https://example.com/story", Some(thumb)))
+                .expect("the link itself is fine, so the card stays");
+            assert!(embed.thumb.is_none(), "{thumb} reached an img src");
+            assert_eq!(embed.uri, "https://example.com/story");
+        }
+    }
+
+    #[test]
+    fn a_post_that_says_something_keeps_its_words_and_loses_the_dead_link() {
+        let bricks = bricks_from(
+            "hello wall",
+            external_embed_json("javascript:alert(document.domain)"),
+        );
+        assert_eq!(bricks.len(), 1);
+        match &bricks[0] {
+            Brick::Post(post) => {
+                assert_eq!(post.text, "hello wall");
+                assert!(post.external.is_none(), "a dead link reached the wall");
+            }
+            other => panic!("expected post brick, got {other:?}"),
+        }
+    }
+
+    /// A post whose only content was a link nobody can open has nothing left to
+    /// show, and the wall-worthiness rule catches it for free.
+    #[test]
+    fn a_post_carrying_only_a_dead_link_never_reaches_the_wall() {
+        assert!(
+            bricks_from("", external_embed_json("javascript:alert(1)")).is_empty(),
+            "a post with no text, no images and no openable link is not wall-worthy"
+        );
     }
 }

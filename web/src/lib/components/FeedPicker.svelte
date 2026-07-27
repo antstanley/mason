@@ -280,8 +280,21 @@
 				     first: with the AppView unreachable this is still a wall away -->
 				<section aria-labelledby={recentId} class="mt-6">
 					<h3 id={recentId} class="text-xs font-bold tracking-wide uppercase opacity-60">recent</h3>
+					<!-- keyed by uri and NOT by index, which is the opposite of the
+					     results list below and has to stay that way. Taking a card
+					     remembers its feed, and remembering moves it to the head of THIS
+					     list; Svelte flushes in a microtask between one event listener
+					     and the next, so with index keys the anchor the reader is
+					     mid-click on is rebound to whichever feed now sits at that
+					     position, href and all, before the browser resolves the
+					     navigation. That laid the wrong wall for every card but the
+					     first, silently, on a plain click, a keyboard Enter and a middle
+					     click alike. A uri key MOVES the anchor instead of rebinding it,
+					     which is what the switcher panel's copy of this list has always
+					     done. `ordered()` keeps one entry per uri, so a duplicate key is
+					     impossible here. -->
 					<ul aria-label={tally(feeds.recent.length, 'recent feed')} class="mt-2 grid gap-2 sm:grid-cols-2">
-						{#each feeds.recent as feed, i (i)}
+						{#each feeds.recent as feed (feed.uri)}
 							<li><FeedCard {feed} /></li>
 						{/each}
 					</ul>
@@ -299,8 +312,15 @@
 					     directory concatenated, with no dedupe between them, and Svelte
 					     answers a repeated key by THROWING each_key_duplicate as it
 					     renders, which here would mean the picker going blank the moment
-					     a second page repeated one feed. The recents list above is keyed
-					     the same way for the same reason, cheaply. -->
+					     a second page repeated one feed.
+					     THE RECENTS LIST ABOVE IS KEYED THE OTHER WAY, BY URI, and the
+					     two are meant to disagree: do not "fix" the inconsistency. Each
+					     list gets the only key that is safe for it. Recents are deduped
+					     by `ordered()`, so a uri key cannot repeat there, and they
+					     REORDER under their own cards, so an index key rebinds the
+					     anchor being clicked and lays the wrong wall. Results are the
+					     other way round: a uri can repeat, and nothing a results card
+					     does touches `feeds.results`, so an index key costs nothing. -->
 					<ul aria-label={tally(feeds.results.length, 'feed')} class="mt-2 grid gap-2 sm:grid-cols-2">
 						{#each feeds.results as feed, i (i)}
 							<li><FeedCard {feed} /></li>

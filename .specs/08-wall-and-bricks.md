@@ -195,13 +195,29 @@ lives.
 | Post | Every image, each at its own aspect ratio, rather than the first one; the full text unclamped; the external embed with its whole description; the timestamp |
 | Post (from glaze) | The same reader. A glaze brick is a post brick, so its filmstrip becomes a stack and every alt text is readable |
 | Video | The poster with a play button that mounts `VideoPlayer` exactly as the card does; title, activity or viewer count, runtime, author |
-| Blog | The cover at full width, the publication chip, the whole description, every tag rather than four, the published date, and "read at <publication>" as the primary control |
+| Blog | The cover at full width, the publication chip, the whole description, every tag rather than four, the published date, and "read at <publication>" as the primary control, rendered only when the blog has a canonical URL |
 
 A blog's article body is still not rendered, and the reader is where that
 limit is most visible: the content union of `site.standard.document` is
 platform-specific and mason never parses it (see
 [00-overview.md](00-overview.md)). The reader answers that by making the
 outbound link the primary action on a blog rather than a footnote.
+
+The reader is the one place a post's `external.uri` reaches an `<a href>`, and
+that link is vetted rather than rewritten: `httpUrl` and not `clientUrl` (see
+[07-web-client.md](07-web-client.md)). It is a stranger's link carried inside
+their record, not a url mason built, so the reader's chosen client has no claim
+on it. Sending a `bsky.app` starter pack or hashtag to another client would land
+on a route that client does not serve, while the address printed under the
+headline, and the host `LinkPreview` draws over the picture, still read
+`bsky.app`.
+
+`BlogBrick.url` is legitimately empty (a failed `getRecord` on
+`site.standard.publication` leaves the publication with no base, so
+`canonical_url` answers `""`), and an `<a href="">` resolves to the current
+document. Both surfaces guard on it and neither renders a dead control:
+`BrickShell` gives such a card no anchor at all, and the reader omits the "read
+at" button rather than offering a way out that reopens mason.
 
 ### Dialog behaviour
 
@@ -467,6 +483,36 @@ creator's handle, its description clamped to two lines, and its like count
 (hidden at zero, like every tally on the wall). Activating one opens
 `/?feed=<uri>` and writes it to `mason:feeds`.
 
+**Whichever button activated it**, which costs a second listener rather than
+one: no browser dispatches `click` for a non-primary button, so a middle click,
+the one that opens the wall in a background tab, is an `auxclick` and nothing
+else. A card that only listened for `click` remembered every feed a reader
+cmd-clicked and no feed they middle-clicked. `auxclick` also fires for the right
+button, which opens a context menu and no wall, so the primary and middle
+buttons are the two that count. The path neither listener can see is "open link
+in new tab" chosen from that context menu, which dispatches no event at all; that
+feed is remembered the next time it is opened from a link. The rule lives once,
+in `feeds.rememberFromLink`, because the switcher panel's recent-feed links are
+the same link with the same promise.
+
+**A recents card is keyed by its uri and never by its position**, in the picker
+and in the switcher panel alike, and that is a correctness rule rather than a
+preference. Remembering a feed moves it to the head of the very list the card was
+rendered from, so the list reorders under the click that started it, and Svelte
+flushes in a microtask between one event listener and the next. With a position
+key the clicked anchor is handed a different feed, and its `href` with it, before
+the browser resolves the navigation, so the picker lays the feed that sat one
+place earlier for every card but the first. Nothing says so: the header, the wall
+and `mason:feeds` all agree on the wrong feed, and the reader's own repair (tap
+again, because the feed they wanted is now at the front) makes it read as
+flakiness. `ordered()` already keeps one entry per uri, so a uri key cannot
+repeat. The picker's **results** list is deliberately the opposite, keyed by
+position, and the two are meant to disagree: results are pages of somebody else's
+directory concatenated with no dedupe between them, where a repeated uri throws
+`each_key_duplicate` mid render and takes the whole picker with it, and nothing a
+results card does reorders the results. The general rule, for any list: a link
+whose own handler mutates the list it is rendered from must be keyed by identity.
+
 ### The picker reads the AppView directly, and that is chrome rather than moderation
 
 The picker is a directory listing, so it asks the public AppView from the browser
@@ -482,6 +528,16 @@ shape of a bug, so it is pinned rather than copied: the contract fixture carries
 `vocab.hiddenLabels` as object keys and `contract-check.ts` asserts the
 TypeScript list equals it, the same mechanism that already keeps the error codes
 and the video sources in step (see [06-wire-contract.md](06-wire-contract.md)).
+
+A second, smaller list (`UNLAYABLE_FEEDS`) covers feeds that rank by *who is
+asking*, which mason has no viewer for: `getFeed` answers 502 or 401 for them
+logged out, so listing one promises a wall that cannot be laid. It applies to
+browse, search, a creator's own list, **and** recents, and against recents it is
+a filter on the way out rather than a delete on the way in: `mason:feeds` keeps
+the entry, and the picker hides it. Removing a name from the list therefore
+brings the card straight back rather than asking a reader to find the feed again,
+which is only true because `remember()` writes the stored list and not the
+filtered one.
 
 ### States
 
@@ -526,10 +582,22 @@ live in components.
   with roving arrow-key focus, Home, End, Escape and click-away, because a native
   `<select>` cannot render the client icons; `SwitchWall` is a dialog with
   Escape, click-away, and a focus-out that closes when focus leaves the whole
-  switcher. `RefreshWall` is a plain `<button>` with an accessible name and a
-  disabled state that is real rather than styled, so a screen-reader user is
-  told the wall is already refreshing instead of pressing a control that
-  silently does nothing.
+  switcher, **and it also closes on the click that takes a link inside it**. Its
+  openness is local component state, so a client-side navigation does not touch
+  it: the recent-feed links and the demo link would otherwise leave the dialog
+  and its scrim over the wall that had just laid, dimming it and swallowing every
+  click, with a screen-reader reader still inside a dialog named "Switch wall"
+  over a wall that had already switched. A MODIFIED click leaves the panel up,
+  because it opened a wall somewhere else and this one has not moved, and no link
+  in the panel ever calls `preventDefault`: they stay real links. A middle click
+  leaves it up for a plainer reason, that no `click` is dispatched for it at all,
+  which is also why the recent-feed link listens for `auxclick` as well and
+  remembers the feed there (one rule, both feed links, above). The close takes
+  no focus back either, unlike a dismissal, because the router puts focus at the
+  top of the page it has just laid. `RefreshWall` is a plain `<button>` with an
+  accessible name and a disabled state that is real rather than styled, so a
+  screen-reader user is told the wall is already refreshing instead of pressing
+  a control that silently does nothing.
 - **Touch targets are at least 44px** (`min-h-11`) on every control, including
   the ones that shrink to icons on mobile.
 - **The reader is a real dialog.** `role="dialog"`, `aria-modal="true"`, an

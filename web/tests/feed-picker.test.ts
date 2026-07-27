@@ -60,6 +60,43 @@ const REMEMBERED = {
 	likeCount: 3,
 };
 
+/** Three stored entries, in the order the picker draws them.
+ *
+ *  THREE and not one, which is the whole point of them. `REMEMBERED` above is a
+ *  row of length one, and one is precisely the length at which a recents row
+ *  cannot go wrong: taking a card remembers its feed, remembering moves that
+ *  feed to the head of the same list, and moving the only card to the front of a
+ *  list of one changes nothing. Every reorder bug this row can have is invisible
+ *  there, which is how one lived through three reviews.
+ *
+ *  Distinct dids as well as distinct rkeys, so a landed URL names exactly one of
+ *  the three and can never be read as a near miss. */
+const ALPHA = {
+	uri: "at://did:plc:aaaaaaaaaaaaaaaaaaaaaaaa/app.bsky.feed.generator/alpha",
+	name: "Alpha",
+	avatar: null,
+	creator: "alpha.test",
+	description: "the first wall this reader laid",
+	likeCount: 1,
+};
+const BRAVO = {
+	uri: "at://did:plc:bbbbbbbbbbbbbbbbbbbbbbbb/app.bsky.feed.generator/bravo",
+	name: "Bravo",
+	avatar: null,
+	creator: "bravo.test",
+	description: "the second wall this reader laid",
+	likeCount: 2,
+};
+const CHARLIE = {
+	uri: "at://did:plc:cccccccccccccccccccccccc/app.bsky.feed.generator/charlie",
+	name: "Charlie",
+	avatar: null,
+	creator: "charlie.test",
+	description: "the third wall this reader laid",
+	likeCount: 3,
+};
+const RECENTS = [ALPHA, BRAVO, CHARLIE];
+
 interface AppView {
 	/** The resting state: the popular list, with no query. */
 	popular?: unknown[];
@@ -133,6 +170,40 @@ function panel(page: Page): Locator {
 /** The one input, which serves search, by-creator and paste. */
 function query(page: Page): Locator {
 	return panel(page).getByRole("textbox");
+}
+
+/** The recents row, found by what a screen reader is told it holds rather than
+ *  by position: the results row below it is a list of cards too, and a bare
+ *  `getByRole("link")` would walk straight into it. */
+function recentsRow(page: Page): Locator {
+	return panel(page).getByRole("list", { name: `${RECENTS.length} recent feeds` });
+}
+
+/** Plant a recents row before the app loads.
+ *
+ *  `page.addInitScript` and NOT `context.addInitScript`, which is load-bearing
+ *  for the middle-click case below rather than a style choice: a context script
+ *  runs in EVERY page of the context, including the background tab that click
+ *  opens, and that tab is same-origin, so it shares this localStorage. It would
+ *  re-plant this fixture over the write the click had just made, and the storage
+ *  assertion would be reading the seed back to itself. */
+async function plantRecents(page: Page): Promise<void> {
+	await page.addInitScript((entries) => {
+		localStorage.setItem("mason:feeds", JSON.stringify(entries));
+	}, RECENTS);
+}
+
+/** Whichever feed the address bar is showing, decoded. Read through `URL` and
+ *  not matched as a pattern, so the assertion is the whole uri and cannot pass
+ *  on a prefix two of these three fixtures share. */
+function laidFeed(url: string): string | null {
+	return new URL(url).searchParams.get("feed");
+}
+
+/** The head of `mason:feeds`, which is the feed most recently opened. */
+async function rememberedFirst(page: Page): Promise<string | undefined> {
+	const stored = await page.evaluate(() => localStorage.getItem("mason:feeds"));
+	return (JSON.parse(stored ?? "[]") as { uri: string }[])[0]?.uri;
 }
 
 /** Open the picker from the landing page and wait for it to be up.
@@ -461,4 +532,121 @@ test("choosing a feed lays that feed and remembers it", async ({ page }) => {
 	await expect(panel(page)).toHaveCount(0);
 	const stored = await page.evaluate(() => localStorage.getItem("mason:feeds"));
 	expect(stored).toContain("app.bsky.feed.generator/whats-hot");
+});
+
+// The same write, from the button that dispatches no click at all. Chromium
+// fires auxclick alone for the middle button, so a card listening for `click`
+// only remembered every feed this reader laid here and no feed they sent to a
+// background tab, which is the one activation the card's own comment singles
+// out. `navbar.test.ts` pins the switcher panel's copy of this link; both go
+// through `feeds.rememberFromLink`, and these two cases are the only lanes that
+// can see either of them wired up at all.
+test("middle-clicking a feed card sends it to a tab and still remembers it", async ({
+	context,
+	page,
+}) => {
+	await appView(page, { popular: [generator()] });
+	await landing(page);
+	await openPicker(page);
+
+	const opened = context.waitForEvent("page");
+	await panel(page).getByRole("link", { name: "What's Hot, by @alice.test" }).click({
+		button: "middle",
+	});
+	const tab = await opened;
+	// `commit` rather than a laid wall: what that tab does next is not this
+	// case's business, and it is closed before it can ask anybody anything
+	await tab.waitForURL(/\?feed=at%3A%2F%2Fdid%3Aplc%3A/, { waitUntil: "commit" });
+	await tab.close();
+
+	const stored = await page.evaluate(() => localStorage.getItem("mason:feeds"));
+	expect(stored).toContain("app.bsky.feed.generator/whats-hot");
+
+	// nothing navigated here, so the picker is still up over the page it opened
+	// over: the reader sent one feed elsewhere and is free to pick another
+	await expect(panel(page)).toBeVisible();
+	expect(await neverLeft(page)).toBe(true);
+});
+
+// The recents row, taken at a position that is not the first, which is the only
+// way to see the thing these two cases are here for.
+//
+// Taking a card remembers its feed, and remembering moves that feed to the head
+// of the very list the card is drawn from: the list reorders under the click
+// that started it. Svelte flushes in a microtask BETWEEN one event listener and
+// the next, so a row keyed by position hands the anchor being clicked to
+// whichever feed has just slid into that slot, `href` and all, before the
+// browser resolves the navigation. Every card but the first laid the feed one
+// place above it, in silence: the header, the wall and `mason:feeds` all agreed
+// on a feed the reader never chose, and tapping again worked, because by then
+// the feed they wanted was at the front. It read as flakiness.
+//
+// Keying by `feed.uri` MOVES the anchor instead of rebinding it, which is what
+// the switcher panel's copy of this list always did (`navbar.test.ts`), and that
+// panel being right is what proved the key rather than the click path was the
+// cause. The picker's results row stays keyed by position on purpose and must:
+// see the comment in `FeedPicker.svelte`.
+//
+// Nothing else in the repo can see any of this. The row is a `.svelte` body, so
+// tsc never reads it; the vitest suites drive `feeds.svelte.ts` in node with no
+// DOM, where there is no anchor and no navigation to be wrong about.
+test("taking the third recent card lays the third feed, not the one above it", async ({ page }) => {
+	await plantRecents(page);
+	await appView(page, { popular: [generator()] });
+	await landing(page);
+	await openPicker(page);
+
+	// the row is the three that were planted, in the order they were planted:
+	// "the third card is Charlie" is the premise everything below rests on
+	const cards = recentsRow(page).getByRole("link");
+	await expect(cards).toHaveCount(RECENTS.length);
+	for (const [at, feed] of RECENTS.entries()) {
+		await expect(cards.nth(at)).toHaveAttribute("aria-label", `${feed.name}, by @${feed.creator}`);
+	}
+	// and the third one's href is right BEFORE it is touched, so the assertion
+	// after the click is about the navigation rather than about the markup
+	const third = cards.nth(2);
+	await expect(third).toHaveAttribute("href", `/?feed=${encodeURIComponent(CHARLIE.uri)}`);
+
+	await third.click();
+
+	await expect.poll(() => laidFeed(page.url())).toBe(CHARLIE.uri);
+	// and the reorder really happened, so this is not green because `remember`
+	// quietly stopped firing: the list DID move under the click and the anchor
+	// went with it rather than being rebound
+	expect(await rememberedFirst(page)).toBe(CHARLIE.uri);
+});
+
+// The same defect through the button that dispatches no `click` at all, where
+// the wrong wall lands in a background tab the reader is not even looking at.
+// The second card rather than the third, so the two cases do not share a
+// position: under the old key this one opened Alpha.
+test("middle-clicking the second recent card sends that same feed to the tab", async ({
+	context,
+	page,
+}) => {
+	await plantRecents(page);
+	await appView(page, { popular: [generator()] });
+	await landing(page);
+	await openPicker(page);
+
+	const second = recentsRow(page).getByRole("link").nth(1);
+	await expect(second).toHaveAttribute("aria-label", `${BRAVO.name}, by @${BRAVO.creator}`);
+
+	const opened = context.waitForEvent("page");
+	await second.click({ button: "middle" });
+	const tab = await opened;
+	// `commit` rather than a laid wall: the URL the browser committed to is the
+	// whole of what this case is about, and waiting on the wasm worker in a
+	// second page would be waiting for nothing
+	await tab.waitForURL(/\?feed=at%3A%2F%2F/, { waitUntil: "commit" });
+	const landed = laidFeed(tab.url());
+	await tab.close();
+	expect(landed).toBe(BRAVO.uri);
+
+	// the list moved under the click here too, and this page did not: the picker
+	// is still up over the page it opened over, with the row now led by Bravo
+	expect(await rememberedFirst(page)).toBe(BRAVO.uri);
+	await expect(panel(page)).toBeVisible();
+	expect(await neverLeft(page)).toBe(true);
 });

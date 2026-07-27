@@ -47,6 +47,7 @@ web/src/
     columns.ts            colsForWidth: the one column-count source
     feedref.ts            what the picker's one input is asking for
     format.ts             runtime and date labels for the cards
+    url.ts                httpUrl: the one scheme guard on an href
     state/*.svelte.ts     rune singletons
     components/           the wall, the cards, the chrome               [08]
 ```
@@ -144,6 +145,17 @@ Three of these are worth naming:
 only when the chosen client is not `bsky.app`. Blog links and stream.place pages
 are not Bluesky posts and no other client knows how to show them, so they pass
 through untouched. Anything that is not `http(s)` returns empty.
+
+**The scheme guard is `httpUrl` in `lib/url.ts`, and it is separable from the
+rewrite on purpose.** `clientUrl` calls it and is for a url *mason* built, from a
+brick's own `url` field, which is always a profile or a post: those are the only
+two spellings ever verified against the other clients. A url somebody else wrote
+takes the guard alone. A post's `external.uri` is the case that matters, and it
+is a stranger's link arriving inside their record: rewriting a `bsky.app` one
+would send a starter pack, a hashtag or a search to a route the destination
+client does not serve, while the address the reader can see under the headline
+still read `bsky.app`. A control is named after where it lands, so the reader
+vets that uri with `httpUrl` and hands it on untouched.
 
 ### The reader is history, not a URL
 

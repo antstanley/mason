@@ -5,8 +5,13 @@
 	// It is a real link with a real href, in the same language as a brick's, so
 	// it copies, opens in a tab and shares. Choosing it lays that feed and
 	// remembers it in `mason:feeds`, which is what puts it in the picker's recent
-	// row next time; the recents write happens on any activation, because a feed
-	// opened in a new tab is still a feed this reader opened.
+	// row next time; the recents write happens on any activation the browser
+	// reports, because a feed opened in a new tab is still a feed this reader
+	// opened. That is why there are two listeners and not one: a middle click
+	// dispatches auxclick and no click at all, so an onclick on its own remembered
+	// nothing for the reader who opens feeds in background tabs. The rule for
+	// which buttons count lives in `feeds.rememberFromLink`, once, because the
+	// switcher panel's recents are the same link with the same promise.
 	import { feeds, type FeedListing } from '$lib/state/feeds.svelte';
 	import Icon from './Icon.svelte';
 
@@ -25,7 +30,8 @@
 
 <a
 	{href}
-	onclick={() => feeds.remember(feed)}
+	onclick={(event) => feeds.rememberFromLink(event, feed)}
+	onauxclick={(event) => feeds.rememberFromLink(event, feed)}
 	aria-label={label}
 	class="group flex h-full min-h-11 w-full items-start gap-3 rounded-card border-2 border-ink/10 bg-chalk p-3 text-left shadow-brick transition-[transform,box-shadow,border-color] duration-200 hover:border-brick-post/60 hover:shadow-brick-lift motion-safe:hover:-translate-y-1 dark:border-chalk/10 dark:bg-kiln"
 >

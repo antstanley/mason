@@ -20,6 +20,7 @@
 	import { player } from '$lib/state/player.svelte';
 	import { clientName, clientUrl } from '$lib/state/client.svelte';
 	import { dateLabel, runtimeLabel } from '$lib/format';
+	import { httpUrl } from '$lib/url';
 	import AuthorChip from './AuthorChip.svelte';
 	import Icon from './Icon.svelte';
 	import LinkPreview from './LinkPreview.svelte';
@@ -232,8 +233,28 @@
 		<p class="text-base leading-relaxed whitespace-pre-wrap">{post.text}</p>
 	{/if}
 	{#if post.external}
+		{@const externalHref = httpUrl(post.external.uri)}
+		<!-- httpUrl and NOT clientUrl, which is the one difference between this link
+		     and the post's own way out two blocks down. This uri is a stranger's
+		     link, carried inside somebody else's record: mason did not build it and
+		     knows nothing about where it points. clientUrl would rewrite a bsky.app
+		     one to the reader's chosen client, and the only spellings ever verified
+		     against those clients are /profile/ and /post/<rkey> (client.svelte.ts),
+		     so a link card for a starter pack, a hashtag or a search would be sent to
+		     a route that client does not serve. Worse, quietly: the address printed
+		     under the headline, and the host LinkPreview draws over the picture, both
+		     come off the raw uri, so the words would still say bsky.app. A control is
+		     named after where it lands, which is the same rule the post's own link
+		     keeps two blocks down.
+		     The scheme guard stays, because mortar drops the whole embed when its uri
+		     is not http(s) (`external_embed` in sources/bluesky.rs) and this is the
+		     second line rather than the rule: in server mode the SPA talks to a native
+		     mortar it was not built with, and a brick from an older one must not be
+		     able to put a javascript: string on an href. An empty answer leaves the
+		     card with no href at all, which the browser reads as not a link: it takes
+		     no click and no Tab, where href="" would quietly reopen mason. -->
 		<a
-			href={post.external.uri}
+			href={externalHref || undefined}
 			target="_blank"
 			rel="noopener noreferrer"
 			class="block overflow-hidden rounded-xl border border-ink/10 bg-plaster-deep/50 transition-colors hover:border-ink/25 dark:border-chalk/10 dark:bg-kiln-deep/60 dark:hover:border-chalk/30"
@@ -350,16 +371,24 @@
 	{/if}
 	<!-- the primary control on a blog, not a footnote: mason never parses the
 	     content union of a document, so the publication is where the article
-	     itself lives and the reader says so plainly -->
-	<a
-		href={blog.url}
-		target="_blank"
-		rel="noopener noreferrer"
-		class="inline-flex min-h-11 w-fit items-center gap-2 rounded-full bg-pop-pink-deep px-6 py-3 font-display font-bold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95"
-	>
-		read at {blog.publication.name}
-		<Icon name="arrow-up-right" class="size-4" />
-	</a>
+	     itself lives and the reader says so plainly.
+	     Guarded exactly as BrickShell guards the card's own anchor, because a blog
+	     brick legitimately has no url: a failed getRecord on site.standard.publication
+	     leaves the publication named "blog" with an empty url, and canonical_url
+	     then answers "" (sources/standardsite.rs). href="" resolves to the current
+	     document, so the unguarded control opened a second copy of mason in a new
+	     tab and called it the article. No way out beats a way out that lies. -->
+	{#if blog.url}
+		<a
+			href={blog.url}
+			target="_blank"
+			rel="noopener noreferrer"
+			class="inline-flex min-h-11 w-fit items-center gap-2 rounded-full bg-pop-pink-deep px-6 py-3 font-display font-bold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95"
+		>
+			read at {blog.publication.name}
+			<Icon name="arrow-up-right" class="size-4" />
+		</a>
+	{/if}
 {/snippet}
 
 {#snippet videoBody(video: VideoBrick)}
