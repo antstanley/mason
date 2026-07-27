@@ -15,7 +15,8 @@
 		| 'play'
 		| 'heart'
 		| 'repeat-2'
-		| 'rotate-cw';
+		| 'rotate-cw'
+		| 'settings';
 
 	const ICONS: Record<IconName, { d: string[]; fill?: boolean }> = {
 		'chevron-left': { d: ['m15 18-6-6 6-6'] },
@@ -41,7 +42,14 @@
 		// two arrows chasing each other: the second one reads as "swap", which is
 		// already the switcher's icon two controls along.
 		'rotate-cw': { d: ['M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8', 'M21 3v5h-5'] },
-	};
+		// lucide `settings`. Its ring is a <circle> upstream; every icon here is a
+		// path so the renderer stays one shape, so it is drawn as two arcs instead.
+		settings: {
+			d: [
+				'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z',
+				'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0'
+			]
+		},	};
 
 	let { name, class: cls = 'size-4' }: { name: IconName; class?: string } = $props();
 	const icon = $derived(ICONS[name]);

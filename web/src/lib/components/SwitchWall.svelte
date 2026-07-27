@@ -17,6 +17,15 @@
 	// so the feed is what the button names.
 	let { actor, feed }: { actor: string | null; feed: string | null } = $props();
 
+	/** How many recents this panel lists. The picker itself keeps twelve, which is
+	 *  a screen of cards there and a list past the fold here: this panel opens
+	 *  upward from a fixed bar on a phone, so every row it adds pushes the "pick a
+	 *  feed" door closer to the top of the viewport. Five is the most that leaves
+	 *  the door on screen at 375px, and the picker is one tap away for the rest. */
+	const PANEL_RECENT_FEEDS = 5;
+
+	const panelRecent = $derived(feeds.recent.slice(0, PANEL_RECENT_FEEDS));
+
 	let open = $state(false);
 	let root = $state<HTMLElement | null>(null);
 	let trigger = $state<HTMLButtonElement | null>(null);
@@ -103,7 +112,10 @@
 	});
 </script>
 
-<div bind:this={root} class="relative">
+<!-- `relative` only from md. Below it the panel is positioned against the fixed
+     bar instead (see its own comment), which is what keeps a 320px panel on
+     screen when the trigger it hangs off is not the right-most control. -->
+<div bind:this={root} class="md:relative">
 	<button
 		bind:this={trigger}
 		type="button"
@@ -140,12 +152,21 @@
 			onclick={() => closePanel()}
 			class="fixed inset-0 z-30 cursor-default bg-ink/35 backdrop-blur-[2px] dark:bg-chalk/15"
 		></button>
+		<!-- Below md this is positioned against the bar, which is `fixed` and so is
+		     the nearest positioned ancestor once the wrapper stops being
+		     `relative`: `inset-x-4` spans the viewport with a gutter either side,
+		     whatever the trigger's own position is. Anchoring it to the trigger with
+		     `right-0` only worked while the switcher was the right-most control; the
+		     moment it moved left of refresh and settings, a 320px panel hung off the
+		     left edge of a 375px screen and clipped its own input. From md the header
+		     is not fixed, the wrapper is `relative` again, and the panel hangs off the
+		     trigger as before. -->
 		<div
 			role="dialog"
 			aria-modal="true"
 			aria-label="Switch wall"
 			onfocusout={onFocusOut}
-			class="absolute right-0 bottom-full z-40 mb-2 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-ink/10 bg-chalk p-5 text-left shadow-brick-lift md:top-full md:bottom-auto md:mt-2 md:mb-0 dark:border-chalk/15 dark:bg-kiln"
+			class="absolute inset-x-4 bottom-full z-40 mb-2 rounded-2xl border border-ink/10 bg-chalk p-5 text-left shadow-brick-lift md:inset-x-auto md:right-0 md:top-full md:bottom-auto md:mt-2 md:mb-0 md:w-80 dark:border-chalk/15 dark:bg-kiln"
 		>
 			<form onsubmit={submit} class="flex flex-col gap-4">
 				<label class="text-xs font-semibold opacity-75" for="switch-handle">switch to a handle</label>
@@ -175,6 +196,49 @@
 					</a>
 				{/if}
 			</form>
+			<!-- The feeds this reader has opened before, which is the fastest way back
+			     to one and the reason the panel is worth opening at all on a phone.
+			     Capped at PANEL_RECENT_FEEDS rather than showing the whole dozen: the
+			     panel sits above a fixed bar on a small screen, and a list that grows
+			     past the fold pushes the "pick a feed" door off it.
+
+			     Real links with real hrefs, in the same language as a brick's and as
+			     FeedCard's, so a middle click or a cmd click opens a wall in a new tab
+			     instead of being swallowed. `remember` on activation moves the feed
+			     back to the front of the list, exactly as choosing one in the picker
+			     does; without it, opening the same feed from here would leave the
+			     order it was in. -->
+			{#if panelRecent.length > 0}
+				<div class="mt-4 border-t border-ink/10 pt-4 dark:border-chalk/10">
+					<h2 class="text-xs font-semibold opacity-75">recent feeds</h2>
+					<ul class="mt-2 flex flex-col">
+						{#each panelRecent as feed (feed.uri)}
+							<li>
+								<a
+									href="/?feed={encodeURIComponent(feed.uri)}"
+									onclick={() => feeds.remember(feed)}
+									class="flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm font-semibold transition-colors hover:bg-ink/5 dark:hover:bg-chalk/10"
+								>
+									{#if feed.avatar}
+										<img
+											src={feed.avatar}
+											alt=""
+											class="size-6 shrink-0 rounded-md object-cover"
+										/>
+									{:else}
+										<span
+											aria-hidden="true"
+											class="size-6 shrink-0 rounded-md bg-ink/10 dark:bg-chalk/15"
+										></span>
+									{/if}
+									<span class="truncate">{feed.name}</span>
+								</a>
+							</li>
+						{/each}
+					</ul>
+				</div>
+			{/if}
+
 			<!-- mason's other front door, from a laid wall: this panel is already the
 			     switch-walls affordance, so the feed picker belongs on it rather than
 			     beside it. The panel closes FIRST, which hands focus back to the

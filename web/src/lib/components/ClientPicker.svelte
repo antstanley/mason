@@ -8,6 +8,11 @@
 	import ClientIcon from './ClientIcon.svelte';
 	import Icon from './Icon.svelte';
 
+	// `wide` is the settings row's shape: on the bar the trigger earns its width,
+	// in a settings panel it has room and a cramped combobox beside a heading
+	// reads like an afterthought.
+	let { wide = false }: { wide?: boolean } = $props();
+
 	let open = $state(false);
 	let root = $state<HTMLElement | null>(null);
 	let trigger = $state<HTMLButtonElement | null>(null);
@@ -84,7 +89,9 @@
 		aria-haspopup="listbox"
 		aria-expanded={open}
 		aria-label="Open posts in {current.label}"
-		class="flex min-h-11 items-center gap-1.5 rounded-full px-2 text-sm font-semibold transition-colors hover:bg-ink/5 sm:px-3 dark:hover:bg-chalk/10"
+		class="flex min-h-11 items-center gap-1.5 rounded-full text-sm font-semibold transition-colors hover:bg-ink/5 dark:hover:bg-chalk/10 {wide
+			? 'w-56 justify-between border-2 border-ink/15 px-3 dark:border-chalk/20'
+			: 'px-2 sm:px-3'}"
 	>
 		<ClientIcon id={current.id} size="size-6 sm:size-[1.3em]" />
 		<!-- a bare butterfly says nothing to a first-time visitor, so mobile shows
@@ -117,7 +124,9 @@
 			role="listbox"
 			aria-label="Open posts in"
 			onkeydown={onListKey}
-			class="absolute right-0 bottom-full z-20 mb-2 min-w-full overflow-hidden rounded-2xl border-2 border-ink/10 bg-chalk p-1 shadow-brick-lift md:top-full md:bottom-auto md:mt-2 md:mb-0 dark:border-chalk/15 dark:bg-kiln"
+			class="absolute right-0 bottom-full z-20 mb-2 min-w-full overflow-hidden rounded-2xl border-2 border-ink/10 bg-chalk p-1 shadow-brick-lift md:top-full md:bottom-auto md:mt-2 md:mb-0 dark:border-chalk/15 dark:bg-kiln {wide
+				? 'w-56'
+				: ''}"
 		>
 			{#each CLIENTS as option (option.id)}
 				<li>

@@ -5,13 +5,15 @@
 	import { page } from '$app/state';
 	import { localMode } from '$lib/api';
 	import BrickReader from '$lib/components/BrickReader.svelte';
-	import ClientPicker from '$lib/components/ClientPicker.svelte';
 	import FeedPicker from '$lib/components/FeedPicker.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 	import LayoutPicker from '$lib/components/LayoutPicker.svelte';
 	import RefreshWall from '$lib/components/RefreshWall.svelte';
+	import Settings from '$lib/components/Settings.svelte';
 	import SwitchWall from '$lib/components/SwitchWall.svelte';
 	import { feeds } from '$lib/state/feeds.svelte';
 	import { reader } from '$lib/state/reader.svelte';
+	import { settings } from '$lib/state/settings.svelte';
 
 	let { children } = $props();
 
@@ -39,10 +41,10 @@
 	// reader.showing), and a wrapper made inert on a wider condition than the
 	// overlay renders on leaves the wall frozen under nothing at all.
 	//
-	// ONE expression covering both overlays, widened rather than replaced: the
-	// reader's disjunct is the same one it has always been, so a feed picker that
-	// went away could not take the reader's inertness with it.
-	const overlayOpen = $derived(reader.isOpen || feeds.isOpen);
+	// ONE expression covering every overlay, widened rather than replaced each
+	// time one arrives: the reader's disjunct is the same one it has always been,
+	// so a screen that went away could not take the reader's inertness with it.
+	const overlayOpen = $derived(reader.isOpen || feeds.isOpen || settings.isOpen);
 
 	// local mode: the wasm service worker IS the feed server.
 	// Always type module: the wasm-bindgen glue contains `import.meta`,
@@ -157,22 +159,32 @@
 				mason&nbsp;<span aria-hidden="true">🧱</span>
 			</a>
 			<!-- one line, always: the bar never wraps on mobile (nowrap), so every
-			     control has to earn its width at 375px. A fourth control arrived
-			     (RefreshWall) and the three that were here spent 320 of the 343px a
-			     375px viewport leaves inside the bar's padding, so the gap pays part
-			     of its rent: gap-1 below sm, where the four controls are four
-			     different shapes and do not need 8px to be told apart. -->
+			     control has to earn its width at 375px. It carries what changes while
+			     somebody reads and nothing else, which is why the client picker moved
+			     behind the cog: a choice made once a year was spending a phone's width
+			     every time the bar was drawn. -->
 			<div class="flex flex-nowrap items-center justify-between gap-1 text-sm sm:gap-3 md:flex-wrap md:justify-end">
 				<LayoutPicker />
-				<!-- lay this wall again, in place. Icon-only, because this row never
-				     wraps and the three controls beside it already spend 375px -->
-				<RefreshWall />
-				<ClientPicker />
 				<!-- both parameters, because the switcher names the wall that is laid:
 				     passing only the actor made a feed wall's button read "@" with an
 				     aria-label to match, and a URL carrying both name the actor while
 				     the feed is what is on the screen -->
 				<SwitchWall {actor} {feed} />
+				<!-- lay this wall again, in place. Icon-only, because this row never
+				     wraps and the three controls beside it already spend 375px -->
+				<RefreshWall />
+				<!-- last on the bar, which is where a settings control belongs: it is
+				     the one thing here that is not about the wall in front of you. -->
+				<button
+					type="button"
+					onclick={() => settings.openSettings()}
+					aria-haspopup="dialog"
+					aria-expanded={settings.isOpen}
+					aria-label="Settings"
+					class="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-ink/5 dark:hover:bg-chalk/10"
+				>
+					<Icon name="settings" class="size-5" />
+				</button>
 			</div>
 		</header>
 	{/if}
@@ -185,3 +197,4 @@
      here, side by side, for that one reason. -->
 <BrickReader />
 <FeedPicker />
+<Settings />
