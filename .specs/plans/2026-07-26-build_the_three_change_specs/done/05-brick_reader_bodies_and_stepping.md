@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [05-brick_reader_bodies_and_stepping-certificate.md](05-brick_reader_bodies_and_stepping-certificate.md)
 
-**Implements:** [`changes/2026-07-26-read_a_brick_in_place.md`](../../../changes/2026-07-26-read_a_brick_in_place.md) §Proposed changes → `08-wall-and-bricks.md` → The brick reader (the per-kind table and the arrow-key rule). Targets [`08-wall-and-bricks.md`](../../../08-wall-and-bricks.md), the new brick-reader section.
+**Implements:** [`changes/merged/2026-07-26-read_a_brick_in_place.md`](../../../changes/merged/2026-07-26-read_a_brick_in_place.md) §Proposed changes → `08-wall-and-bricks.md` → The brick reader (the per-kind table and the arrow-key rule). Targets [`08-wall-and-bricks.md`](../../../08-wall-and-bricks.md), the new brick-reader section.
 **Depends on:** 02, 03, 04
 **Produces:** the reader earns the click: all three kinds render what the card left out, and arrow keys step along the laid wall without paginating it.
 **Pointers:** `FeedGrid.svelte:204` is the kind switch to mirror. `PostCard.svelte:13` renders only `images[0]`; `BlogCard` clamps `description` to three lines and slices `tags` to four; the external embed is truncated. `VideoCard.svelte:47` collapses the card when `player.activeId !== brick.id`, and `player.claim(id)` at `VideoCard.svelte:89` sets it. `VideoPlayer.svelte` is the one sanctioned `.play(` call site.

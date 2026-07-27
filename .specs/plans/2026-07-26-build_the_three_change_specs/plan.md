@@ -1,6 +1,6 @@
 # Plan: Build the three pending change specs
 
-**Status:** In progress · **Layout:** kanban · **Date:** 2026-07-26 · **Owner:** Ant Stanley · **Source spec:** [`.specs/changes/2026-07-26-read_a_brick_in_place.md`](../../changes/2026-07-26-read_a_brick_in_place.md), [`.specs/changes/2026-07-26-lay_a_bluesky_feed.md`](../../changes/2026-07-26-lay_a_bluesky_feed.md), [`.specs/changes/2026-07-26-refresh_the_wall.md`](../../changes/2026-07-26-refresh_the_wall.md)
+**Status:** Done · **Layout:** kanban · **Date:** 2026-07-26 · **Owner:** Ant Stanley · **Source spec:** [`.specs/changes/merged/2026-07-26-read_a_brick_in_place.md`](../../changes/merged/2026-07-26-read_a_brick_in_place.md), [`.specs/changes/merged/2026-07-26-lay_a_bluesky_feed.md`](../../changes/merged/2026-07-26-lay_a_bluesky_feed.md), [`.specs/changes/merged/2026-07-26-refresh_the_wall.md`](../../changes/merged/2026-07-26-refresh_the_wall.md)
 
 One plan for all three pending change specs, because they are not three
 independent builds: they collide on eleven surfaces, two of them regenerate the

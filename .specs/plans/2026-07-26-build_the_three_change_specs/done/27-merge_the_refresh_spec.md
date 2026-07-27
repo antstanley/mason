@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [27-merge_the_refresh_spec-certificate.md](27-merge_the_refresh_spec-certificate.md)
 
-**Implements:** [`changes/2026-07-26-refresh_the_wall.md`](../../../changes/2026-07-26-refresh_the_wall.md) §Merge plan and every one of its `Proposed changes` blocks, plus the one-time cross-spec reconciliation all three merges share.
+**Implements:** [`changes/merged/2026-07-26-refresh_the_wall.md`](../../../changes/merged/2026-07-26-refresh_the_wall.md) §Merge plan and every one of its `Proposed changes` blocks, plus the one-time cross-spec reconciliation all three merges share.
 **Depends on:** 19, 26
 **Produces:** all three change specs merged, the goals numbered once, and `.specs/README.md` with an empty pending list.
 **Pointers:** `.specs/01-domain-model.md:152` (the Snapshot section), `:156`-`:157` (the identity prose the `01` block replaces), `:159` ("State it owns:") and `:161`-`:174` (the state table, which lists exactly `Inner`'s fields; the shipped `refresh` is a `pub` field on `Snapshot` itself, which that table does not cover). `.specs/02-feed-engine.md:32`, `.specs/04-sources-and-moderation.md:279`, `.specs/05-caching-and-persistence.md:64`, `.specs/06-wire-contract.md:24`, `.specs/07-web-client.md:132`, `.specs/08-wall-and-bricks.md:206`, `canonical-types.schema.json`. `.specs/README.md:47` carries the sentence "Three change specs are pending", which only this task can correct truthfully.

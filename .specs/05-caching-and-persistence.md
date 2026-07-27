@@ -90,6 +90,17 @@ Three shapes of TTL, each with a reason:
   left alone for a day. Only a *successful* empty listing earns the negative TTL;
   a transient failure is not cached at all.
 
+**A refresh bypasses two of these on a graph wall, and one on a feed wall.**
+`author_feed` and `image_feed` are re-read on a `refresh=1` request; on a feed
+wall it is `feed_pages` instead. Every other cache stays warm. The split is the
+same reasoning the TTLs already encode: identity and repo contents move on a
+scale of days, so re-reading them would spend a hundred PDS round trips to learn
+nothing, while the AppView author feed is precisely the thing that has changed
+since the reader last looked. A refreshed read overwrites its entry and marks
+the cache dirty, so the next persist cycle captures the fresher data rather than
+the data the refresh replaced. `feed_pages` is not persisted at all, so there
+the overwrite buys the next reader a warm entry and nothing more.
+
 The `live` cache is the one thing on the wall with a deadline, so it is the one
 thing barely cached: sixty seconds, and the value stored is `LiveStream`, not
 `Brick`, because what is cached there is true for every viewer and the per-viewer

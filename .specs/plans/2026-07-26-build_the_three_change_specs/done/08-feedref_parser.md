@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [08-feedref_parser-certificate.md](08-feedref_parser-certificate.md)
 
-**Implements:** [`changes/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `01-domain-model.md` → FeedRef, and → `04-sources-and-moderation.md` → Outbound safety; implementation note 2. Targets [`01-domain-model.md`](../../../01-domain-model.md) §Entities and [`04-sources-and-moderation.md`](../../../04-sources-and-moderation.md) §Outbound safety.
+**Implements:** [`changes/merged/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/merged/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `01-domain-model.md` → FeedRef, and → `04-sources-and-moderation.md` → Outbound safety; implementation note 2. Targets [`01-domain-model.md`](../../../01-domain-model.md) §Entities and [`04-sources-and-moderation.md`](../../../04-sources-and-moderation.md) §Outbound safety.
 **Depends on:** none
 **Produces:** the one request parameter besides `actor` and `cursor` that reaches an upstream query is parsed rather than forwarded, with every rejection path tested and no `AppState` needed to test it.
 **Pointers:** `server/crates/mortar-core/src/sources/mod.rs:8` (the `pub mod` list) and `:15` (the re-export line beside `AuthorYield`/`Follow`). `architecture-principles.md` rule 1: the rest of the crate consumes `sources/mod.rs`, never a submodule directly. `sources/util.rs:8` holds `urlencode`.

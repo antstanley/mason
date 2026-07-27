@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [10-feed_not_found_error_code-certificate.md](10-feed_not_found_error_code-certificate.md)
 
-**Implements:** [`changes/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `06-wire-contract.md` → Errors, and the `MortarErrorCode` fragment in §Type changes; implementation notes 7 and part of 10. Targets [`06-wire-contract.md`](../../../06-wire-contract.md) §Errors.
+**Implements:** [`changes/merged/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/merged/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `06-wire-contract.md` → Errors, and the `MortarErrorCode` fragment in §Type changes; implementation notes 7 and part of 10. Targets [`06-wire-contract.md`](../../../06-wire-contract.md) §Errors.
 **Depends on:** none
 **Produces:** a fifth error code walks the whole forcing chain from `error.rs` to `types.ts` in one commit, leaving the repo green. **This is wire regeneration 1 of 3.**
 **Pointers:** `error.rs:4` (the enum), `:37` (`status_and_code`), `:76` (`variants()`, an `[AppError; 4]`), `:90` and `:106` (both pinned expected arrays). `tests/contract.rs:227` (`ALL_CODES`, a `[&str; 4]`), `:236` (`errors()`), `:251` (`code_key`, an exhaustive match). `tests/fixtures/contract.json` `errors` object. `web/src/lib/types.ts:137` (`MortarErrorCode`). `contract-check.ts:78`'s `ErrorCodesMatch` needs no edit.

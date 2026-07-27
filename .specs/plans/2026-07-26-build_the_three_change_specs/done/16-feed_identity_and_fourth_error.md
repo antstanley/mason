@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [16-feed_identity_and_fourth_error-certificate.md](16-feed_identity_and_fourth_error-certificate.md)
 
-**Implements:** [`changes/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `07-web-client.md` → Reactive state (`feedInfo`) and → Error classification, and → `08-wall-and-bricks.md` → Wall states; implementation note 11. Targets [`07-web-client.md`](../../../07-web-client.md) §Reactive state and §Error classification, and [`08-wall-and-bricks.md`](../../../08-wall-and-bricks.md) §Wall states.
+**Implements:** [`changes/merged/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/merged/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `07-web-client.md` → Reactive state (`feedInfo`) and → Error classification, and → `08-wall-and-bricks.md` → Wall states; implementation note 11. Targets [`07-web-client.md`](../../../07-web-client.md) §Reactive state and §Error classification, and [`08-wall-and-bricks.md`](../../../08-wall-and-bricks.md) §Wall states.
 **Depends on:** 15
 **Produces:** the generator's own face in the header, and "no such feed" instead of telling somebody with a bad feed link to fix their handle.
 **Pointers:** `state/profile.svelte.ts:8` (the hardcoded AppView base to hoist), `:26` (the `browser` guard to mirror). `feed.svelte.ts:197` (`#fail`), `feed.test.ts:218` (the `it.each` table). `SwitchWall.svelte:12`, `:20`, `:85`, `:88` (where the owner's face and aria-label live). `+layout.svelte:129` (the prop `SwitchWall` takes). `FeedGrid.svelte:224`-`:277` (the three existing error panels), `:278`-`:317` (the empty state).

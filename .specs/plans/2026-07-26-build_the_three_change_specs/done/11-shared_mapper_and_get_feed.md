@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [11-shared_mapper_and_get_feed-certificate.md](11-shared_mapper_and_get_feed-certificate.md)
 
-**Implements:** [`changes/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `04-sources-and-moderation.md` → Per source → Bluesky; implementation note 1. Targets [`04-sources-and-moderation.md`](../../../04-sources-and-moderation.md) §Per source.
+**Implements:** [`changes/merged/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/merged/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `04-sources-and-moderation.md` → Per source → Bluesky; implementation note 1. Targets [`04-sources-and-moderation.md`](../../../04-sources-and-moderation.md) §Per source.
 **Depends on:** none
 **Produces:** one mapping path, shared, so a feed wall inherits moderation, `!warn` blur, video unwrapping and repost dropping rather than growing a second copy of them.
 **Pointers:** `server/crates/mortar-core/src/sources/bluesky.rs:208` (`author_feed`), `:224` / `:228` / `:232` (the three filters), `:250` (`struct AuthorFeed`, which reads only the `feed` array today), `:201` (`get_image_feed`, the neighbour the new function sits beside). `sources/util.rs:8` holds `urlencode`. **Seven** existing author-feed tests live at `bluesky.rs:464`, `:509`, `:535`, `:564`, `:594`, `:622` and `:654`. The last one, `author_feed_drops_hidden_posts`, is the one that covers the hidden-label drop, which is the exact moderation behaviour the shared mapper exists to preserve on a wall where every author is a stranger; an earlier draft of this task listed six and left that one out.

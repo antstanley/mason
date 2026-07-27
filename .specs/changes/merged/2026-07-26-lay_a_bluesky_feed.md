@@ -860,9 +860,18 @@ one rule about what happens when both could be open (the picker is a landing-pag
 surface and the reader is a wall surface, so the simple answer is that opening
 either closes the other).
 
-[`2026-07-26-refresh_the_wall.md`](../2026-07-26-refresh_the_wall.md) names its own
+[`2026-07-26-refresh_the_wall.md`](2026-07-26-refresh_the_wall.md) names its own
 half of the feed interaction: `refresh` over a feed wall bypasses the
 `feed_pages` entry rather than the author-feed caches.
+
+**All three merged, and every obligation above is discharged.** `App.PageState`
+gained both members rather than being replaced, and the rule about two overlays
+is the shape of the push itself: `pushState` carries only its own key, so opening
+either surface clears the other's. The refresh spec merged last, on 2026-07-27,
+so it owned the `feed_pages` bypass; that shipped in `fetch::feed_page_cached`
+and is stated in the same words on
+[`02-feed-engine.md`](../../02-feed-engine.md) and
+[`05-caching-and-persistence.md`](../../05-caching-and-persistence.md).
 
 ### Tests worth writing before the code
 

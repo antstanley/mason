@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [02-shared_reveal_set-certificate.md](02-shared_reveal_set-certificate.md)
 
-**Implements:** [`changes/2026-07-26-read_a_brick_in_place.md`](../../../changes/2026-07-26-read_a_brick_in_place.md) §Proposed changes → `08-wall-and-bricks.md` → Sensitive media; implementation notes 2, 3 and 4. Targets [`08-wall-and-bricks.md`](../../../08-wall-and-bricks.md) §Sensitive media and [`07-web-client.md`](../../../07-web-client.md) §Reactive state.
+**Implements:** [`changes/merged/2026-07-26-read_a_brick_in_place.md`](../../../changes/merged/2026-07-26-read_a_brick_in_place.md) §Proposed changes → `08-wall-and-bricks.md` → Sensitive media; implementation notes 2, 3 and 4. Targets [`08-wall-and-bricks.md`](../../../08-wall-and-bricks.md) §Sensitive media and [`07-web-client.md`](../../../07-web-client.md) §Reactive state.
 **Depends on:** none
 **Produces:** a brick uncovered on the wall stays uncovered wherever it is rendered next, and the demo wall carries a covered brick so the behaviour can be observed at all.
 **Pointers:** `web/src/lib/components/Sensitive.svelte:15` (props), `:17` (`let revealed = $state(false)`, at 17 not 19), `:32` (the show-anyway `<button>` opens there; `:34` is its `onclick`). Four call sites, not three: `cards/PostCard.svelte:19`, `cards/VideoCard.svelte:52`, `cards/GlazeCard.svelte:138` (carousel branch) and `cards/GlazeCard.svelte:201` (single/grid branch). `GlazeCard.svelte:69` has an unrelated `let revealed = $state(false)` for the touch pill; it is not the one being removed. `server/crates/mortar-core/src/fixtures.rs:148` is the **video** arm's `blur: None` and `:186` the **post** arm's; the post one is the one this task changes.

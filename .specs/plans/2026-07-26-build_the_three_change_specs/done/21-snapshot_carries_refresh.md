@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [21-snapshot_carries_refresh-certificate.md](21-snapshot_carries_refresh-certificate.md)
 
-**Implements:** [`changes/2026-07-26-refresh_the_wall.md`](../../../changes/2026-07-26-refresh_the_wall.md) §Proposed changes → `01-domain-model.md` → Entities → Snapshot, and → `02-feed-engine.md` → Refresh (the idempotence paragraph); implementation notes 2 and 3. Targets [`01-domain-model.md`](../../../01-domain-model.md) §Entities → Snapshot.
+**Implements:** [`changes/merged/2026-07-26-refresh_the_wall.md`](../../../changes/merged/2026-07-26-refresh_the_wall.md) §Proposed changes → `01-domain-model.md` → Entities → Snapshot, and → `02-feed-engine.md` → Refresh (the idempotence paragraph); implementation notes 2 and 3. Targets [`01-domain-model.md`](../../../01-domain-model.md) §Entities → Snapshot.
 **Depends on:** 13, 20
 **Produces:** the flag reaches a fill that was spawned detached, and provably never reaches an extension wave.
 **Pointers:** `snapshot.rs:88` (the `Snapshot` struct: `id`, `seed`, `viewer`, `mode` are `pub` fields, and `Inner` at `:235` is the mutex-guarded half the `01` state table actually lists), `:105` (`Snapshot::new`), `:346` (`ensure_snapshot`), `:375` (`get_or_build`), `:684` (`test_snapshot`). `fill.rs:56` and `:89` (the two `fill::fill` call sites), `:151` and `:153` (the two `fill::extend` call sites), `:219` (`fan_out_authors`). `feed.rs:86` and `:95` (the two call sites task 13 has already rewritten around).

@@ -1,6 +1,6 @@
 # Change: Refresh the wall without reloading the page
 
-**Status:** Proposed · **Date:** 2026-07-26 · **Owner:** Ant Stanley · **Target:** Repo-wide
+**Status:** Merged · **Date:** 2026-07-26 · **Merged:** 2026-07-27 · **Owner:** Ant Stanley · **Target:** Repo-wide
 
 A laid wall is final. Once the first screen freezes, the only thing that grows it
 is the scroll pump, and the only way to see anything newer is a browser reload,
@@ -37,14 +37,14 @@ and no more.
 
 | Canonical page | Nature of change |
 |---|---|
-| [`.specs/01-domain-model.md`](../01-domain-model.md) | The `Snapshot` entity gains `refresh`, in its identity prose rather than its state table |
-| [`.specs/02-feed-engine.md`](../02-feed-engine.md) | `handle_feed` gains `refresh`; when it is honoured and what it reaches |
-| [`.specs/04-sources-and-moderation.md`](../04-sources-and-moderation.md) | The two fast content reads become bypassable, with a failure fallback |
-| [`.specs/05-caching-and-persistence.md`](../05-caching-and-persistence.md) | What a refresh re-reads and what it deliberately leaves warm |
-| [`.specs/06-wire-contract.md`](../06-wire-contract.md) | The `refresh` parameter and its fixture entry |
-| [`.specs/07-web-client.md`](../07-web-client.md) | `FeedState.refresh()`, the session-cache invalidation, the one-shot flag |
-| [`.specs/08-wall-and-bricks.md`](../08-wall-and-bricks.md) | The header control, the wall's appearance during a refresh, the live region |
-| [`.specs/canonical-types.schema.json`](../canonical-types.schema.json) | A `FeedRefresh` query-vocabulary def |
+| [`.specs/01-domain-model.md`](../../01-domain-model.md) | The `Snapshot` entity gains `refresh`, in its identity prose rather than its state table |
+| [`.specs/02-feed-engine.md`](../../02-feed-engine.md) | `handle_feed` gains `refresh`; when it is honoured and what it reaches |
+| [`.specs/04-sources-and-moderation.md`](../../04-sources-and-moderation.md) | The two fast content reads become bypassable, with a failure fallback |
+| [`.specs/05-caching-and-persistence.md`](../../05-caching-and-persistence.md) | What a refresh re-reads and what it deliberately leaves warm |
+| [`.specs/06-wire-contract.md`](../../06-wire-contract.md) | The `refresh` parameter and its fixture entry |
+| [`.specs/07-web-client.md`](../../07-web-client.md) | `FeedState.refresh()`, the session-cache invalidation, the one-shot flag |
+| [`.specs/08-wall-and-bricks.md`](../../08-wall-and-bricks.md) | The header control, the wall's appearance during a refresh, the live region |
+| [`.specs/canonical-types.schema.json`](../../canonical-types.schema.json) | A `FeedRefresh` query-vocabulary def |
 
 ---
 
@@ -52,7 +52,8 @@ and no more.
 
 Each block below is the prose as it should read once merged, so links *inside* a
 quoted block are relative to the canonical page it lands on, not to this
-directory. Links outside the blocks resolve from `.specs/changes/` as usual.
+directory. Links outside the blocks resolve from `.specs/changes/merged/`, where
+this document has lived since it was merged.
 
 ### `.specs/01-domain-model.md` → Entities → Snapshot (Modify)
 
@@ -80,6 +81,12 @@ table:
 >     refresh: bool,
 > ) -> Result<FeedResponse, AppError>
 > ```
+
+**Merged as a three-way, not as written.** This block was drafted against the
+branch before [`2026-07-26-lay_a_bluesky_feed.md`](2026-07-26-lay_a_bluesky_feed.md)
+landed, so it still names `actor: &str`. What is on the page, and what shipped,
+is `target: FeedTarget<'_>` **and** `refresh: bool`; applying this block verbatim
+would have reverted `FeedTarget`.
 
 ### `.specs/02-feed-engine.md` → Refresh (Add, new section after Intents)
 
@@ -159,6 +166,10 @@ And append to the fallback paragraph:
 
 > | `query.mode` / `query.intent` / `query.refresh` | The query vocabulary, as object keys |
 
+**Merged as a three-way, not as written.** The row on the page carries all four
+query keys (`query.target` came from the feed spec) and the `vocab.hiddenLabels`
+row beside it is untouched.
+
 ### `.specs/07-web-client.md` → Responsibilities (Modify)
 
 > 2. Drive the warm-then-commit first screen, the endless-scroll pagination, and
@@ -166,7 +177,13 @@ And append to the fallback paragraph:
 
 ### `.specs/07-web-client.md` → The feed state machine (Add)
 
-Add after the `loadMore()` block in the diagram:
+Add after the `loadMore()` block in the diagram. Two things about it read
+differently on the page than they do here, and both are deliberate: the session
+cache is keyed by **(target, mode)** rather than (actor, mode), because the feed
+spec gave `#key` a target; and the flag is spent when a flagged request
+**settles**, which is a throw as well as an adoption. The throw is a fourth
+disarm point this block does not name, and it is the one that keeps one tap to
+one fan-out on the error path.
 
 > ```
 >    refresh()   ← the header control
@@ -414,6 +431,18 @@ Most of the work is on the web side.
 ```
 
 ### Interaction with the other pending change specs
+
+**All three merged, and every obligation below is discharged.** This spec merged
+last, on 2026-07-27, so it owned both halves. The feed-wall bypass shipped in
+`fetch::feed_page_cached` and is stated on
+[`02-feed-engine.md`](../../02-feed-engine.md) and
+[`05-caching-and-persistence.md`](../../05-caching-and-persistence.md) in the
+same words. The reader close shipped in `RefreshWall.svelte`, at the control
+rather than inside `FeedState`, because `reader.svelte.ts` already imports
+`feed.svelte.ts` and the reverse import would be a cycle between two singletons
+that also drags `$app/navigation` into the feed module's graph. And the `05`
+cache table did grow its twelfth row, which is exactly what the countless
+sentence was written to survive.
 
 If [`2026-07-26-lay_a_bluesky_feed.md`](2026-07-26-lay_a_bluesky_feed.md) lands,
 a feed wall has no snapshot and no author-feed caches, so `refresh` there means

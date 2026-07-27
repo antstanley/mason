@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [17-feed_picker_state-certificate.md](17-feed_picker_state-certificate.md)
 
-**Implements:** [`changes/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `08-wall-and-bricks.md` → The feed picker (the five sections and the label filter), and → `07-web-client.md` → The picker is history, not a URL; implementation note 12. Targets [`08-wall-and-bricks.md`](../../../08-wall-and-bricks.md), the new picker section.
+**Implements:** [`changes/merged/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/merged/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `08-wall-and-bricks.md` → The feed picker (the five sections and the label filter), and → `07-web-client.md` → The picker is history, not a URL; implementation note 12. Targets [`08-wall-and-bricks.md`](../../../08-wall-and-bricks.md), the new picker section.
 **Depends on:** 01, 14, 16
 **Produces:** everything the picker knows, in the one lane a test can see: recents, three queries, their loading and error states, and the hidden-tier filter.
 **Pointers:** `web/src/app.d.ts` (`App.PageState`, **created** by task 01, so this task **adds** a member rather than replacing the interface). `state/profile.svelte.ts:26` (the `browser` guard). `lib/appview.ts` (created by task 16). `HiddenLabel` in `types.ts` (created by task 14). `state/handle.svelte.ts` holds `mason:handle` in `localStorage`; `mason:feeds` sits beside it.

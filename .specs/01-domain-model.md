@@ -153,10 +153,15 @@ handle to a DID and reads the wall owner's logged-out opt-out at the same time.
 
 One viewer's wall in progress. Not serialised; it lives only in the engine.
 
-Identity: `snapshot_id = "<mode-tag>-<xxh3_64(did, seed) as 16 hex>"`, so a glaze
-wall and a full wall for the same actor and seed can never collide.
+Identity: `snapshot_id = "<mode-tag>-<xxh3_64(did, seed) as 16 hex>"`, so a
+glaze wall and a full wall for the same actor and seed can never collide.
+Beside it the snapshot carries `refresh`, set once at construction: this wall
+was asked for explicitly, so its fill re-reads the fast content caches instead
+of trusting them. It is immutable for the snapshot's life and therefore not
+guarded state.
 
-State it owns:
+State it owns, all of it inside one mutex-guarded `Inner`, which is why
+`refresh` is described above rather than listed below:
 
 | Field | Meaning |
 |---|---|
@@ -316,11 +321,17 @@ through the browser build's IndexedDB export.
 | One author's archived streams | author DID | `caches.streams` |
 | Who is live, network-wide | the single key `0u8` | `caches.live` |
 | A wall in progress | `snapshot_id` | `caches.snapshots` |
-| One page of a feed generator | `(feed uri, upstream cursor)` | `caches.feed_pages` |
+| One page of a feed generator | `(feed uri, limit, upstream cursor)` | `caches.feed_pages` |
 
 The live list is the only viewer-independent cache, which is what makes a single
 key safe. Turning it into bricks is per-viewer and happens downstream of the
 cache, in `fetch::live_bricks`.
+
+The `limit` sits inside the `feed_pages` key rather than beside it because the
+two views ask a generator for different depths: the mixed views ask for
+`PAGE_SIZE` and glaze asks for 100. A key of (feed uri, upstream cursor) alone
+would serve a glaze request the 24-item page a mixed request cached a moment
+earlier, and the image wall would silently run a quarter as deep.
 
 ---
 

@@ -362,6 +362,12 @@
       "enum": ["preview", "freeze"]
     },
 
+    "FeedRefresh": {
+      "description": "The ?refresh= request parameter. Exactly the token \"1\" asks for a new wall laid from re-read content caches; any other value, including absent, is no refresh. On a graph wall it is honoured only when cursor is absent, because a refresh is always a first page. Mirrors refresh_from_query in server/crates/mortar-core/src/feed.rs.",
+      "type": "string",
+      "const": "1"
+    },
+
     "FeedRef": {
       "description": "The ?feed= request parameter: a pointer to a Bluesky feed generator record. Parsed, never forwarded. Either an AT-URI whose collection is exactly app.bsky.feed.generator, or a bsky.app feed URL whose profile segment mason resolves to a DID. Anything else is bad_request.",
       "oneOf": [

@@ -15,8 +15,8 @@ state machine, and the service-worker lifecycle. What the wall looks like is in
 1. Turn a URL into a wall: `/?actor=<handle>` lays a graph wall and
    `/?feed=<at-uri>` lays a feed generator's. Those two parameters are the whole
    routing surface.
-2. Drive the warm-then-commit first screen and the endless-scroll pagination
-   against `/api/feed`.
+2. Drive the warm-then-commit first screen, the endless-scroll pagination, and
+   the in-place refresh against `/api/feed`.
 3. Register and manage the service worker that *is* the feed engine in local
    mode, including what happens to an open tab when a deploy lands.
 4. Hold reader preferences (layout, client, last handle, recent feeds) locally.
@@ -248,9 +248,79 @@ reset(target, mode)
       ├─ fetchFeed(target, cursor, mode)     (no intent: a normal committed page)
       ├─ dedupe against #seen, append, adopt cursor, done = !cursor, #save()
       └─ on error: classify
+
+   refresh()   ← the header control
+      ├─ refuses while loading, warming, or with no target
+      ├─ drop this (target, mode) from the session cache: back/forward must not
+      │  resurrect the wall the reader just replaced
+      ├─ cursor = null, done = false, error = null, warming = true
+      ├─ items are LEFT ON THE WALL and initialLoad is untouched
+      ├─ arm a one-shot refresh flag, and an in-flight marker beside it
+      └─ generation++, then spawn #warm(generation), whose first request
+         carries the flag
 ```
 
-Three mechanisms hold it together:
+The cache entry is dropped *before* the generation bump, so a reset that lands
+mid-refresh (a back gesture, a re-navigation to the same wall) lays the wall
+again rather than handing back the arrangement the reader just asked to replace.
+
+Three details hold the refresh together:
+
+- **The outgoing wall stays visible.** `refresh()` does not clear `items`, so
+  the reader keeps looking at bricks while the new wall warms, and the first
+  `#replace` reflows the old arrangement into the new one. That is the same
+  machinery the warming reflow already uses; clearing to skeletons would make a
+  refresh look like a failure for two seconds.
+- **The flag is one-shot, and it is spent when a flagged request SETTLES, never
+  when one is issued.** `#warm`'s first poll normally carries it, but `freeze()`
+  can fire while that poll is still in flight, with the cursor still null, so a
+  flag cleared at issue time would be spent on a request whose result is then
+  discarded and the committed wall would never be refreshed at all.
+
+  Clearing on adopt is not sufficient on its own, because it lets both
+  cursorless requests carry the flag: two fresh seeds, two snapshots, two fills,
+  and two hundred-author fan-outs from one tap. So `refresh()` also arms a
+  private in-flight marker, and **no second cursorless request goes out under
+  the same refresh**: `freeze()` returns early while a flagged cursorless
+  request is in flight, with no side effect at all (not the generation bump, not
+  `loading`), and `#warm` calls it once the preview has resolved and its cursor
+  (which carries the seed) has been adopted, so the committed request lands on
+  the refreshing snapshot. A held commit is dropped rather than queued: a reader
+  who engaged during a refresh waits for the refreshing snapshot, or for the
+  ceiling, rather than committing the moment the marker clears, because what
+  they would commit early is a wall built from a different seed.
+
+  Settling covers a **throw** as well as an answer, and that is a fourth place
+  the flag is spent beside adoption, `freeze`'s `finally` and the next `reset`.
+  `#warm`'s catch releases the marker and spends the flag before asking for the
+  commit: releasing the marker, because `freeze` is held while it is set and the
+  wall would otherwise sit warming forever behind its own guard; spending the
+  flag, because that commit is itself cursorless (a refresh nulled the cursor)
+  and an unspent flag would ride it, which is one tap and two flagged cursorless
+  requests, one after the other. The price is that a refresh whose first request
+  never answered commits an unrefreshed wall, and that is the cheaper half: the
+  control is live again the moment the freeze settles, so the reader can ask
+  again, which costs one more tap rather than a fan-out nobody asked for.
+
+  Deferring the request is the whole mechanism, and merely stripping the second
+  request's flag would be worse than doing nothing. An unflagged cursorless
+  request rolls its own fresh seed, builds a second snapshot and fills it from
+  the untouched five-minute author-feed cache, so it clears the twelve-author
+  first-paint gate off cache hits while the refreshing fill is still working
+  through a hundred rate-limited calls. It would win, and it would commit the
+  pre-refresh wall. This matters more than it looks: under
+  `prefers-reduced-motion: reduce` the wall freezes the instant `warming` flips
+  true, with no scroll event at all, so preview-plus-freeze is the DEFAULT path
+  for those readers rather than a race.
+- **`FeedState` still touches no DOM.** Nothing in a refresh moves the scroll
+  position, which is what keeps the vitest lane running the real module in node
+  and keeps the refresh from freezing itself. The one thing the control does
+  besides calling `refresh()` is close an open reader, and that lives at the
+  control rather than in `FeedState` for the same reason: it reaches
+  `history.back()` a module away, and the reverse import would be a cycle
+  between two singletons.
+
+Three mechanisms hold the rest of it together:
 
 - **A generation counter.** Bumped on every reset and freeze. Every async
   continuation rechecks it and bows out if a newer wall took over, so a late
@@ -364,7 +434,7 @@ whose bricks are fixtures compiled into the wasm and need no network at all.
 | Lane | Runner | Covers |
 |---|---|---|
 | `web/src/**/*.test.ts` | vitest, node environment | `FeedState` transitions, `api.ts` request shaping and error mapping |
-| `web/tests/*.test.ts` | Playwright, chromium | The real static build: the worker intercepts `/api/feed` and lays the demo wall |
+| `web/tests/*.test.ts` | Playwright, chromium | The real static build, in five specs: the service-worker smoke (the worker intercepts `/api/feed` and lays the demo wall), the brick reader, the feed picker, the refresh control, and a blog carrying the same tag twice. **The only lane in the repo that renders a component at all** |
 | `pnpm check:ci` | `tsc --noEmit` | Types in `.ts` and `.svelte.ts`, including the wire drift guard. **Not `.svelte` component bodies** |
 
 vitest rides the app's own vite config through `mergeConfig`, so `.svelte.ts`
@@ -434,6 +504,16 @@ somebody working on a component reaches for first.
   by the card and the reader.** Uncovering a brick on the wall and finding it
   covered again one click later reads as a bug. It is still forgotten on
   reload: the set lives in a rune, not in storage.
+- *A refresh lays a new wall from the top.* **It does not weave new bricks into
+  the old one.** Laid bricks never move, which is what makes the cursor
+  meaningful; prepending would shift every brick behind the reader and
+  invalidate the offset they are holding.
+- *The outgoing wall stays on screen during a refresh.* **Reflow, do not clear.**
+  The preview loop already replaces an arrangement in place, and skeletons in
+  the middle of a session read as something breaking.
+- *No auto-refresh and no unread count.* **The reader asks.** A wall that
+  restacks itself while somebody reads it, or wears a badge counting what they
+  have not seen, is the doomscroll mechanic mason is positioned against.
 
 **Open questions**
 

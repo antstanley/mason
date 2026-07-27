@@ -36,6 +36,7 @@ pub async fn handle_feed(
     cursor: Option<&str>,
     mode: Mode,
     intent: FeedIntent,
+    refresh: bool,
 ) -> Result<FeedResponse, AppError>
 ```
 
@@ -72,13 +73,69 @@ The wasm front polls `Preview` while a wall warms and asks `Freeze` exactly once
 to commit. `Normal` is what a client without a preview loop asks, and it is why
 server mode still opens on a proper mix rather than on nothing but posts.
 
+### Refresh
+
+`?refresh=1` says the reader asked for this wall on purpose. It does two things
+and refuses to do a third.
+
+On a graph wall it is honoured **only on a cursorless request**. A refresh is
+always a first page: mid-scroll it would mean re-reading a hundred author feeds
+to serve page nine, whose bricks were admitted from the old ones anyway. With a
+cursor present the flag is ignored, not an error. A cursor that does not decode
+leaves it alone, because that request is already laying a fresh wall from a
+fresh seed.
+
+On a cursorless request there is already a fresh seed (that is what no cursor
+means), so a refresh always lands on a brand new snapshot id and can never
+disturb the one it replaces. What the flag adds is carried into that snapshot
+and read by its fill: `author_feed` and `image_feed` are re-read from the
+AppView rather than served from cache. Nothing else is. The follow graph, PDS
+endpoints, blog documents, archived streams, the owner's opt-out and the
+per-viewer activity list all stay warm, because none of them is where "new
+posts" lives and every one of them is expensive to re-read (see
+[05](05-caching-and-persistence.md)).
+
+The **fill** honours it and an extension wave never does. A wave asks authors
+this wall has never asked, so there is nothing cached for it to step over, and
+honouring the flag per wave would make a refresh cost more the longer the reader
+scrolls. `fill::fill` passes the snapshot's flag and `fill::extend` passes a
+literal `false`; no signature enforces that, so a test holds it instead.
+
+**A refresh bypasses two of these on a graph wall, and one on a feed wall.**
+`author_feed` and `image_feed` are re-read on a `refresh=1` request; on a feed
+wall it is `feed_pages` instead. Every other cache stays warm. That sentence is
+[05](05-caching-and-persistence.md)'s, word for word, because it is one rule on
+two pages. A feed wall has no snapshot and no author feeds behind it, so that
+one entry is the whole of what "new posts" means there, and the cursorless rule
+does not travel with it: the rule exists because re-reading a hundred
+rate-limited author feeds to serve page nine changes nothing about the pages
+already laid, and a feed page is one AppView call whichever page it names. The
+refreshed answer is inserted as usual, so the freeze behind a refreshed preview
+is still one network read rather than two.
+
+Because the flag rides on snapshot **creation** rather than on each request, it
+is idempotent per wall: `ensure_snapshot` builds a snapshot and spawns its fill
+exactly once, so the preview polls and the freeze that follow a refresh land on
+the already-refreshing snapshot whether or not they repeat the flag. The
+converse is the same rule read the other way, and it is the honest half: a
+request that meets a snapshot somebody else already built inherits **that**
+snapshot's flag. An unflagged request therefore cannot turn off a fill already
+re-reading on a refresh's behalf, and a flagged one cannot make a fill that has
+already gone out re-read anything.
+
+The demo wall ignores it. Its bricks are fixtures compiled into the binary and
+there is nothing to re-read, so the demo arm returns before the flag reaches
+anything.
+
 ### Request flow
 
 ```
-handle_feed(Actor(actor), cursor, mode, intent)
+handle_feed(Actor(actor), cursor, mode, intent, refresh)
   │
   ├─ decode cursor ──▶ Some{seed, offset} | None (garbage decodes to None, and
   │                                               a feed cursor is treated as one)
+  │
+  ├─ refresh &= cursor did not decode   // a refresh is always a first page
   │
   ├─ actor == "demo" ? ──▶ fixture page from compiled-in bricks, return
   │
@@ -87,9 +144,10 @@ handle_feed(Actor(actor), cursor, mode, intent)
   ├─ seed = cursor.seed  or  fresh_seed(did)
   │
   ├─ intent == Preview ?
-  │     ensure_snapshot ▸ preview_page(clone of pool) ▸ return {items, cursor(offset 0), warming}
+  │     ensure_snapshot(refresh) ▸ preview_page(clone of pool)
+  │                              ▸ return {items, cursor(offset 0), warming}
   │
-  ├─ get_or_build(did, seed, mode)          // blocks for first paint
+  ├─ get_or_build(did, seed, mode, refresh)  // blocks for first paint
   ├─ get_page(offset, PAGE_SIZE, wait_for_mix = intent == Normal)
   └─ return {items, cursor: has_more ? encode{seed, offset + items.len()} : null}
 ```
@@ -107,14 +165,14 @@ engine: no snapshot, no pool, no admission caps, no cohort, no extension waves,
 no grout and no mixer.
 
 ```
-handle_feed(Feed(ref), cursor, mode, intent)
+handle_feed(Feed(ref), cursor, mode, intent, refresh)
   │
   ├─ FeedRef::parse(ref) ──▶ AtUri  |  Err(BadRequest)
   │     a bsky.app feed URL resolves its profile segment to a DID first
   │
   ├─ decode cursor ──▶ Some{feed} | None   (a graph cursor here decodes to None:
   │                                         a fresh wall, not an error)
-  ├─ feed_page_cached(uri, upstream cursor)
+  ├─ feed_page_cached(uri, upstream cursor, limit, refresh)
   │     ──▶ (bricks, next upstream cursor)  |  Err(FeedNotFound | Upstream)
   │
   ├─ Mode::Glaze ? ──▶ keep only is_image_post()   (and lay every survivor)

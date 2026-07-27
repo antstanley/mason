@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [07-merge_the_reader_spec-certificate.md](07-merge_the_reader_spec-certificate.md)
 
-**Implements:** [`changes/2026-07-26-read_a_brick_in_place.md`](../../../changes/2026-07-26-read_a_brick_in_place.md) §Merge plan, and every one of its `Proposed changes` blocks.
+**Implements:** [`changes/merged/2026-07-26-read_a_brick_in_place.md`](../../../changes/merged/2026-07-26-read_a_brick_in_place.md) §Merge plan, and every one of its `Proposed changes` blocks.
 **Depends on:** 01, 02, 06
 **Produces:** canonical pages 00, 07, 08 and 09 describe the reader that shipped, with the four corrections the change spec absorbed on 2026-07-26 confirmed present rather than re-authored here.
 **Pointers:** `.specs/00-overview.md` §Goals (a numbered list ending at 7) and §Non-goals (the No blog content rendering bullet). `.specs/07-web-client.md:93` §Reactive state and its Decisions list. `.specs/08-wall-and-bricks.md:13` §Responsibilities, `:97` §Cards, `:194` §Sensitive media, `:269` §Accessibility behaviours, `:297` §Implementation layout. `.specs/09-design-system.md` §Motion. `.specs/README.md` pending and merged tables.

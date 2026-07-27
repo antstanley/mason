@@ -100,6 +100,13 @@ operator has to reach whoever is generating the traffic.
   included, which the full wall omits), so one request reaches much further back
   and returns far more images than skimming 30 mostly-text posts would.
 
+  Both feed reads take a `refresh` argument. When it is set, the cache is not
+  consulted and the AppView answer overwrites whatever was there. A refreshed
+  read that fails *transiently* falls back to the cached yield rather than
+  returning `None`, so a refresh can never lay a thinner wall than the one it
+  replaced: the author did answer, just earlier. A refreshed read with nothing
+  cached behind it behaves exactly like a cold one.
+
 - **`get_feed(feed_uri, cursor, limit)`** pages a feed generator through the
   AppView and returns `(AuthorYield, Option<String>)`: the mapped bricks and the
   upstream cursor. It shares the *exact* mapping path with both author-feed
@@ -113,6 +120,12 @@ operator has to reach whoever is generating the traffic.
   other failure is `Upstream`. Unlike an author feed, this is the wall's only
   source: there is no hundred-author quorum to degrade into, so a failure is
   the request failing rather than a thin wall.
+
+  This read takes a `refresh` argument too, and steps over its `feed_pages`
+  entry exactly as the two above step over theirs: on a feed wall that entry is
+  the whole of what "new posts" means. What does not carry over is the fallback.
+  There is no hundred-author quorum to degrade into here, so a refreshed read
+  that fails is the request failing, exactly as an unrefreshed one is.
 
 All three feed reads share one mapping path (`map_feed_page`): drop reposts
 (`reason != null`), drop anything a logged-out viewer must not see, blur the
@@ -304,6 +317,7 @@ wall. But a blip must not be remembered as a fact either.
 | Outcome | Meaning | Cached? | Caller sees |
 |---|---|---|---|
 | Transport error, `RetriesExhausted`, 429, 5xx | Transient | No | `None` from `author_feed_cached` / `image_feed_cached`: the author never answered, so they are not recorded as fanned and a later wave asks again |
+| Transient failure on a refreshed read | Transient | No (the older entry survives) | The previously cached yield, so the refreshed wall is never thinner than the one it replaced |
 | Other 4xx on an author feed | The AppView's honest answer (suspended or deleted repo) | Yes, as an empty yield | An author who genuinely yields nothing |
 | 400/404 on a repo `listRecords` | The collection has never existed here | Yes, empty | "This person does not blog / does not stream" |
 | Any other repo failure | Transient | No | An empty yield this time; the next snapshot asks again |

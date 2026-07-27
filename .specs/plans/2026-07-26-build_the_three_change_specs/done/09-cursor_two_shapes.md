@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [09-cursor_two_shapes-certificate.md](09-cursor_two_shapes-certificate.md)
 
-**Implements:** [`changes/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `01-domain-model.md` → Cursor, and the `CursorPayload` fragment in §Type changes; implementation note 6. Targets [`01-domain-model.md`](../../../01-domain-model.md) §Entities → Cursor.
+**Implements:** [`changes/merged/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/merged/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `01-domain-model.md` → Cursor, and the `CursorPayload` fragment in §Type changes; implementation note 6. Targets [`01-domain-model.md`](../../../01-domain-model.md) §Entities → Cursor.
 **Depends on:** none
 **Produces:** a feed cursor round-trips, and every cursor mason has ever issued still decodes to the graph shape.
 **Pointers:** `server/crates/mortar-core/src/algo/cursor.rs:8` (the struct), `:15` (`encode`), `:21` (`decode`). **Three** existing tests, not two: `:32` (`roundtrip`, whose body writes the struct expression `Cursor { seed: 42, offset: 96 }` at `:33`), `:46` (the legacy stray-`snapshot`-key test, whose body writes `Some(Cursor { seed: 42, offset: 96 })` at `:51`), `:59` (`garbage_is_none`, including the `{"seed":42}` case, which names no constructor at all). Three consumers, not one: `feed.rs:51` (decode), `feed.rs:57` and `:64` (the **demo** branch reads `decoded.map(|c| c.offset)` and re-encodes a `Cursor { seed: 0, offset }`), `feed.rs:76`, `:90`, `:103` (the graph branch), `feed.rs:202` (`demo_page`).

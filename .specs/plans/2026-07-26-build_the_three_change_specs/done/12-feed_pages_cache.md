@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [12-feed_pages_cache-certificate.md](12-feed_pages_cache-certificate.md)
 
-**Implements:** [`changes/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `05-caching-and-persistence.md` → The caches; implementation notes 4 and 5. Targets [`05-caching-and-persistence.md`](../../../05-caching-and-persistence.md) §The caches and [`01-domain-model.md`](../../../01-domain-model.md) §Required query patterns.
+**Implements:** [`changes/merged/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/merged/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `05-caching-and-persistence.md` → The caches; implementation notes 4 and 5. Targets [`05-caching-and-persistence.md`](../../../05-caching-and-persistence.md) §The caches and [`01-domain-model.md`](../../../01-domain-model.md) §Required query patterns.
 **Depends on:** 10, 11
 **Produces:** one page of a feed generator, cached for sixty seconds and never persisted, so the preview-then-freeze pair is one network read and a back/forward is free.
 **Pointers:** `sources/fetch.rs:177` (`image_feed_cached`, the neighbour the new function sits beside). `cache.rs:194` (the `Caches` struct), `:236` (`Caches::new`). `persist.rs:40` (`CACHE_NAMES`, a `[&str; 9]` that must stay 9). `sources/mod.rs:15` (the re-export line). `architecture-principles.md` rule 1: `cache.rs` takes the yield types re-exported from `sources/mod.rs`, never a submodule directly.

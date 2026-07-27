@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [14-wire_target_and_hidden_labels-certificate.md](14-wire_target_and_hidden_labels-certificate.md)
 
-**Implements:** [`changes/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `06-wire-contract.md` → What the fixture covers, and the `HiddenLabel` fragment in §Type changes; implementation note 10. Targets [`06-wire-contract.md`](../../../06-wire-contract.md) §What the fixture covers.
+**Implements:** [`changes/merged/2026-07-26-lay_a_bluesky_feed.md`](../../../changes/merged/2026-07-26-lay_a_bluesky_feed.md) §Proposed changes → `06-wire-contract.md` → What the fixture covers, and the `HiddenLabel` fragment in §Type changes; implementation note 10. Targets [`06-wire-contract.md`](../../../06-wire-contract.md) §What the fixture covers.
 **Depends on:** 13
 **Produces:** the target vocabulary and mortar's hidden-label list are pinned on both sides of the wire by the same mechanism that already keeps the error codes and video sources in step. **This is wire regeneration 2 of 3.**
 **Pointers:** `sources/bluesky.rs:68` (`HIDDEN_LABELS`, a **private** const; `tests/contract.rs` is an integration test and can only see `pub` items). `sources/mod.rs:15` (the re-export line). `tests/contract.rs:347` (the `GLAZE`/`PREVIEW`/`FREEZE` const block, the pattern to copy), `:361` (the `query` object), `:386` (the `vocab` object, inside the closing `json!`; `:366` is only the comment above the `source_map` build). `web/src/lib/api.ts:34` (`FeedIntent`, the neighbour). `web/src/lib/contract-check.ts:79`-`:83` (the vocabulary assertions).

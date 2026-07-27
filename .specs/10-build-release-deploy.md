@@ -1,6 +1,6 @@
 # 10 - Build, Release, Deploy
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley
 
 How mason is built, checked, versioned and shipped. Toolchain choices and code
 style are in [development-guidelines.md](development-guidelines.md); the
@@ -52,7 +52,7 @@ Every command in the repo goes through `just`.
 | `just dev-server` | Server mode: native mortar on :8787 and the SPA against it |
 | `just build` | Static site into `web/build/` (rebuilds wasm first) |
 | `just test` | Build the wasm first, then `cargo nextest run`, `pnpm check:ci` (tsc over **two** projects, the app and the service worker), `pnpm test` (vitest) |
-| `just test-e2e` | Build, then the Playwright service-worker smoke in chromium |
+| `just test-e2e` | Build, then five Playwright specs in chromium: the service-worker smoke, the brick reader, the feed picker, the refresh control, and a blog carrying the same tag twice |
 | `just test-wasm` | The wasm-only Rust paths in a headless browser |
 | `just lint` | Build the wasm first, then `oxlint`, `knip`, `cargo clippy --workspace --all-targets -D warnings` |
 | `just fmt` / `just fmt-check` | `oxfmt` and `cargo fmt` |
@@ -88,7 +88,7 @@ Four lanes, because the engine compiles two ways and the client is a browser app
 | Native Rust | `cargo nextest` | The engine: scoring, mixing, cohorts, admission, sources against wiremock, the wire-contract pin |
 | Wasm Rust | `wasm-pack test --headless --chrome` | The browser-only paths: the timer and spawn seam, the gloo-net transport, the hand-rolled throttle |
 | Web unit | vitest | `FeedState` transitions and `api.ts` |
-| Web end to end | Playwright | The real static build: the worker intercepts `/api/feed` and lays the demo wall |
+| Web end to end | Playwright | The real static build, in five specs: the service-worker smoke (the worker intercepts `/api/feed` and lays the demo wall), the brick reader, the feed picker, the refresh control, and a blog carrying the same tag twice. The only lane that renders a component |
 
 Test modules in `mortar-core` are gated `cfg(all(test, not(target_arch = "wasm32")))`
 so the native suite (tokio, wiremock) stays off the browser build, and the wasm
@@ -385,7 +385,7 @@ config/{production,preview}.jsonc   blogwright
 web/vite.config.ts          adapter-static, SW register: false, the mode define
 web/tsconfig.worker.json    the second tsc project: the service worker, which
                             the generated config excludes from the first
-web/playwright.config.ts    the service-worker smoke
+web/playwright.config.ts    the browser lane: chromium against the static build
 web/vitest.config.ts        merged with the app's vite config
 ```
 

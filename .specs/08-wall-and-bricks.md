@@ -312,6 +312,7 @@ on `defaultPrevented` rather than on the listener chain. Together they keep
 | `error` with items | A retry button: "more bricks did not arrive" |
 | `stalled` | "the wall paused", with a "try for more" button. Scrolling retries too |
 | `warming` or loading or pumping | A 4-card skeleton tail |
+| `warming` with items already laid | The wall the reader was reading, reflowing into the refreshed one, with the usual four-card skeleton tail beneath it. Never the twelve-card initial grid, which is `initialLoad` only and a refresh does not set it |
 | `done` | "that is every brick. the wall is finished." |
 
 Both recoverable errors drop the reader into a handle box, because a wall you
@@ -371,6 +372,52 @@ freezes it: the wall must stop moving the instant they reach for it.
 | Arrow keys, PageUp/Down, Home, End, Space | A keyboard user has no wheel to reach with |
 | `focusin` anywhere inside the wall | A switch user's way of engaging |
 | `prefers-reduced-motion: reduce` | Freeze before it moves at all: those readers never see the auto-reflow |
+
+### Refreshing
+
+`RefreshWall` sits in the header beside the layout and client pickers: one
+control, no confirmation, no count.
+
+**It does not scroll.** The wall re-lays under the reader, wherever they are.
+
+This is a product choice and not a mechanical necessity, and it is worth being
+precise about which, because the mechanics nearly went the other way. A
+programmatic scroll is indistinguishable from a reader reaching for the wall:
+`window.scrollTo` moves the position synchronously but queues its `scroll`
+event, and that event is delivered *after* the microtask that re-runs the
+freeze effect and arms its listeners. Before the in-flight marker existed, a
+refresh that scrolled therefore froze itself on its own scroll in either call
+order, and committed the pre-refresh wall. The marker removes that: a freeze
+during a refresh is deferred until the flagged preview lands, whoever triggered
+it, so a scroll is now safe.
+
+What is left is the reason the control still does not scroll: the outgoing wall
+stays on screen and reflows into the new one, and that is a thing the reader has
+to be looking at to see. Jumping them to the top is not wrong, it just throws
+the reflow away. The alternative is cheap now, and it is an open question below
+rather than a closed door.
+
+Under `prefers-reduced-motion: reduce` there is no scroll in it at all, and a
+refresh is still exactly one request out: `FeedGrid` freezes the instant
+`warming` flips true, with no listener attached and no scroll event to wait for,
+so a reduced-motion refresh is a cursorless preview carrying the flag plus a
+freeze that the in-flight marker holds until that preview's cursor has been
+adopted. One cursorless request, one refreshed fan-out, and one reflow when the
+preview lands.
+
+The control closes an open reader before it asks for the wall, because a refresh
+replaces `feed.items` wholesale and the reader locates its open brick in that
+list by id. Today no click can reach that line, since an open reader makes the
+content wrapper `inert` and this control sits inside it, so the call is the
+guarantee held for the next trigger rather than a live path.
+
+It is disabled while the feed is loading or warming, and that is the whole rate
+limit: one refresh can be in flight, so a double tap cannot start two
+hundred-author fan-outs. The wall keeps its single polite live region, which
+already says "laying bricks" while warming; a refresh is a warm, so it needs no
+new announcement and `RefreshWall` adds no region of its own. The announcement
+of *new* bricks is suppressed for free, because the region's count resets while
+warming so a reflow's churn never reads as new bricks.
 
 ---
 
@@ -466,7 +513,10 @@ live in components.
   with roving arrow-key focus, Home, End, Escape and click-away, because a native
   `<select>` cannot render the client icons; `SwitchWall` is a dialog with
   Escape, click-away, and a focus-out that closes when focus leaves the whole
-  switcher.
+  switcher. `RefreshWall` is a plain `<button>` with an accessible name and a
+  disabled state that is real rather than styled, so a screen-reader user is
+  told the wall is already refreshing instead of pressing a control that
+  silently does nothing.
 - **Touch targets are at least 44px** (`min-h-11`) on every control, including
   the ones that shrink to icons on mobile.
 - **The reader is a real dialog.** `role="dialog"`, `aria-modal="true"`, an
@@ -507,6 +557,7 @@ web/src/lib/
     HandleForm.svelte        the front door
     SwitchWall.svelte        the owner's face as a wall switcher
     LayoutPicker.svelte      bento / masonry / glaze
+    RefreshWall.svelte       lay this wall again, now
     ClientPicker.svelte      which atmosphere client links open in
     Icon.svelte              every lucide path, inline
     ClientIcon.svelte        per-client marks
@@ -566,3 +617,13 @@ appears and the form still works.
 - *Live region verbosity.* Every pagination batch is announced. On a fast
   connection during a long scroll that is a lot of announcements; whether it
   wants throttling is unmeasured.
+- *Whether a refresh should return the reader to the top.* It does not, and this
+  is a live choice rather than the constraint it started as: the in-flight
+  marker defers any freeze during a refresh, including one a programmatic scroll
+  would trigger, so scrolling is no longer self-defeating. The cost is only that
+  a reader taken to the top does not watch the reflow they asked for. Open: a
+  reader deep in a long wall probably wants the top, and a reader who tapped
+  refresh to see what is new probably does not.
+- *Pull to refresh.* A touch reader's instinct is to drag down, and the wall has
+  nothing there. It competes with the browser's own overscroll refresh and needs
+  a gesture threshold, a rubber band and a reduced-motion path. Open.

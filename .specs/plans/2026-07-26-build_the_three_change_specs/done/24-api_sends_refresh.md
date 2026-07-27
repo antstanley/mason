@@ -2,7 +2,7 @@
 
 **Plan:** [plan.md](../plan.md) · **Certificate:** [24-api_sends_refresh-certificate.md](24-api_sends_refresh-certificate.md)
 
-**Implements:** [`changes/2026-07-26-refresh_the_wall.md`](../../../changes/2026-07-26-refresh_the_wall.md) implementation note 8, and → `06-wire-contract.md` → The endpoint (the cursorless rule). Targets [`07-web-client.md`](../../../07-web-client.md) §The feed state machine.
+**Implements:** [`changes/merged/2026-07-26-refresh_the_wall.md`](../../../changes/merged/2026-07-26-refresh_the_wall.md) implementation note 8, and → `06-wire-contract.md` → The endpoint (the cursorless rule). Targets [`07-web-client.md`](../../../07-web-client.md) §The feed state machine.
 **Depends on:** 15, 23
 **Produces:** the client never sends a flag mortar would ignore, and the cursorless rule is visible to anybody reading the network tab.
 **Pointers:** `api.ts:36` (`fetchFeed`, already taking a `FeedTarget` from task 15), `:45` (the params build), `:66` (`warmFeed`). `api.test.ts:51` (the existing exact-URL assertion, the pattern to follow). `feed.svelte.ts:200` and `service-worker.ts:253` are the existing `satisfies MortarErrorCode` uses this mirrors.
