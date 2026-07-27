@@ -21,8 +21,12 @@ interface FeedGeneratorResponse {
  *  reference a reader recognises, and a header that waited for the network
  *  would show an empty button on every feed wall's first paint. A reference
  *  with no slash at all, or one ending in one, keeps the whole string rather
- *  than naming the feed nothing. */
-function feedRkey(raw: string): string {
+ *  than naming the feed nothing.
+ *
+ *  Exported because the feed picker needs the same fallback for a generator
+ *  published without a display name, and two spellings of "what a feed is
+ *  called before it has a name" would drift. */
+export function feedRkey(raw: string): string {
   const rkey = raw.slice(raw.lastIndexOf("/") + 1);
   return rkey || raw;
 }

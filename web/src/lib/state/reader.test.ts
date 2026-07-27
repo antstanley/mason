@@ -97,6 +97,7 @@ beforeEach(() => {
   vi.spyOn(feed, "freeze").mockImplementation(() => Promise.resolve());
   feed.items = wall.slice();
   delete pageState.brick;
+  delete pageState.picker;
 });
 
 afterEach(() => {
@@ -168,6 +169,19 @@ describe("opening", () => {
     // a warming wall reorders between preview polls, so the arrangement is
     // committed before the reader starts locating a brick inside it
     expect(order).toEqual(["freeze", "push"]);
+  });
+
+  it("opens on its own key alone, which is what shuts the feed picker", () => {
+    pageState.picker = "feeds"; // the picker is up over the landing page
+    new ReaderState().open(brick("a"));
+
+    const pushed = vi.mocked(pushState).mock.calls[0]?.[1];
+    // the reader's half of the one rule about two overlays: a push REPLACES
+    // page state rather than merging into it, so carrying only `brick` is what
+    // closes the picker. The picker's half is the same shape and feeds.test.ts
+    // pins it there; neither overlay has to remember the other exists.
+    expect(pushed).toEqual({ brick: "a" });
+    expect(pushed).not.toHaveProperty("picker");
   });
 
   it("is up only while page.state says so, and keeps its brick after that", () => {
