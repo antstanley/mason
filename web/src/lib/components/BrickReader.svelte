@@ -18,7 +18,7 @@
 	import type { BlogBrick, PostBrick, VideoBrick } from '$lib/types';
 	import { reader } from '$lib/state/reader.svelte';
 	import { player } from '$lib/state/player.svelte';
-	import { clientUrl } from '$lib/state/client.svelte';
+	import { clientName, clientUrl } from '$lib/state/client.svelte';
 	import { dateLabel, runtimeLabel } from '$lib/format';
 	import AuthorChip from './AuthorChip.svelte';
 	import Icon from './Icon.svelte';
@@ -265,25 +265,44 @@
 			{/if}
 		</a>
 	{/if}
-	<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm opacity-75">
-		{#if stamp}
-			<!-- when it was laid: the card has never had room for a timestamp -->
-			<time datetime={post.createdAt}>{stamp}</time>
-		{/if}
-		{#if post.likeCount > 0}
-			<span class="inline-flex items-center gap-1" aria-label="{post.likeCount} likes">
-				<Icon name="heart" class="size-3.5" />
-				{post.likeCount}
-			</span>
-		{/if}
-		{#if post.repostCount > 0}
-			<span class="inline-flex items-center gap-1" aria-label="{post.repostCount} reposts">
-				<Icon name="repeat-2" class="size-3.5" />
-				{post.repostCount}
-			</span>
-		{/if}
+	{@const postHref = clientUrl(post.url)}
+	{@const postClient = clientName(postHref)}
+	<!-- One line, counts on the left and the way out on the right. They were
+	     stacked, which spent a whole row on a control the width of six words and
+	     pushed the stepper further from the text it steps. `gap-x-3` between the
+	     two halves is the floor, so the link never sits against the counts even
+	     when the panel is at its narrowest; past that they wrap and the link keeps
+	     the right edge on its own line. -->
+	<div class="flex flex-wrap items-center justify-between gap-x-3 text-sm">
+		<div class="flex flex-wrap items-center gap-x-3 gap-y-1 opacity-75">
+			{#if stamp}
+				<!-- when it was laid: the card has never had room for a timestamp -->
+				<time datetime={post.createdAt}>{stamp}</time>
+			{/if}
+			{#if post.likeCount > 0}
+				<span class="inline-flex items-center gap-1" aria-label="{post.likeCount} likes">
+					<Icon name="heart" class="size-3.5" />
+					{post.likeCount}
+				</span>
+			{/if}
+			{#if post.repostCount > 0}
+				<span class="inline-flex items-center gap-1" aria-label="{post.repostCount} reposts">
+					<Icon name="repeat-2" class="size-3.5" />
+					{post.repostCount}
+				</span>
+			{/if}
+		</div>
+		<!-- named after where it actually lands rather than after the setting: a
+		     post whose url is not a bsky.app one passes through clientUrl untouched,
+		     and "open in Twinkl" would be a promise the link does not keep. `ms-auto`
+		     rather than relying on justify-between alone, which would strand the
+		     link on the left when a post has no timestamp and no counts. -->
+		{@render sourceLink(
+			postHref,
+			postClient ? `open in ${postClient}` : 'open the post',
+			'ms-auto text-brick-post-ink dark:text-brick-post'
+		)}
 	</div>
-	{@render sourceLink(clientUrl(post.url), 'open the post', 'text-brick-post-ink dark:text-brick-post')}
 {/snippet}
 
 {#snippet blogBody(blog: BlogBrick)}
@@ -499,13 +518,13 @@
 					<Icon name="chevron-left" class="size-5" />
 					previous brick
 				</button>
-				{#if reader.index >= 0}
-					<!-- the same count the live region below announces, so it is marked
-					     hidden here rather than read out twice -->
-					<p class="shrink-0 text-xs tabular-nums opacity-60" aria-hidden="true">
-						{reader.index + 1} / {reader.total}
-					</p>
-				{/if}
+				<!-- No count between the two controls. It read as progress through the
+				     wall and was not: the pump keeps laying while the reader is up, so
+				     the denominator grows underneath a number that looked fixed, and
+				     "4 of 22" became "4 of 31" without the reader having moved. The
+				     live region below still says where a step landed, which is a
+				     different job: it announces that the panel swapped at all, to
+				     somebody who cannot see that it did. -->
 				<button
 					type="button"
 					onclick={() => step(1)}

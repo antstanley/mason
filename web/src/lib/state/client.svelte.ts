@@ -35,6 +35,25 @@ class ClientState {
   }
 }
 
+/** What to call the place a link is about to open, for a control that names its
+ *  destination rather than saying "open the post".
+ *
+ *  Keyed on the FINISHED url rather than on `client.id`, because those two
+ *  disagree: `clientUrl` rewrites bsky.app links and passes everything else
+ *  through untouched, so a stream.place link on a Twinkl setting still goes to
+ *  stream.place. Reading the label off the setting would promise a client the
+ *  reader is not about to land in. `null` when the host belongs to no client on
+ *  the list, which is the caller's cue to say something generic. */
+export function clientName(url: string): string | null {
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return null;
+  }
+  return CLIENTS.find((c) => c.host === host)?.label ?? null;
+}
+
 export const client = new ClientState();
 
 /** How each client spells the route bsky.app calls `/profile/`.

@@ -586,3 +586,89 @@ test("a modified click still goes to the source, and opens no reader", async ({ 
 	// same claim said the other way round
 	await expect(panel(page)).toHaveCount(0);
 });
+
+// The way out of the reader, which now shares a line with the counts and names
+// where it goes. Both halves matter and neither is visible to any other lane:
+// the layout is a `.svelte` class list, and the label is computed from the url
+// the link ends up with rather than from the setting.
+test("the way out sits on the counts' line, and names the client it opens", async ({ page }) => {
+	await laidWall(page);
+	const { card } = await plainPostCard(page);
+	await card.click();
+	await expect(panel(page)).toBeVisible();
+	// the panel rises AND scales as it arrives, so every box inside it reads a
+	// fraction short until that finishes. Measuring through it is how a 44px
+	// target reads as 43.72 and a passing layout reports itself broken.
+	await panel(page).evaluate(async (el) => {
+		await Promise.allSettled(
+			el.getAnimations({ subtree: true }).map((animation) => animation.finished),
+		);
+	});
+
+	// bsky.app is the default client, and a fixture post is a Bluesky post
+	const out = panel(page).getByRole("link", { name: "open in Bluesky" });
+	await expect(out).toBeVisible();
+	await expect(out).toHaveAttribute("href", /^https:\/\/bsky\.app\/profile\//);
+
+	// one line, not two. Asserted on the boxes rather than on the markup, since
+	// the point of the change is where these land on screen: they overlap
+	// vertically, and the link is the right-hand one.
+	const when = panel(page).locator("time").first();
+	const stamp = await when.boundingBox();
+	const link = await out.boundingBox();
+	expect(stamp).not.toBeNull();
+	expect(link).not.toBeNull();
+	const overlap =
+		Math.min((stamp?.y ?? 0) + (stamp?.height ?? 0), (link?.y ?? 0) + (link?.height ?? 0)) -
+		Math.max(stamp?.y ?? 0, link?.y ?? 0);
+	expect(overlap).toBeGreaterThan(0);
+	expect(link?.x ?? 0).toBeGreaterThan((stamp?.x ?? 0) + (stamp?.width ?? 0));
+
+	// and it kept the 44px target it had when it was a row of its own
+	expect(link?.height ?? 0).toBeGreaterThanOrEqual(44);
+});
+
+test("the way out renames itself when the client does", async ({ page }) => {
+	await laidWall(page);
+
+	// pick a different client, in settings, which is where that choice lives now
+	await page.getByRole("button", { name: "Settings", exact: true }).click();
+	await page.getByRole("dialog", { name: "settings" }).getByRole("button", { name: /Open posts in/ }).click();
+	await page.getByRole("listbox", { name: "Open posts in" }).getByRole("option", { name: "Twinkl" }).click();
+	await page.getByRole("button", { name: "Close settings" }).last().click();
+	await expect(page.getByRole("dialog")).toHaveCount(0);
+
+	const { card } = await plainPostCard(page);
+	await card.click();
+	const out = panel(page).getByRole("link", { name: "open in Twinkl" });
+	await expect(out).toBeVisible();
+	// named after where it lands, and it does land there: twinkl spells the
+	// profile route differently, so this is the rewrite as well as the label
+	await expect(out).toHaveAttribute("href", /^https:\/\/twinkl\.social\/@/);
+});
+
+// The count between the stepper's two controls is gone, and the announcement is
+// not. Those are easy to confuse for one thing: they carried the same numbers,
+// and deleting "the brick counter" naturally takes both. They do different jobs.
+// The visible one read as progress through a wall that grows while the reader is
+// open, so its denominator moved under a reader who had not; the live region is
+// how somebody who cannot see the panel learns that a step swapped it.
+test("the stepper counts nothing, and still says where a step landed", async ({ page }) => {
+	await laidWall(page);
+	const { card } = await plainPostCard(page);
+	await card.click();
+	await expect(panel(page)).toBeVisible();
+
+	// the row the two controls share, reached from one of them rather than by a
+	// class, so it is the row the reader actually sees
+	const stepper = panel(page).getByRole("button", { name: "next brick" }).locator("xpath=..");
+	await expect(stepper.getByRole("button")).toHaveCount(2);
+	await expect(stepper).not.toContainText("/");
+
+	// and the announcement survived, with a step to prove it still tracks
+	const opened = await position(page);
+	await page.keyboard.press("ArrowRight");
+	await expect(readout(page)).toHaveText(`brick ${opened.at + 1} of ${opened.total}`);
+	// still nothing on screen saying so
+	await expect(stepper).not.toContainText("/");
+});

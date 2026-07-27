@@ -3,7 +3,7 @@
 // spells its routes differently, so these cover the rules it always had as well
 // as the one it just gained.
 import { describe, expect, it } from "vitest";
-import { CLIENTS, clientUrl } from "./client.svelte";
+import { CLIENTS, clientName, clientUrl } from "./client.svelte";
 
 const POST = "https://bsky.app/profile/alice.test/post/3l6oveex3ii2l";
 
@@ -86,6 +86,34 @@ describe("clientUrl", () => {
       expect(out).toContain("3l6oveex3ii2l");
       // and none of them leaves the bsky.app host behind
       if (c.host !== "bsky.app") expect(new URL(out).hostname).toBe(c.host);
+    }
+  });
+});
+
+// The label the reader's "open in ..." control wears. It is read off the
+// finished url rather than off the setting, and these are the cases where those
+// two answers differ.
+describe("clientName", () => {
+  it("names the client a rewritten link is about to land in", () => {
+    for (const c of CLIENTS) {
+      expect(clientName(clientUrl(POST, c.host))).toBe(c.label);
+    }
+  });
+
+  it("refuses to name a client for a link that is not going to one", () => {
+    // clientUrl passes a non-bsky link through untouched whatever the setting
+    // is, so a stream.place page opens at stream.place even on Twinkl. Naming
+    // the setting here would promise somewhere the link never goes.
+    const stream = "https://stream.place/alice.test/live";
+    expect(clientUrl(stream, "twinkl.social")).toBe(stream);
+    expect(clientName(stream)).toBeNull();
+  });
+
+  it("has nothing to say about a string that is not a url", () => {
+    // what clientUrl returns when it rejects one, so this is the pair that
+    // actually reaches the reader rather than a hypothetical
+    for (const url of ["", "not a url", "javascript:alert(1)"]) {
+      expect(clientName(url)).toBeNull();
     }
   });
 });
