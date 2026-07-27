@@ -22,6 +22,7 @@
 	import { dateLabel, runtimeLabel } from '$lib/format';
 	import AuthorChip from './AuthorChip.svelte';
 	import Icon from './Icon.svelte';
+	import LinkPreview from './LinkPreview.svelte';
 	import Sensitive from './Sensitive.svelte';
 	import VideoPlayer from './VideoPlayer.svelte';
 
@@ -235,18 +236,33 @@
 			href={post.external.uri}
 			target="_blank"
 			rel="noopener noreferrer"
-			class="block rounded-xl border border-ink/10 bg-plaster-deep/50 p-4 transition-colors hover:border-ink/25 dark:border-chalk/10 dark:bg-kiln-deep/60 dark:hover:border-chalk/30"
+			class="block overflow-hidden rounded-xl border border-ink/10 bg-plaster-deep/50 transition-colors hover:border-ink/25 dark:border-chalk/10 dark:bg-kiln-deep/60 dark:hover:border-chalk/30"
 		>
-			<!-- the card truncates this title to one line and clamps the
-			     description to two; here it is the whole embed -->
-			<p class="font-semibold">{post.external.title}</p>
-			{#if post.external.description}
-				<p class="mt-1 text-sm leading-snug opacity-75">{post.external.description}</p>
+			{#if post.external.thumb}
+				<!-- the link's own picture, with what it says over the foot of it. The
+				     card shows this INSTEAD of the post's images and only when there
+				     are none; the reader has room for both, so a post that attached a
+				     picture and linked somewhere shows the pictures above and this
+				     underneath. Behind the same reveal, since it is a stranger's
+				     picture either way. -->
+				<Sensitive id={post.id} blur={post.blur}>
+					<LinkPreview external={post.external} />
+				</Sensitive>
+			{:else}
+				<!-- no picture on the other end, so the words carry it. The card
+				     truncates this title to one line and clamps the description to
+				     two; here it is the whole embed -->
+				<div class="p-4">
+					<p class="font-semibold">{post.external.title}</p>
+					{#if post.external.description}
+						<p class="mt-1 text-sm leading-snug opacity-75">{post.external.description}</p>
+					{/if}
+					<span class="mt-2 inline-flex items-center gap-1 text-xs font-semibold opacity-60">
+						{post.external.uri}
+						<Icon name="arrow-up-right" class="size-3" />
+					</span>
+				</div>
 			{/if}
-			<span class="mt-2 inline-flex items-center gap-1 text-xs font-semibold opacity-60">
-				{post.external.uri}
-				<Icon name="arrow-up-right" class="size-3" />
-			</span>
 		</a>
 	{/if}
 	<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm opacity-75">

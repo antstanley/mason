@@ -33,7 +33,13 @@ interface ImageEmbed {
   aspectRatio: AspectRatio | null;
 }
 
-interface ExternalEmbed {
+/** A link a post carries, as the AppView resolved it: the Open Graph title,
+ *  description and image it read from the page's headers. Exported because
+ *  `LinkPreview.svelte` takes one as a prop, and a component prop is a type
+ *  nothing in this repo checks: tsc cannot parse a `.svelte` file and vite
+ *  strips types without checking them, so an unexported one would compile,
+ *  ship, and be `any` all the way down. */
+export interface ExternalEmbed {
   uri: string;
   title: string;
   description: string;
