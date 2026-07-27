@@ -105,7 +105,7 @@ DONE(Task 22) is every obligation O1 to O7 below holding, each backed by the evi
     at 2 and still lays the newer rkey, so the fresh answer was inserted as usual and the freeze
     behind a refreshed preview stays one network read. Mutating `feed_wall`'s forward to a literal
     `false` fails the test at request 3 (1 against an expected 2). Cache resolution: the flag reaches
-    only `fetch::feed_page_cached`, which guards `state.caches.feed_pages` — `author_feed` and
+    only `fetch::feed_page_cached`, which guards `state.caches.feed_pages`, not `author_feed` and
     `image_feed` are untouched on this path.
 
 - **O5 · The last positional slot is asserted behaviourally.**
@@ -151,13 +151,13 @@ DONE(Task 22) is every obligation O1 to O7 below holding, each backed by the evi
     (`cargo check -p mortar-core -p mortar-wasm --target wasm32-unknown-unknown --all-targets`, which
     is what covers the new test modules' gating). `just wasm` → the generated
     `web/src/lib/mortar-wasm/pkg/mortar_wasm.d.ts:44` reads
-    `feed_page(actor?, feed?, cursor?, mode?, intent?, refresh?): Promise<string>` — six slots, the
+    `feed_page(actor?, feed?, cursor?, mode?, intent?, refresh?): Promise<string>`: six slots, the
     sixth optional, because `mortar-wasm/src/lib.rs:107` declares `refresh: Option<String>` and not
     `bool`. `cd web && pnpm check:ci` → exit 0 (svelte-kit sync, `tsc -p tsconfig.json`,
     `tsc -p tsconfig.worker.json`). `tsc -p tsconfig.worker.json --listFiles` includes both
     `src/service-worker.ts` and the freshly generated `pkg/mortar_wasm.d.ts`, so the six-argument call
     really is inside a tsc program. The call site is
-    `feed_page(actor, feed, cursor, mode, intent, refresh)` — `refresh` last, after `intent`.
+    `feed_page(actor, feed, cursor, mode, intent, refresh)`, with `refresh` last, after `intent`.
     `just check` → exit 0 (guard-dashes, guard-autoplay, guard-toolchain, fmt-check, guard-wasm,
     oxfmt, oxlint with only the four pre-existing warnings, knip, `clippy -D warnings`, nextest
     154/154, check:ci, vitest 45/45). No `contract.json` movement and no `.specs/`, `api.ts` or
@@ -228,10 +228,10 @@ DONE(Task 22) is every obligation O1 to O7 below holding, each backed by the evi
 
 VERDICT: DONE
 CONFIDENCE: high
-SUMMARY: O1 to O7 are all SATISFIED on evidence I collected myself — the five named tests run and, for
+SUMMARY: O1 to O7 are all SATISFIED on evidence I collected myself: the five named tests run and, for
 the two claims the gate asked to break, mutated-and-failed then restored; the Playwright slot case
 green with `refresh=1` and red when `intent` and `refresh` are transposed; `just check` exit 0; and
 the live two-curl review backed by a counting proxy showing 100 upstream author-feed reads under the
-flag against 38 without it — with all four regression traces PRESERVED, one evidence gap
+flag against 38 without it, with all four regression traces PRESERVED, one evidence gap
 (`just test-wasm` is broken identically on pristine `main`) and one residue note handing the
 feed-wall cursor question to the spec merge.
