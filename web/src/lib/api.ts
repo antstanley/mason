@@ -1,5 +1,5 @@
 import { browser } from "$app/environment";
-import type { ErrorEnvelope, FeedMode, FeedResponse } from "./types";
+import type { ErrorEnvelope, FeedMode, FeedRefresh, FeedResponse } from "./types";
 
 /** Empty → local mode: same-origin fetch, intercepted by the wasm service
  *  worker. Set → server mode: direct CORS call to that mortar instance.
@@ -51,11 +51,14 @@ export type FeedTargetKind = "actor" | "feed";
  *  `FeedTarget` in server/crates/mortar-core/src/feed.rs. */
 export type FeedTarget = { actor: string } | { feed: string };
 
+/** `refresh` last, and a boolean rather than the token: the caller says what it
+ *  wants and this function decides whether the wire carries it. */
 export async function fetchFeed(
   target: FeedTarget,
   cursor?: string | null,
   mode?: FeedMode,
   intent?: FeedIntent,
+  refresh?: boolean,
 ): Promise<FeedResponse> {
   if (localMode && browser && "serviceWorker" in navigator) {
     await swControlsPage();
@@ -70,6 +73,13 @@ export async function fetchFeed(
   if (cursor) params.set("cursor", cursor);
   if (mode) params.set("mode", mode);
   if (intent) params.set("intent", intent);
+  // the cursorless half of the condition mirrors handle_feed, which ignores the
+  // flag when a cursor decodes. Duplicated on purpose: the engine is already
+  // correct without this, but sending a flag mortar would ignore makes the
+  // network tab lie about what a mid-scroll refresh asked for. The literal is
+  // `satisfies FeedRefresh` so renaming the token in mortar, and in the
+  // regenerated contract fixture, fails typechecking here too.
+  if (refresh && !cursor) params.set("refresh", "1" satisfies FeedRefresh);
   const res = await fetch(`${BASE}/api/feed?${params}`);
   if (!res.ok) {
     // in both modes the body is mortar's ErrorEnvelope; a non-JSON body (a

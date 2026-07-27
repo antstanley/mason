@@ -83,6 +83,34 @@ describe("request shaping", () => {
       "/api/feed?feed=at%3A%2F%2Fdid%3Aplc%3Aabc%2Fapp.bsky.feed.generator%2Fhot&cursor=cur1&mode=glaze&intent=freeze",
     );
   });
+
+  it("asks for a refresh on a cursorless request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(okBody, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchFeed({ actor: "demo" }, null, "glaze", "preview", true)).resolves.toEqual({
+      items: [],
+      cursor: null,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/feed?actor=demo&mode=glaze&intent=preview&refresh=1",
+    );
+  });
+
+  it("drops the refresh flag when a cursor rides along", async () => {
+    // handle_feed ignores the flag once a cursor decodes, so putting it on the
+    // wire anyway would make the network tab claim a mid-scroll page asked for
+    // a hundred-author re-read that never happened
+    const fetchMock = vi.fn().mockResolvedValue(new Response(okBody, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchFeed({ actor: "demo" }, "cur1", "glaze", "preview", true)).resolves.toEqual({
+      items: [],
+      cursor: null,
+    });
+    // the whole URL, so `refresh` is absent rather than merely not-first
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/feed?actor=demo&cursor=cur1&mode=glaze&intent=preview",
+    );
+  });
 });
 
 describe("service-worker control race (FE-4)", () => {
