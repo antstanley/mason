@@ -40,6 +40,13 @@ All three bases are fields on `Config` and are overridable, so tests point morta
 at a wiremock server. In server mode they are additionally overridable by
 `APPVIEW_BASE`, `PLC_BASE` and `STREAMPLACE_BASE` environment variables.
 
+Those three are the whole of the server's upstream configuration. It reads two
+more environment variables that are not upstreams and belong here only so the
+list is complete: `PORT`, which is the port it binds and defaults to 8787, and
+`MASON_ALLOWED_ORIGINS` (see [06](06-wire-contract.md)). Anything unparseable
+falls back to the default rather than failing to start, on the same reasoning as
+the query vocabulary: the safe direction is the default one.
+
 `did:web` identities skip plc.directory and read
 `https://<domain>/.well-known/did.json` instead.
 

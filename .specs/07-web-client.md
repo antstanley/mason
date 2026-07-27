@@ -233,6 +233,11 @@ reset(target, mode)
       ├─ adopt page.cursor  (it carries the seed, so the next poll and the
       │                      freeze land on this same warming snapshot)
       ├─ #replace(page.items)     ▸ the wall reflows in place, deduped
+      ├─ initialLoad = false      ▸ once a preview has laid a brick, not at the
+      │                             freeze: this is what takes the wall off the
+      │                             twelve-card skeleton grid and onto the
+      │                             reflowing preview, which is the whole point
+      │                             of warming rather than blocking
       ├─ page.warming && within ceiling ?  sleep(POLL_MS = 350)  : freeze()
       └─ on error: freeze(generation, e), so a real error surfaces properly
       ▼

@@ -172,7 +172,7 @@ Not persisted:
 - Each payload is `{version, entries: [[key, value, expiresUnixMs], …]}`, where
   `version` is `persist::VERSION` (currently 4). A payload written by a different
   version is discarded on import; it is only a cache.
-- `idbSweepStale` deletes the pre-v4 whole-bundle key (`mason-caches-v1`) and any
+- `idbSweepStale` deletes the pre-v4 whole-bundle key (`mortar-caches-v1`) and any
   `mortar-cache:*` key whose cache mortar no longer persists, so a renamed or
   dropped cache does not orphan its key forever.
 

@@ -110,9 +110,11 @@ Local mode is the default and needs no server at all.
                                streams)
 ```
 
-Server mode swaps only the box in the middle. Setting
-`PUBLIC_MASON_SERVER_URL` in `web/.env` makes the same SPA call a native mortar
-over CORS instead of its own service worker:
+Server mode swaps only the box in the middle. Setting the
+`PUBLIC_MASON_SERVER_URL` environment variable, which `just dev-server` does,
+makes the same SPA call a native mortar over CORS instead of its own service
+worker. It is a real environment variable read at build time, not a `.env` file:
+see [07-web-client.md](07-web-client.md).
 
 ```
  browser tab (same SPA) ──CORS GET /api/feed──▶ mortar-server (axum, :8787)

@@ -20,8 +20,11 @@ server/crates/
 Two build modes, one Rust engine. **Local mode (default)**: mortar compiles to
 wasm and runs in a service worker that intercepts `/api/feed`; the browser talks
 directly to the AppView, plc.directory, each PDS, and stream.place. **Server
-mode**: set `PUBLIC_MASON_SERVER_URL` in `web/.env` and the SPA calls a native
-mortar over CORS.
+mode**: set the `PUBLIC_MASON_SERVER_URL` environment variable, which
+`just dev-server` does, and the SPA calls a native mortar over CORS. It is a real
+environment variable read at build time by a vite `define`, not a `.env` file:
+vite's default `envPrefix` is `VITE_`, so a `PUBLIC_`-prefixed name in `web/.env`
+never reaches `import.meta.env` and the SPA quietly stays in local mode.
 
 Two walls, one engine. The default mixes every kind; `?mode=glaze` is the image
 wall, Bluesky media posts only, and the layout picker's glaze option asks for it.

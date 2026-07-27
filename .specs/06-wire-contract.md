@@ -119,6 +119,15 @@ reached mortar: `wasm` (a non-envelope throw, 500) and, in `api.ts`, `unknown`
 and hit the static host). This is why `ErrorEnvelope.error` is typed as a plain
 `string` on the web side while `MortarErrorCode` names only mortar's own five.
 
+`mortar-wasm` carries one more, and it is deliberately outside `MortarErrorCode`:
+if serialising a `FeedResponse` ever fails, the export throws
+`{"error": "internal", "message": …, "status": 500}` rather than a panic that
+would cross the wasm boundary as an unreadable trap. It is not an `AppError`, it
+is not in the fixture, and nothing pins it, because it is unreachable: `serde_json`
+cannot fail on a `FeedResponse`, whose every field is an owned, finite value. It
+is named here so the five-code table is not read as a promise the serializer
+backstop quietly breaks.
+
 ---
 
 ## The two transports

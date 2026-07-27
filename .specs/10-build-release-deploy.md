@@ -375,7 +375,7 @@ runs first (see Local gates above).
 
 ```
 justfile                    every command
-rust-toolchain.toml         channel 1.97.0, wasm32 target
+rust-toolchain.toml         the one Rust pin, plus the wasm32 target
 package.json                the source-of-truth version; changesets scripts
 .changeset/config.json      changelog-github, private packages versioned and tagged
 scripts/sync-version.mjs    propagate the version everywhere

@@ -227,7 +227,14 @@ or its author line.
   two visible controls do the same. Stepping stops at the ends of the laid
   wall; the reader never triggers pagination. A step swaps the whole panel, so
   it keeps focus inside the reader and announces the brick's new position
-  politely.
+  politely. Two mechanisms carry that, and both are load-bearing rather than
+  incidental: the panel scrolls back to its top, because it is the same element
+  across a step and a five-image post would otherwise open the next brick
+  halfway down; and focus is re-homed to the panel whenever a step leaves it
+  outside, which happens when the step disables the control that was focused or
+  crosses into a kind that does not render it. Without the second, focus lands on
+  `body`, outside the dialog, with an inert wall behind it and nothing to tab back
+  into.
 - One video plays at a time, network-wide, unchanged, but the reader must claim
   the player under **its own id** (`reader:<brick.id>`). A card collapses back
   to its poster only when `player.activeId` stops matching its own brick id, so
@@ -441,8 +448,13 @@ what you want:
 | Recent | `mason:feeds` in `localStorage`, most recent first, capped at 12 | The reader has opened a feed before |
 | Search | `app.bsky.unspecced.getPopularFeedGenerators?query=<q>` | The reader types a search term |
 | By creator | `app.bsky.feed.getActorFeeds?actor=<handle>` | The input parses as a handle |
-| Popular | The same popular endpoint with no query, paged by its cursor | Always, as the resting state |
+| Popular | The same popular endpoint with no query | Always, as the resting state |
 | Paste | The value is handed to mortar as `?feed=`, which parses it | The input is a `bsky.app` feed link or an AT-URI |
+
+**All three network questions page**, not only the resting one: whichever of
+search, by creator and popular is showing keeps a `more feeds` control until its
+cursor runs out. The cursor is the picker's own state and never reaches the URL,
+so paging is forgotten the moment the picker closes.
 
 One input serves search, creator and paste: what the reader typed decides which
 question is being asked. That is the same input the handle box takes, and **by
@@ -480,6 +492,7 @@ and the video sources in step (see [06-wire-contract.md](06-wire-contract.md)).
 | A handle with no feeds | "that person has not made any feeds", with a link to lay their wall instead |
 | The AppView unreachable | Recents and the paste box, plus a quiet line saying browsing is unavailable. Paste is the load-bearing path and always works |
 | A pasted value that will not parse | The input says so in place; nothing navigates |
+| More results left | A `more feeds` control under the list, for whichever question is showing. It goes when a page adds nothing, which is how the picker learns the list ended: the upstream cursor is private, so the end is inferred from a page that yielded no new cards rather than announced |
 
 The picker is a dialog in the same language as mason's other overlays:
 `role="dialog"`, `aria-modal="true"`, focus into the input on open, Escape and
