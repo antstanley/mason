@@ -6,6 +6,7 @@
 	import { tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { feedInfo } from '$lib/state/feedinfo.svelte';
+	import { feeds } from '$lib/state/feeds.svelte';
 	import { cleanHandle, lastHandle } from '$lib/state/handle.svelte';
 	import { profile } from '$lib/state/profile.svelte';
 	import Icon from './Icon.svelte';
@@ -174,6 +175,22 @@
 					</a>
 				{/if}
 			</form>
+			<!-- mason's other front door, from a laid wall: this panel is already the
+			     switch-walls affordance, so the feed picker belongs on it rather than
+			     beside it. The panel closes FIRST, which hands focus back to the
+			     switcher's own button: this control unmounts with the panel, and the
+			     picker returns focus to whatever held it, so that has to be something
+			     still on the page. -->
+			<button
+				type="button"
+				onclick={() => {
+					closePanel();
+					feeds.openPicker();
+				}}
+				class="mt-4 inline-flex min-h-11 w-full cursor-pointer items-center justify-center rounded-full border border-ink/15 px-4 text-sm font-semibold transition-colors hover:bg-ink/5 dark:border-chalk/15 dark:hover:bg-chalk/10"
+			>
+				or pick a feed to lay
+			</button>
 		</div>
 	{/if}
 </div>

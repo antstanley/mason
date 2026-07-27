@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { warmFeed } from '$lib/api';
+	import { feeds } from '$lib/state/feeds.svelte';
 	import { cleanHandle, lastHandle } from '$lib/state/handle.svelte';
 	import LandingWall from './LandingWall.svelte';
 
@@ -68,6 +69,23 @@
 			<p class="opacity-75">
 				no login. mason reads your public follows in your own browser, and nowhere else.
 			</p>
+			<!-- the second front door, under the box and beside it as a peer: a
+			     handle assumes its own answer, and this asks a different question.
+			     The picker is a screen held in history state, so it opens over this
+			     page rather than leaving it; the push itself lives in the rune. -->
+			<button
+				type="button"
+				onclick={(event) => {
+					// focus this control before the picker opens, because the picker
+					// hands focus back to whatever held it and a mouse click does not
+					// focus a button in every browser
+					event.currentTarget.focus();
+					feeds.openPicker();
+				}}
+				class="inline-flex min-h-11 cursor-pointer items-center px-2 font-semibold text-brick-post-ink hover:underline dark:text-brick-post"
+			>
+				or pick a feed to lay
+			</button>
 			<a
 				href="/?actor=demo"
 				class="inline-flex min-h-11 items-center px-2 font-semibold text-brick-post-ink hover:underline dark:text-brick-post"

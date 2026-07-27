@@ -501,6 +501,31 @@ test("a glaze card's image anchor reads the brick in place", async ({ page }) =>
 	expect(page.url()).toBe(before);
 });
 
+// The carousel branch's anchor, which is a DIFFERENT element from the one the
+// case above reaches: a post with four or more images becomes an in-card
+// filmstrip and every slide is its own link, while the covered fixture brick
+// carries one image and so takes the single branch. Without this case the strip
+// has no assertion on it at all, and a glaze wall of five-image posts could stop
+// opening the reader with every other case still green.
+test("a glaze card's filmstrip reads the brick from a slide", async ({ page }) => {
+	await laidWall(page);
+	await glazeWall(page);
+	const before = page.url();
+
+	// the strip is what it IS rather than a position: only the carousel branch
+	// renders paging controls, so a card carrying one is a card with four or more
+	// images (fixtures.rs builds five-image posts for exactly this)
+	const strip = cards(page)
+		.filter({ has: page.getByRole("button", { name: "Next image" }) })
+		.first();
+	await expect(strip).toBeVisible();
+
+	await strip.locator("a").first().click();
+
+	await expect(panel(page)).toBeVisible();
+	expect(page.url()).toBe(before);
+});
+
 // One video plays at a time, network-wide, and the reader has to claim the
 // player under an id of its OWN (`reader:<brick.id>`) rather than under the
 // brick's. A card tears its player down when `player.activeId` stops matching

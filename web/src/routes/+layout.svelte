@@ -6,8 +6,10 @@
 	import { localMode } from '$lib/api';
 	import BrickReader from '$lib/components/BrickReader.svelte';
 	import ClientPicker from '$lib/components/ClientPicker.svelte';
+	import FeedPicker from '$lib/components/FeedPicker.svelte';
 	import LayoutPicker from '$lib/components/LayoutPicker.svelte';
 	import SwitchWall from '$lib/components/SwitchWall.svelte';
+	import { feeds } from '$lib/state/feeds.svelte';
 	import { reader } from '$lib/state/reader.svelte';
 
 	let { children } = $props();
@@ -35,7 +37,11 @@
 	// answer here. Page state alone is wider than the reader (see
 	// reader.showing), and a wrapper made inert on a wider condition than the
 	// overlay renders on leaves the wall frozen under nothing at all.
-	const overlayOpen = $derived(reader.isOpen);
+	//
+	// ONE expression covering both overlays, widened rather than replaced: the
+	// reader's disjunct is the same one it has always been, so a feed picker that
+	// went away could not take the reader's inertness with it.
+	const overlayOpen = $derived(reader.isOpen || feeds.isOpen);
 
 	// local mode: the wasm service worker IS the feed server.
 	// Always type module: the wasm-bindgen glue contains `import.meta`,
@@ -166,6 +172,8 @@
 </div>
 
 <!-- OUTSIDE the wrapper above, deliberately: that wrapper is the element made
-     inert, and inert covers every descendant, so a reader mounted inside it
-     would open unfocusable and invisible to assistive tech -->
+     inert, and inert covers every descendant, so an overlay mounted inside it
+     would open unfocusable and invisible to assistive tech. Both overlays sit
+     here, side by side, for that one reason. -->
 <BrickReader />
+<FeedPicker />
