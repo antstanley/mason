@@ -1,6 +1,6 @@
 # 04 - Sources and Moderation
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley
 
 Everything mason reads from the network enters through `sources/`. Each submodule
 reads one upstream and maps it into bricks; `sources/fetch.rs` is the seam the
@@ -31,7 +31,7 @@ or any scoring.
 
 | Source | Base | Endpoints | Bucket |
 |---|---|---|---|
-| Bluesky AppView | `https://public.api.bsky.app` | `app.bsky.actor.getProfile`, `app.bsky.graph.getFollows`, `app.bsky.feed.getAuthorFeed` | `Appview` (rate limited) |
+| Bluesky AppView | `https://public.api.bsky.app` | `app.bsky.actor.getProfile`, `app.bsky.graph.getFollows`, `app.bsky.feed.getAuthorFeed`, `app.bsky.feed.getFeed` | `Appview` (rate limited) |
 | PLC directory | `https://plc.directory` | `GET /<did>` (DID documents) | `Unmetered` |
 | Each author's PDS | resolved per author | `com.atproto.repo.listRecords`, `com.atproto.repo.getRecord`, `com.atproto.sync.getBlob` | `Unmetered` |
 | Streamplace | `https://stream.place` | `place.stream.live.getLiveUsers`, `place.stream.playback.*` | `Unmetered` |
@@ -100,11 +100,26 @@ operator has to reach whoever is generating the traffic.
   included, which the full wall omits), so one request reaches much further back
   and returns far more images than skimming 30 mostly-text posts would.
 
-Both feed reads share one mapping path: drop reposts (`reason != null`), drop
-anything a logged-out viewer must not see, blur the soft-warn tier, then map to
-bricks. A post whose embed is `app.bsky.embed.video#view` becomes a video brick;
-`recordWithMedia` is unwrapped to its media half first; everything else becomes a
-post brick carrying images or an external embed.
+- **`get_feed(feed_uri, cursor, limit)`** pages a feed generator through the
+  AppView and returns `(AuthorYield, Option<String>)`: the mapped bricks and the
+  upstream cursor. It shares the *exact* mapping path with both author-feed
+  reads, which is the whole reason a feed wall inherits moderation, `!warn`
+  blur, video-embed unwrapping and repost dropping without a second
+  implementation of any of them. `getFeed` hydrates its results into the same
+  `PostView` shape `getAuthorFeed` returns, labels included, so the shared
+  mapper needs no branch.
+
+  A 400 or 404 is an unknown or withdrawn feed and becomes `FeedNotFound`. Any
+  other failure is `Upstream`. Unlike an author feed, this is the wall's only
+  source: there is no hundred-author quorum to degrade into, so a failure is
+  the request failing rather than a thin wall.
+
+All three feed reads share one mapping path (`map_feed_page`): drop reposts
+(`reason != null`), drop anything a logged-out viewer must not see, blur the
+soft-warn tier, then map to bricks. A post whose embed is
+`app.bsky.embed.video#view` becomes a video brick; `recordWithMedia` is unwrapped
+to its media half first; everything else becomes a post brick carrying images or
+an external embed.
 
 ### PDS resolution (`sources/pds.rs`)
 
@@ -244,6 +259,16 @@ any value interpolated into a query string, so a handle, DID or cursor containin
 `&`, `#`, `?` or a space cannot rewrite or truncate the upstream query, or poison
 a cache key derived from it.
 
+A `feed` parameter is a third class of untrusted string: it does not reach an
+anchor, it reaches an *upstream query*. `FeedRef::parse` is what vets it. It
+requires the `at://` scheme and the exact `app.bsky.feed.generator` collection,
+or a `bsky.app` feed URL it rebuilds an AT-URI from, and rejects everything else
+as `bad_request` rather than forwarding it. The result is `urlencode`d into the
+`getFeed` query like every other interpolated value, so a reference carrying
+`&` or `#` cannot rewrite the upstream request or poison the cache key derived
+from it. There is no SSRF surface: the host is always the configured AppView
+base, never anything the reference names.
+
 ### Requests mortar itself makes (SSRF)
 
 Both the `did:web` domain and the `serviceEndpoint` come out of an untrusted DID
@@ -298,7 +323,9 @@ a *successful* empty listing ever earns the long negative TTL. See
 server/crates/mortar-core/src/sources/
   mod.rs           the seam's exports: AuthorYield, Follow, StdDocs, LiveStream
   fetch.rs         one fetch-and-cache function per source; the ONLY door algo/ uses
-  bluesky.rs       profile, follows, author feeds, labels, post → brick
+  bluesky.rs       profile, follows, author feeds, feed generator pages, labels,
+                   post → brick
+  feedref.rs       the ?feed= parameter → an AT-URI, or a rejection
   pds.rs           DID document → PDS endpoint, SSRF vetting, blob_url
   standardsite.rs  site.standard.document → BlogBrick, publications, suppression
   streamplace.rs   live list and place.stream.video → VideoBrick, TID timestamps

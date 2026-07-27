@@ -1,6 +1,6 @@
 # 06 - Wire Contract
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley
 
 One endpoint, one response shape, one error shape, spoken over two transports.
 This page defines them and the drift guard that keeps the Rust and TypeScript
@@ -22,19 +22,26 @@ sides in step. The entities on the wire are modelled in
 ## The endpoint
 
 ```
-GET /api/feed?actor=<handle|did>[&cursor=<opaque>][&mode=glaze][&intent=preview|freeze]
+GET /api/feed?(actor=<handle|did>|feed=<at-uri|bsky.app feed url>)
+             [&cursor=<opaque>][&mode=glaze][&intent=preview|freeze]
 ```
 
 | Parameter | Required | Values | Meaning |
 |---|---|---|---|
-| `actor` | yes | a Bluesky handle, a DID, or the literal `demo` | Whose wall to lay |
-| `cursor` | no | opaque base64url of `{seed, offset}` | Where to continue; absent starts a fresh wall |
-| `mode` | no | `glaze` | The image wall; anything else, including absent, is the full wall |
+| `actor` | one of the two | a Bluesky handle, a DID, or the literal `demo` | Whose graph to lay |
+| `feed` | one of the two | a feed generator AT-URI, or a `bsky.app/profile/<actor>/feed/<rkey>` URL | Which feed generator to lay |
+| `cursor` | no | opaque base64url of `{seed, offset}` or `{feed}` | Where to continue; absent starts a fresh wall |
+| `mode` | no | `glaze` | The image wall; it composes with either source |
 | `intent` | no | `preview`, `freeze` | The warm-then-commit first screen; absent is a normal committed page |
 
-Unknown values for `mode` and `intent` fall back to the default rather than
-erroring, so a stray parameter can never break a feed request. A missing `actor`
-is a 400.
+Exactly one of `actor` and `feed` is needed. `feed` wins when both are given,
+because the two name different walls and one of them has to. Neither being
+present is a 400, as a missing `actor` was before.
+
+Unknown values for `mode` and `intent` still fall back to the default rather
+than erroring. `feed` does **not**: it is a structured reference that reaches an
+upstream query, and a value that will not parse is a `bad_request` rather than
+a silent fallback to somebody's graph.
 
 Server mode also serves `GET /api/health`.
 
@@ -81,8 +88,9 @@ One envelope, both modes:
 
 | `error` | HTTP status | Raised when |
 |---|---|---|
-| `bad_request` | 400 | A required parameter is missing |
+| `bad_request` | 400 | Neither `actor` nor `feed` names a wall, or `feed` will not parse |
 | `actor_not_found` | 404 | The AppView 400s or 404s on the actor |
+| `feed_not_found` | 404 | The AppView 400s or 404s on the feed generator |
 | `login_required` | 403 | The wall owner set `!no-unauthenticated` |
 | `upstream` | 502 | An upstream read failed on a load-bearing path |
 
@@ -101,7 +109,7 @@ The service worker adds two out-of-band codes of its own for failures that never
 reached mortar: `wasm` (a non-envelope throw, 500) and, in `api.ts`, `unknown`
 (a non-JSON error body, which in local mode means a request escaped the worker
 and hit the static host). This is why `ErrorEnvelope.error` is typed as a plain
-`string` on the web side while `MortarErrorCode` names only mortar's own four.
+`string` on the web side while `MortarErrorCode` names only mortar's own five.
 
 ---
 
@@ -110,7 +118,7 @@ and hit the static host). This is why `ErrorEnvelope.error` is typed as a plain
 ```
 LOCAL MODE
   page ──fetch("/api/feed?…")──▶ service worker
-                                    │  feed_page(actor, cursor, mode, intent)
+                                    │  feed_page(actor, feed, cursor, mode, intent)
                                     ▼
                                  mortar-wasm
                                     │  Ok  → JSON string  → Response 200
@@ -167,8 +175,9 @@ UPDATE_FIXTURE=1 cargo test -p mortar-core --test contract
 | `bricks.{post,blog,video}.{full,bare}` | Every brick kind, with every optional field present and with none |
 | `pages.{committed,preview,final}` | The three `FeedResponse` shapes |
 | `errors.<code>.{server,wasm}` | Every error code in both envelope forms |
-| `query.mode` / `query.intent` | The query vocabulary, as object keys |
+| `query.mode` / `query.intent` / `query.target` | The query vocabulary, as object keys (`target` holds `actor` and `feed`) |
 | `vocab.videoSource` | `bluesky` / `streamplace`, as object keys |
+| `vocab.hiddenLabels` | The five labels of the hidden tier, as object keys, so the feed picker's client-side copy cannot drift from mortar's |
 
 **Vocabulary rides as object keys, not string values.** `tsc` widens an imported
 JSON file's string values to `string`, but object keys stay literal, so `keyof`
@@ -182,7 +191,7 @@ assert `Equal<keyof typeof contract.errors, MortarErrorCode>` in both directions
   null-versus-absent survive; the literals are checked separately.
 - **Vocabulary** with a bidirectional `Equal<>` between fixture keys and the TS
   literal unions (`Brick["kind"]`, `MortarErrorCode`, `FeedIntent`, `FeedMode`,
-  `VideoBrick["source"]`).
+  `FeedTargetKind`, `VideoBrick["source"]`, `HiddenLabel`).
 - **Field sets** with `Equal<keyof full, keyof Interface>`, which is what catches
   a field mortar gained that `types.ts` does not know about, and renames of
   optional fields, in both directions.
@@ -214,7 +223,7 @@ even without regenerating the contract fixture.
 server/crates/mortar-core/src/model.rs         FeedResponse, Brick and friends
 server/crates/mortar-core/src/error.rs         AppError, ErrorEnvelope, pinned strings
 server/crates/mortar-core/src/mode.rs          Mode::from_query
-server/crates/mortar-core/src/feed.rs          FeedIntent::from_query, PAGE_SIZE
+server/crates/mortar-core/src/feed.rs          FeedTarget::from_query, FeedIntent::from_query, PAGE_SIZE
 server/crates/mortar-core/tests/contract.rs    the fixture generator and pin
 server/crates/mortar-core/tests/fixtures/contract.json
 server/crates/mortar-server/src/routes/        axum wiring, CORS, IntoResponse

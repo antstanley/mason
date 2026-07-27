@@ -24,8 +24,10 @@ can be in. The state machine driving it is in
 
 ## Layouts
 
-One control (`LayoutPicker`) offers three walls. `glaze` is also an algorithm:
-picking it sets `mode=glaze` and re-fetches an images-only wall.
+One control (`LayoutPicker`) offers three views, and all three work on either
+wall source. `glaze` is also an algorithm: picking it sets `mode=glaze`, which
+on a graph wall re-fetches an images-only wall and on a feed wall filters the
+feed's own posts to those carrying an image.
 
 | Layout | Component | Packing |
 |---|---|---|
@@ -304,7 +306,7 @@ on `defaultPrevented` rather than on the listener chain. Together they keep
 | Condition | What the reader sees |
 |---|---|
 | `initialLoad` | A 12-card skeleton grid at the same column count as the real wall |
-| `error` and no items | An error panel: sealed, handle-not-found, or unreachable, each with the right recovery |
+| `error` and no items | An error panel: sealed, handle-not-found, no-such-feed, or unreachable, each with the right recovery |
 | `done` and no items | "this wall has no bricks yet", with a handle box. An empty wall is a site, not a dead end |
 | items present | The wall, plus a sentinel, plus a tail |
 | `error` with items | A retry button: "more bricks did not arrive" |
@@ -316,6 +318,18 @@ Both recoverable errors drop the reader into a handle box, because a wall you
 cannot see is still a door to another one. The typo keeps its text to fix; the
 sealed wall clears it, because there is nothing to correct, only somewhere else
 to go. Both focus and select the input on arrival.
+
+A feed wall changes the chrome, not the wall. `SwitchWall` shows the feed
+generator's avatar and name where it would show the owner's face, and the empty
+state reads "this feed has no bricks yet". Every other state (the skeletons, the
+stall, the ending, the three error panels) is unchanged, and all three views are
+offered.
+
+The fourth panel is the one a feed wall adds, and it deliberately offers neither
+handle box nor retry: a bad feed link is not a mistyped handle, and a retry
+cannot repair a feed that is not there. The way on is the header's switcher,
+which on a feed wall is also the door to the feed picker, plus the demo link
+every panel carries.
 
 ### The scroll pump
 
@@ -357,6 +371,79 @@ freezes it: the wall must stop moving the instant they reach for it.
 | Arrow keys, PageUp/Down, Home, End, Space | A keyboard user has no wheel to reach with |
 | `focusin` anywhere inside the wall | A switch user's way of engaging |
 | `prefers-reduced-motion: reduce` | Freeze before it moves at all: those readers never see the auto-reflow |
+
+---
+
+## The feed picker
+
+A handle assumes its own answer: it asks the reader who they already want to
+read. The feed picker is mason's other front door, and it is a screen rather
+than a field, standing beside the handle box as a peer.
+
+`FeedPicker` is reached two ways: from the landing page, where it sits under the
+handle box, and from `SwitchWall` on a laid wall, which is already the
+switch-walls affordance. Either way it opens over the current content and is held
+in history state (`pushState('', { picker: 'feeds' })`), so the back gesture
+returns the reader to where they were instead of out of mason.
+
+Five ways to reach a feed, because they answer five different states of knowing
+what you want:
+
+| Section | Source | Shown when |
+|---|---|---|
+| Recent | `mason:feeds` in `localStorage`, most recent first, capped at 12 | The reader has opened a feed before |
+| Search | `app.bsky.unspecced.getPopularFeedGenerators?query=<q>` | The reader types a search term |
+| By creator | `app.bsky.feed.getActorFeeds?actor=<handle>` | The input parses as a handle |
+| Popular | The same popular endpoint with no query, paged by its cursor | Always, as the resting state |
+| Paste | The value is handed to mortar as `?feed=`, which parses it | The input is a `bsky.app` feed link or an AT-URI |
+
+One input serves search, creator and paste: what the reader typed decides which
+question is being asked. That is the same input the handle box takes, and **by
+creator is the bridge between the two front doors**: a handle here means "show me
+the feeds this person made" rather than "show me their wall".
+`getActorFeeds` accepts a bare handle, so it costs no resolution hop.
+
+Each result is a card carrying the feed's avatar, its display name, its
+creator's handle, its description clamped to two lines, and its like count
+(hidden at zero, like every tally on the wall). Activating one opens
+`/?feed=<uri>` and writes it to `mason:feeds`.
+
+### The picker reads the AppView directly, and that is chrome rather than moderation
+
+The picker is a directory listing, so it asks the public AppView from the browser
+exactly as `profile` already does for a wall owner's avatar. Content moderation
+stays where it belongs: every brick a chosen feed yields is filtered by mortar
+when the wall is laid.
+
+The picker does owe one check of its own, because a feed generator's own record
+carries labels. A feed whose view or whose creator carries the hidden tier is not
+listed, so mason never advertises a feed it would then refuse to lay properly.
+That puts the hidden-label list on both sides of the wire, which is normally the
+shape of a bug, so it is pinned rather than copied: the contract fixture carries
+`vocab.hiddenLabels` as object keys and `contract-check.ts` asserts the
+TypeScript list equals it, the same mechanism that already keeps the error codes
+and the video sources in step (see [06-wire-contract.md](06-wire-contract.md)).
+
+### States
+
+| Condition | What the reader sees |
+|---|---|
+| Loading | Six card skeletons at the picker's own column count |
+| A search with no results | "no feeds by that name", and the paste hint |
+| A handle with no feeds | "that person has not made any feeds", with a link to lay their wall instead |
+| The AppView unreachable | Recents and the paste box, plus a quiet line saying browsing is unavailable. Paste is the load-bearing path and always works |
+| A pasted value that will not parse | The input says so in place; nothing navigates |
+
+The picker is a dialog in the same language as mason's other overlays:
+`role="dialog"`, `aria-modal="true"`, focus into the input on open, Escape and
+back to close, `inert` behind it, and the results as a list so a screen reader is
+told how many there are. It mounts as a sibling of the layout's content wrapper,
+beside the brick reader and outside the subtree it dims, and it shares that
+wrapper's `inert` condition rather than adding a second one: the wrapper is
+inert while **either** overlay is open. Opening one closes the other, because
+the picker is a landing surface and the reader is a wall surface, and neither
+has anything to say over the top of the other. Touch targets stay at 44px and
+the cards' hover lift is `motion-safe:`, like a brick's.
 
 ---
 
@@ -415,6 +502,8 @@ web/src/lib/
     BrickReader.svelte       one brick at reading width, over the wall
     VideoPlayer.svelte       the ONE sanctioned .play()
     LandingWall.svelte       the inert demo wall behind the handle form
+    FeedPicker.svelte        the second front door: browse, search, paste
+    FeedCard.svelte          one feed generator as a result
     HandleForm.svelte        the front door
     SwitchWall.svelte        the owner's face as a wall switcher
     LayoutPicker.svelte      bento / masonry / glaze

@@ -1,6 +1,6 @@
 # Change: Lay a Bluesky feed as a wall
 
-**Status:** Proposed · **Date:** 2026-07-26 · **Owner:** Ant Stanley · **Target:** Repo-wide
+**Status:** Merged · **Date:** 2026-07-26 · **Merged:** 2026-07-27 · **Owner:** Ant Stanley · **Target:** Repo-wide
 
 mason lays exactly one algorithm: a sampled follow graph, ranked by grout and
 laid by the mixer. This change splits a wall into a **source** and a **view**,
@@ -48,16 +48,16 @@ screen beside the handle box rather than a second input on it.
 
 | Canonical page | Nature of change |
 |---|---|
-| [`.specs/00-overview.md`](../00-overview.md) | Goals, system shape, scope summary |
-| [`.specs/01-domain-model.md`](../01-domain-model.md) | A `FeedRef` entity; the `Cursor` entity gains a second shape; the query-pattern table |
-| [`.specs/02-feed-engine.md`](../02-feed-engine.md) | `handle_feed` gains `feed`; a feed wall's request flow, which builds no snapshot |
-| [`.specs/03-grout-and-mixer.md`](../03-grout-and-mixer.md) | Neither module runs for a feed wall |
-| [`.specs/04-sources-and-moderation.md`](../04-sources-and-moderation.md) | `getFeed` joins the Bluesky source; the feed reference is vetted like any untrusted string |
-| [`.specs/05-caching-and-persistence.md`](../05-caching-and-persistence.md) | A `feed_pages` cache, not persisted |
-| [`.specs/06-wire-contract.md`](../06-wire-contract.md) | The `feed` parameter, an optional `actor`, `feed_not_found`, two cursor shapes |
-| [`.specs/07-web-client.md`](../07-web-client.md) | `?feed=` as a second routing surface; feed identity in the header; a fourth error state |
-| [`.specs/08-wall-and-bricks.md`](../08-wall-and-bricks.md) | The feed box on the landing form; what a feed wall's chrome shows |
-| [`.specs/canonical-types.schema.json`](../canonical-types.schema.json) | `FeedRef` and `HiddenLabel` added; `CursorPayload` and `MortarErrorCode` replaced |
+| [`.specs/00-overview.md`](../../00-overview.md) | Goals, system shape, scope summary |
+| [`.specs/01-domain-model.md`](../../01-domain-model.md) | A `FeedRef` entity; the `Cursor` entity gains a second shape; the query-pattern table |
+| [`.specs/02-feed-engine.md`](../../02-feed-engine.md) | `handle_feed` gains `feed`; a feed wall's request flow, which builds no snapshot |
+| [`.specs/03-grout-and-mixer.md`](../../03-grout-and-mixer.md) | Neither module runs for a feed wall |
+| [`.specs/04-sources-and-moderation.md`](../../04-sources-and-moderation.md) | `getFeed` joins the Bluesky source; the feed reference is vetted like any untrusted string |
+| [`.specs/05-caching-and-persistence.md`](../../05-caching-and-persistence.md) | A `feed_pages` cache, not persisted |
+| [`.specs/06-wire-contract.md`](../../06-wire-contract.md) | The `feed` parameter, an optional `actor`, `feed_not_found`, two cursor shapes |
+| [`.specs/07-web-client.md`](../../07-web-client.md) | `?feed=` as a second routing surface; feed identity in the header; a fourth error state |
+| [`.specs/08-wall-and-bricks.md`](../../08-wall-and-bricks.md) | The feed box on the landing form; what a feed wall's chrome shows |
+| [`.specs/canonical-types.schema.json`](../../canonical-types.schema.json) | `FeedRef` and `HiddenLabel` added; `CursorPayload` and `MortarErrorCode` replaced |
 
 ---
 
@@ -367,6 +367,13 @@ Add a row, and extend the `lastHandle` row's storage note:
 > | `state/feedinfo.svelte.ts` | `feedInfo` | The feed generator's name, avatar and creator, for the header | none |
 > | `state/handle.svelte.ts` | `lastHandle` | The last handle typed, and the last feeds opened | `mason:handle`, `mason:feeds` |
 
+**Merged differently, 2026-07-27.** The second row above attributes `mason:feeds`
+to `state/handle.svelte.ts`, and the recents list did not land there: it lives in
+`web/src/lib/state/feeds.svelte.ts` beside the picker's own queries. The merged
+table therefore gives the new module a row of its own
+(`| state/feeds.svelte.ts | feeds | The feeds opened recently, most recent first | mason:feeds |`)
+and leaves `lastHandle` carrying `mason:handle` alone.
+
 And add to the paragraphs beneath:
 
 > - **`feedInfo` exists for the same reason `profile` does.** The feed never
@@ -523,6 +530,27 @@ That block enumerates every component by name, so the two new ones join it after
 ---
 
 ## Type changes
+
+**Merged with two corrections, 2026-07-27.** The `CursorPayload` fragment below
+is internally inconsistent and the shipped engine is on the right side of it, so
+`.specs/canonical-types.schema.json` carries a corrected version rather than this
+one. The fragment is kept here unedited, as dated history of what was proposed:
+
+- **`"additionalProperties": false` is wrong on both shapes, and on the graph
+  shape it contradicts implementation note 6 above and the whole
+  backward-compatibility guarantee.** `Cursor` is an untagged serde enum with
+  `deny_unknown_fields` on neither variant, precisely so a cursor issued before
+  the `snapshot` key was dropped keeps its seed and offset across the deploy.
+  Both shapes were merged open, which is also what
+  `a_cursor_carrying_the_removed_snapshot_key_still_decodes_to_its_seed_and_offset`
+  pins. The cost is one ambiguity the merged def names in place: a payload
+  carrying `feed` *and* `seed` *and* `offset` satisfies both open branches and so
+  fails the `oneOf`, while serde resolves it by declared order to `Feed`. mason
+  emits no such payload, and an attacker-written one decodes to a feed cursor.
+- **`"minLength": 1` on the feed string describes something the engine does not
+  enforce.** `{"feed":""}` decodes to `Cursor::Feed` today and degrades to the
+  feed's head, which is the same fresh wall a garbage cursor gets. The merged def
+  drops the constraint and says why.
 
 ```json
 {
@@ -832,7 +860,7 @@ one rule about what happens when both could be open (the picker is a landing-pag
 surface and the reader is a wall surface, so the simple answer is that opening
 either closes the other).
 
-[`2026-07-26-refresh_the_wall.md`](2026-07-26-refresh_the_wall.md) names its own
+[`2026-07-26-refresh_the_wall.md`](../2026-07-26-refresh_the_wall.md) names its own
 half of the feed interaction: `refresh` over a feed wall bypasses the
 `feed_pages` entry rather than the author-feed caches.
 

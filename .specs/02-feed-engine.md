@@ -1,6 +1,6 @@
 # 02 - Feed Engine
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley
 
 This page covers `mortar-core`: the crate that turns a handle into pages of
 bricks. Scoring and mixing are in [03-grout-and-mixer.md](03-grout-and-mixer.md);
@@ -32,7 +32,7 @@ parsing (`sources/`), or presentation. It never renders and never stores.
 ```rust
 pub async fn handle_feed(
     state: &Arc<AppState>,
-    actor: &str,
+    target: FeedTarget<'_>,
     cursor: Option<&str>,
     mode: Mode,
     intent: FeedIntent,
@@ -41,7 +41,12 @@ pub async fn handle_feed(
 
 Both fronts are thin wrappers around it. `mortar-server`'s axum handler parses
 the query string into these arguments; `mortar-wasm`'s `feed_page` does the same
-from JS strings. Page size is a constant: `PAGE_SIZE = 24`.
+from JS strings.
+
+`FeedTarget` is `Actor(&str)` or `Feed(&str)`, built by each front from the
+query string: `feed` wins when both parameters are present, and neither being
+present is a `bad_request`. Page size is a constant for both:
+`PAGE_SIZE = 24`.
 
 ### Modes
 
@@ -70,9 +75,10 @@ server mode still opens on a proper mix rather than on nothing but posts.
 ### Request flow
 
 ```
-handle_feed(actor, cursor, mode, intent)
+handle_feed(Actor(actor), cursor, mode, intent)
   │
-  ├─ decode cursor ──▶ Some{seed, offset} | None (garbage decodes to None)
+  ├─ decode cursor ──▶ Some{seed, offset} | None (garbage decodes to None, and
+  │                                               a feed cursor is treated as one)
   │
   ├─ actor == "demo" ? ──▶ fixture page from compiled-in bricks, return
   │
@@ -90,6 +96,74 @@ handle_feed(actor, cursor, mode, intent)
 
 A preview's cursor points at the **current** screen (offset 0), not the next
 page, so the freeze that follows commits from there.
+
+---
+
+## A feed wall
+
+A feed generator is an algorithm somebody else published, and mason's job on a
+feed wall is to lay it, not to re-rank it. So a feed wall skips almost the whole
+engine: no snapshot, no pool, no admission caps, no cohort, no extension waves,
+no grout and no mixer.
+
+```
+handle_feed(Feed(ref), cursor, mode, intent)
+  │
+  ├─ FeedRef::parse(ref) ──▶ AtUri  |  Err(BadRequest)
+  │     a bsky.app feed URL resolves its profile segment to a DID first
+  │
+  ├─ decode cursor ──▶ Some{feed} | None   (a graph cursor here decodes to None:
+  │                                         a fresh wall, not an error)
+  ├─ feed_page_cached(uri, upstream cursor)
+  │     ──▶ (bricks, next upstream cursor)  |  Err(FeedNotFound | Upstream)
+  │
+  ├─ Mode::Glaze ? ──▶ keep only is_image_post()   (and lay every survivor)
+  ├─ Mode::Wall  ? ──▶ truncate to PAGE_SIZE
+  │
+  └─ intent == Preview ? {items, cursor: the INCOMING cursor, warming: false}
+                       : {items, cursor: next.map(encode)}
+```
+
+Four consequences, and each one is the point:
+
+- **There is nothing to warm.** One AppView call answers a page, so a preview
+  reports itself already settled and echoes the cursor it was given, exactly as
+  the demo wall does. The client freezes on its first poll, and the 60 second
+  `feed_pages` cache makes the freeze that follows a cache hit rather than a
+  second round trip. What it echoes is the position it actually read, re-encoded
+  rather than copied from the request, so a graph cursor handed to a feed wall
+  is dropped here instead of being returned as though it meant something; for a
+  feed cursor the two are byte identical.
+- **The page size follows the view, because glaze's filter is aggressive.** The
+  mixed views ask for `limit = PAGE_SIZE` and may come back a few short, since
+  reposts and moderated posts are dropped after the request; serving short is
+  already normal and the pump retries. Glaze asks for `limit = 100`
+  (`getFeed`'s ceiling) and lays **every** image post that survives, not the
+  first `PAGE_SIZE` of them. Most posts in a general feed carry no image, so
+  asking for 24 and filtering would lay three or four bricks per network call
+  and spend a dozen calls filling one screen. Laying all of them rather than
+  truncating is not an optimisation but a correctness requirement: there is no
+  pool to hold a remainder in, and the cursor mason hands back belongs to the
+  call that fetched them, so a truncated page throws the rest away.
+- **The wall ends when the feed does.** `getFeed` returning no cursor is the
+  whole end condition. There is no `graph_spent`, no `has_more()` and no pool
+  to drain.
+- **Only posts and Bluesky videos can appear.** A feed generator returns post
+  URIs, so blogs and Streamplace bricks are structurally absent from a feed
+  wall. The mix ratio has nothing to balance.
+
+**All three views work on a feed wall, and glaze means something different on
+each source.** A view is the reader's choice about the wall in front of them, so
+it does not depend on where the bricks came from:
+
+| View | Graph wall | Feed wall |
+|---|---|---|
+| Bento, Masonry | Presentation only; one mixed wall packed two ways | Presentation only; one feed packed two ways |
+| Glaze | `Mode::Glaze` re-reads each author deep (`posts_with_media`, 100) and admits image posts alone | `Mode::Glaze` filters the feed's own posts to those carrying an image |
+
+One `mode` value carries both, because `Mode` selects kinds and never a source.
+The layout picker therefore needs no new state, no fourth option and no disabled
+cases: three views, always, whichever door the reader came in through.
 
 ---
 
@@ -113,6 +187,15 @@ The failure direction depends on what is already known:
 
 A flaky profile read must never seal a wall by accident, but an unresolvable
 handle has no wall to lay either way.
+
+A feed wall has no owner to gate. `!no-unauthenticated` is a request about a
+person's own social graph being put on display; a feed generator is a published
+service, and the feed's creator has not asked anybody not to read it. Individual
+posts and their authors are still filtered: a feed wall runs the same post
+mapper as an author feed, which drops a hidden or opted-out author's posts and
+blurs the `!warn` tier (see [04](04-sources-and-moderation.md)). That per-post
+filter is complete coverage on a feed wall, where the cohort filter has nothing
+to do, because a feed cannot yield a blog or a stream.
 
 ---
 

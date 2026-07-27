@@ -1,6 +1,6 @@
 # 03 - Grout and the Mixer
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley
 
 Two pure modules decide what the wall looks like. `algo/score.rs` computes
 **grout**, a brick's rank within its own kind. `algo/mix.rs` lays bricks one at a
@@ -22,6 +22,9 @@ are exact. The engine that calls them is described in
 
 The mixer does **not** own: admission (that is the snapshot's), freshness
 enforcement at the door (also the snapshot's), or any notion of the reader.
+Neither module runs for a feed wall. A feed generator publishes an order and
+mason lays it in that order; re-ranking somebody else's algorithm by grout would
+produce a wall that is neither theirs nor mason's.
 
 ---
 

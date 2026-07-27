@@ -1,6 +1,6 @@
 # 05 - Caching and Persistence
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley
 
 mason has no database. All state is in-memory behind hand-rolled TTL caches,
 because the same engine has to run inside a service worker that a browser may
@@ -76,6 +76,7 @@ just a cache warmer.
 | `activity` | `activity_key(viewer, mode)` | `Vec<String>` (yielding authors, max 300) | 24 h | 1 000 | yes |
 | `live` | the constant `0u8` | `Vec<LiveStream>` | 60 s | 1 | **no** |
 | `snapshots` | `snapshot_id` | `Arc<Snapshot>` | 30 min | 500 | **no** |
+| `feed_pages` | `<feed uri>\u{1f}<limit>\u{1f}<upstream cursor>` | `Arc<AuthorYield>` plus the next cursor | 60 s | 500 | **no** |
 
 Three shapes of TTL, each with a reason:
 
@@ -97,6 +98,18 @@ filter happens downstream.
 `author_feed` and `image_feed` are kept apart deliberately: the two walls read the
 same author differently (`posts_no_replies&limit=30` versus
 `posts_with_media&limit=100`), and one cache would let each clobber the other's.
+`feed_pages` solves the same problem inside one cache by carrying the limit in
+its key: the mixed views ask a generator for `PAGE_SIZE` and glaze asks for 100,
+so a key of (uri, cursor) alone would serve a glaze request the 24-item page a
+mixed request cached a moment earlier and the image wall would silently run a
+quarter as deep.
+
+A feed page is a ranked view with a deadline, like the live list, so it is
+cached for a minute and never persisted. Sixty seconds is enough to make the
+preview-then-freeze pair one network read and to survive a back/forward, and
+short enough that reopening a feed wall shows the feed's current head. A
+persisted feed page would be laid hours later as though it were fresh ranking,
+which is exactly the lie the persistence layer exists to avoid.
 
 ---
 
@@ -137,6 +150,9 @@ Not persisted:
   it.
 - **Snapshots.** They hold locks and in-flight state, and the seed-carrying cursor
   already rebuilds them deterministically from the warm caches above.
+- **Feed pages.** Somebody else's ranking, sixty seconds from being stale, and
+  one call rebuilds it. `feed_pages` is deliberately absent from
+  `persist::CACHE_NAMES`, so no exporter can reach it by name.
 
 ### Storage layout
 
