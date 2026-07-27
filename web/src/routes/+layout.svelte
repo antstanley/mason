@@ -8,6 +8,7 @@
 	import ClientPicker from '$lib/components/ClientPicker.svelte';
 	import FeedPicker from '$lib/components/FeedPicker.svelte';
 	import LayoutPicker from '$lib/components/LayoutPicker.svelte';
+	import RefreshWall from '$lib/components/RefreshWall.svelte';
 	import SwitchWall from '$lib/components/SwitchWall.svelte';
 	import { feeds } from '$lib/state/feeds.svelte';
 	import { reader } from '$lib/state/reader.svelte';
@@ -156,9 +157,16 @@
 				mason&nbsp;<span aria-hidden="true">🧱</span>
 			</a>
 			<!-- one line, always: the bar never wraps on mobile (nowrap), so every
-			     control has to earn its width at 375px -->
-			<div class="flex flex-nowrap items-center justify-between gap-2 text-sm sm:gap-3 md:flex-wrap md:justify-end">
+			     control has to earn its width at 375px. A fourth control arrived
+			     (RefreshWall) and the three that were here spent 320 of the 343px a
+			     375px viewport leaves inside the bar's padding, so the gap pays part
+			     of its rent: gap-1 below sm, where the four controls are four
+			     different shapes and do not need 8px to be told apart. -->
+			<div class="flex flex-nowrap items-center justify-between gap-1 text-sm sm:gap-3 md:flex-wrap md:justify-end">
 				<LayoutPicker />
+				<!-- lay this wall again, in place. Icon-only, because this row never
+				     wraps and the three controls beside it already spend 375px -->
+				<RefreshWall />
 				<ClientPicker />
 				<!-- both parameters, because the switcher names the wall that is laid:
 				     passing only the actor made a feed wall's button read "@" with an
