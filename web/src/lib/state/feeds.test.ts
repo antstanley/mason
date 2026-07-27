@@ -14,6 +14,7 @@ import {
   FeedsState,
   HIDDEN_LABELS,
   MAX_RECENT_FEEDS,
+  UNLAYABLE_FEEDS,
   type FeedListing,
 } from "./feeds.svelte";
 
@@ -444,6 +445,15 @@ describe("the hidden tier", () => {
     expect(picker.results.map((f) => f.uri)).toEqual(["at://ok"]);
   });
 
+  it("lists a feed whose displayName is absent, falling back to its rkey", async () => {
+    fetchMock.mockResolvedValue(
+      answer([view({ displayName: undefined, uri: "at://did:plc:x/app.bsky.feed.generator/hot" })]),
+    );
+    const picker = new FeedsState();
+    await picker.browse();
+    expect(picker.results.map((f) => f.name)).toEqual(["hot"]);
+  });
+
   it("lists a feed carrying the warn tier, which mortar blurs rather than hides", async () => {
     fetchMock.mockResolvedValue(answer([view({ labels: [{ val: "!warn" }] })]));
     const picker = new FeedsState();
@@ -543,5 +553,157 @@ describe("the singleton", () => {
     expect(feeds.question).toBe("popular");
     expect(feeds.loading).toBe(false);
     expect(feeds.browseUnavailable).toBe(false);
+  });
+});
+
+describe("feeds mason cannot lay a wall from", () => {
+  // One case per entry, driven off the module's own list rather than a retyped
+  // copy, for the same reason the hidden tier is: an entry added there gets a
+  // case here for free, and one removed cannot leave a stale case asserting a
+  // feed stays hidden when it no longer is.
+  const denied = UNLAYABLE_FEEDS.map((f) => [f.name, f.creator ?? "anybody.test"] as const);
+
+  it("has one case per denied feed", () => {
+    expect(denied).toHaveLength(11);
+  });
+
+  it.each(denied)("does not list %s by @%s", async (name, creator) => {
+    fetchMock.mockResolvedValue(
+      answer([
+        view({ displayName: name, creator: { handle: creator }, uri: "at://denied" }),
+        view({ uri: "at://ok" }),
+      ]),
+    );
+    const picker = new FeedsState();
+
+    await picker.browse();
+
+    // getFeed on these answers 502 or 401 with no viewer, so listing one
+    // promises a wall that cannot be laid
+    expect(picker.results.map((f) => f.uri)).toEqual(["at://ok"]);
+  });
+
+  it("keeps bsky.app's Discover, which is whats-hot and the best wall in the list", async () => {
+    // the load-bearing half of the creator field: skyfeed's Discover is denied
+    // and bsky.app's is not, and a name-only rule would take both
+    fetchMock.mockResolvedValue(
+      answer([
+        view({ displayName: "Discover", creator: { handle: "skyfeed.xyz" }, uri: "at://sky" }),
+        view({ displayName: "Discover", creator: { handle: "bsky.app" }, uri: "at://hot" }),
+      ]),
+    );
+    const picker = new FeedsState();
+
+    await picker.browse();
+
+    expect(picker.results.map((f) => f.uri)).toEqual(["at://hot"]);
+  });
+
+  it("denies a name-only entry whoever published it", async () => {
+    // the popular list really does carry two "Mutuals", bsky.app's and
+    // skyfeed.xyz's, which is why these entries carry no creator
+    fetchMock.mockResolvedValue(
+      answer([
+        view({ displayName: "Mutuals", creator: { handle: "bsky.app" }, uri: "at://a" }),
+        view({ displayName: "Mutuals", creator: { handle: "skyfeed.xyz" }, uri: "at://b" }),
+        view({ displayName: "Mutuals", creator: undefined, uri: "at://c" }),
+        view({ uri: "at://ok" }),
+      ]),
+    );
+    const picker = new FeedsState();
+
+    await picker.browse();
+
+    expect(picker.results.map((f) => f.uri)).toEqual(["at://ok"]);
+  });
+
+  it("keeps a creator-pinned name when somebody else published it", async () => {
+    fetchMock.mockResolvedValue(
+      answer([view({ displayName: "Teams", creator: { handle: "someone.else" }, uri: "at://ok" })]),
+    );
+    const picker = new FeedsState();
+    await picker.browse();
+    expect(picker.results.map((f) => f.uri)).toEqual(["at://ok"]);
+  });
+
+  it("matches however the name is cased or padded, since it is free text", async () => {
+    fetchMock.mockResolvedValue(
+      answer([
+        view({ displayName: "MUTUALS", uri: "at://shout" }),
+        view({ displayName: "  Quiet Posters  ", uri: "at://padded" }),
+        view({ displayName: "tHe 'gRaM", uri: "at://mixed" }),
+        view({ displayName: "Teams", creator: { handle: "  RETR0.ID " }, uri: "at://creator" }),
+        view({ uri: "at://ok" }),
+      ]),
+    );
+    const picker = new FeedsState();
+
+    await picker.browse();
+
+    expect(picker.results.map((f) => f.uri)).toEqual(["at://ok"]);
+  });
+
+  it("keeps a feed whose name merely contains one, rather than matching loosely", async () => {
+    fetchMock.mockResolvedValue(
+      answer([
+        view({ displayName: "Mutuals and more", uri: "at://more" }),
+        view({ displayName: "Not For You", uri: "at://not" }),
+        view({ displayName: "ClaraGram", uri: "at://clara" }),
+        view({
+          displayName: "Discover Art!",
+          creator: { handle: "davis.social" },
+          uri: "at://art",
+        }),
+      ]),
+    );
+    const picker = new FeedsState();
+
+    await picker.browse();
+
+    expect(picker.results.map((f) => f.uri)).toEqual([
+      "at://more",
+      "at://not",
+      "at://clara",
+      "at://art",
+    ]);
+  });
+
+  it("applies to a search and to a creator's own list, not only to browse", async () => {
+    fetchMock.mockResolvedValue(
+      answer([view({ displayName: "Mentions", uri: "at://denied" }), view({ uri: "at://ok" })]),
+    );
+    const picker = new FeedsState();
+
+    await picker.search("mentions");
+    expect(picker.results.map((f) => f.uri)).toEqual(["at://ok"]);
+
+    await picker.byCreator("alice.test");
+    expect(picker.results.map((f) => f.uri)).toEqual(["at://ok"]);
+  });
+
+  it("drops one already sitting in recents, which is the card most likely tapped", () => {
+    // a feed opened before it was denied is already in somebody's mason:feeds
+    stored.set(
+      STORAGE_KEY,
+      JSON.stringify([
+        { ...feedListing("at://viewer", "For You"), creator: "spacecowboy17.bsky.social" },
+        { ...feedListing("at://pinned", "Best of Follows"), creator: "bsky.app" },
+        feedListing("at://ok", "Science"),
+      ]),
+    );
+
+    expect(new FeedsState().recent.map((f) => f.uri)).toEqual(["at://ok"]);
+  });
+
+  it("leaves the stored list alone, so undenying a feed brings its card back", () => {
+    const raw = JSON.stringify([
+      { ...feedListing("at://viewer", "For You"), creator: "bsky.app" },
+      feedListing("at://ok", "Science"),
+    ]);
+    stored.set(STORAGE_KEY, raw);
+
+    expect(new FeedsState().recent.map((f) => f.uri)).toEqual(["at://ok"]);
+    // filtered on the way out, not deleted on the way in
+    expect(stored.get(STORAGE_KEY)).toBe(raw);
   });
 });

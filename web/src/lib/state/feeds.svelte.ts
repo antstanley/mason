@@ -69,6 +69,84 @@ export const HIDDEN_LABELS: Record<HiddenLabel, true> = {
   "graphic-media": true,
 };
 
+/** One feed the picker must not offer. A bare `name` denies it whoever published
+ *  it; a `creator` alongside denies that one publisher's copy alone. */
+interface UnlayableFeed {
+  name: string;
+  creator?: string;
+}
+
+/** Feeds the picker must not offer, because tapping one does not give a wall.
+ *
+ *  Almost all of them rank by *who is asking*: your mutuals, your mentions, the
+ *  people you follow who post rarely. mason is logged out by construction, so
+ *  there is no viewer for them to be about. Listing a door mason then holds shut
+ *  is the same mistake the hidden-tier filter above exists to prevent, so it is
+ *  fixed in the same place.
+ *
+ *  Measured against the public AppView on 2026-07-27, not assumed. `getFeed`
+ *  with no viewer answers **502 InternalServerError** for most of them and
+ *  **401 AuthRequiredError** for skyfeed's Discover. Neither is a 404, so mortar
+ *  classifies both `upstream` and the reader gets "the wall wouldn't load" for a
+ *  feed that was never layable.
+ *
+ *  **`Teams` is the exception and is here for a different reason**, recorded
+ *  rather than smoothed over: it answers 200, but with a single brick logged
+ *  out. That is a wall in name only, and a card promising one is worse than no
+ *  card. If it ever fills out logged out, this entry is the thing to remove.
+ *
+ *  **Keyed by name rather than AT-URI**, which is the opposite of what this file
+ *  does everywhere else and needs its reason on the record. The same
+ *  viewer-shaped feed ships from several publishers: the popular list carries
+ *  two "Mutuals" (bsky.app's and skyfeed.xyz's), and its "For You" is
+ *  spacecowboy17's rather than Bluesky's own. A URI denylist would hide one
+ *  copy, leave the rest broken in the list, and need a new entry every time
+ *  somebody published another. The name is what identifies the *idea*, and the
+ *  idea is what cannot work logged out.
+ *
+ *  **The creator field is what keeps that from overreaching, and it is
+ *  load-bearing.** "Discover" is skyfeed's auth-gated feed and it is also
+ *  `bsky.app`'s `whats-hot`, which answers 200 and is the single most useful
+ *  wall in the list. Denying the name alone would hide the best feed mason has.
+ *  So a name is only ever denied outright when the name itself describes the
+ *  viewer-shaped idea; anything a working feed could plausibly also be called is
+ *  pinned to its publisher.
+ *
+ *  The residual cost is accepted rather than overlooked: a working third-party
+ *  feed genuinely called "Mentions" would be hidden from browse and search. It
+ *  stays reachable by paste, which is the load-bearing path.
+ *
+ *  Compared case-folded and trimmed, because both fields are free text.
+ *
+ *  Exported so the tests drive one case per entry off this value rather than a
+ *  retyped copy, the way the hidden tier above is: an entry added here gets its
+ *  case for free, and one removed cannot leave a stale case behind. */
+export const UNLAYABLE_FEEDS: readonly UnlayableFeed[] = [
+  // viewer-shaped by name, whoever published them
+  { name: "for you" },
+  { name: "popular with friends" },
+  { name: "mutuals" },
+  { name: "quiet posters" },
+  { name: "mentions" },
+  { name: "only posts" },
+  { name: "the 'gram" },
+  // one publisher's copy only, because the name alone is not a safe signal
+  { name: "discover", creator: "skyfeed.xyz" },
+  { name: "latest from follows", creator: "why.bsky.world" },
+  { name: "teams", creator: "retr0.id" },
+  { name: "best of follows", creator: "bsky.app" },
+];
+
+/** Whether this feed is one mason cannot lay a wall from logged out. */
+function unlayable(name: string | null | undefined, creator: string | null | undefined): boolean {
+  if (name === null || name === undefined) return false;
+  const wanted = name.trim().toLowerCase();
+  const by = creator?.trim().toLowerCase();
+  return UNLAYABLE_FEEDS.some(
+    (feed) => feed.name === wanted && (feed.creator === undefined || feed.creator === by),
+  );
+}
+
 /** Which question the picker is answering. One at a time, because the picker
  *  shows one list of results and what the reader typed decides which question
  *  is being asked; an answer replaces whatever was showing rather than landing
@@ -140,15 +218,24 @@ function hidden(labels: Label[] | undefined): boolean {
 
 /** One generator view as a listing, or null when the picker must not list it.
  *
- *  Two reasons not to. A view with no uri names no feed, so there is nothing to
+ *  Three reasons not to. A view with no uri names no feed, so there is nothing to
  *  open. A view carrying the hidden tier, on the feed's own record OR on its
  *  creator's, is a feed mason would refuse to lay brick by brick once the wall
  *  was asked for, and advertising it here would be mason recommending a door it
- *  then holds shut. */
+ *  then holds shut. A view whose ranking is about a viewer mason does not have
+ *  cannot be laid at all (`UNLAYABLE_FEEDS` above), which is the same mistake
+ *  reached from the other end.
+ *
+ *  All three are applied here rather than per question, so browse, search and a
+ *  creator's own list cannot disagree about what mason will show. */
 function listing(view: GeneratorView): FeedListing | null {
   const uri = view.uri;
   if (!uri) return null;
   if (hidden(view.labels) || hidden(view.creator?.labels)) return null;
+  // the rkey fallback is deliberately not checked: a feed published with no
+  // display name is not one of these, and rkeys like `with-friends` would
+  // otherwise never match anyway
+  if (unlayable(view.displayName, view.creator?.handle)) return null;
   return {
     uri,
     name: view.displayName || feedRkey(uri),
@@ -166,12 +253,22 @@ function listing(view: GeneratorView): FeedListing | null {
  *
  *  Applied on the way in from storage as well as on every open: `mason:feeds` is
  *  a string a reader can edit, so its length and its contents are the picker's
- *  problem rather than a past version's promise. */
+ *  problem rather than a past version's promise.
+ *
+ *  `UNLAYABLE_FEEDS` is applied here too, and this is the only place recents
+ *  meet it. A feed opened before it was denied, or before mason knew it could
+ *  not be laid, is already sitting in somebody's `mason:feeds`, and a recent
+ *  card is the one a reader is most likely to tap. Filtering on the way out
+ *  rather than deleting on the way in means the stored list is left alone: if an
+ *  entry here turns out to be wrong, or a feed starts working logged out,
+ *  removing it from the list above brings the card straight back rather than
+ *  asking a reader to find the feed again. */
 function ordered(feeds: FeedListing[]): FeedListing[] {
   const seen = new Set<string>();
   const kept: FeedListing[] = [];
   for (const feed of feeds) {
     if (seen.has(feed.uri)) continue;
+    if (unlayable(feed.name, feed.creator)) continue;
     seen.add(feed.uri);
     kept.push(feed);
     if (kept.length === MAX_RECENT_FEEDS) break;
