@@ -231,6 +231,12 @@ export class FeedState {
       // host and 404s with a non-JSON error doc (code "unknown"), which must not
       // be mistaken for a missing handle.
       this.error = "handle-not-found";
+    } else if (e instanceof FeedError && e.code === ("feed_not_found" satisfies MortarErrorCode)) {
+      // a reference naming no generator mortar can page: unknown, withdrawn, or
+      // mistyped. It carries its own code precisely so it cannot land in the
+      // branch above, which hands back a handle box to fix a handle the reader
+      // never typed.
+      this.error = "feed-not-found";
     } else {
       this.error = "feed-unavailable";
     }

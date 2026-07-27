@@ -1,15 +1,20 @@
 <script lang="ts">
-	// The wall owner's face doubles as a switcher. Clicking it does NOT leave the
-	// current wall; it drops a small form below the button. Nothing re-renders
-	// until a DIFFERENT handle is submitted, so opening the panel and thinking
-	// better of it leaves the wall exactly where it was.
+	// Whoever's wall this is, their face doubles as a switcher. Clicking it does
+	// NOT leave the current wall; it drops a small form below the button. Nothing
+	// re-renders until a DIFFERENT handle is submitted, so opening the panel and
+	// thinking better of it leaves the wall exactly where it was.
 	import { tick } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { feedInfo } from '$lib/state/feedinfo.svelte';
 	import { cleanHandle, lastHandle } from '$lib/state/handle.svelte';
 	import { profile } from '$lib/state/profile.svelte';
 	import Icon from './Icon.svelte';
 
-	let { actor }: { actor: string } = $props();
+	// Both spellings of a wall, and neither is required: the header takes what
+	// the URL has. A graph wall shows the owner's face, a feed wall shows the
+	// generator's, and with both parameters present the feed is what is laid,
+	// so the feed is what the button names.
+	let { actor, feed }: { actor: string | null; feed: string | null } = $props();
 
 	let open = $state(false);
 	let root = $state<HTMLElement | null>(null);
@@ -17,10 +22,32 @@
 	let input = $state<HTMLInputElement | null>(null);
 	let value = $state('');
 
-	// the wall owner's face for the button
+	const onFeed = $derived(!!feed);
+
+	// the face on the button, from whichever identity this wall has. Neither
+	// load blocks anything: both leave a fallback in place and fill it in if and
+	// when the AppView answers.
 	$effect(() => {
-		profile.load(actor);
+		if (feed) {
+			feedInfo.load(feed);
+		} else {
+			profile.load(actor ?? '');
+		}
 	});
+
+	// what the button says it is showing, and the initial it falls back to when
+	// there is no face yet
+	const wallName = $derived(onFeed ? feedInfo.name : `@${actor ?? ''}`);
+	const wallFace = $derived(onFeed ? feedInfo.avatar : profile.avatar);
+	// A feed's own name is not unique (two "Discover" feeds are ordinary), so the
+	// creator's handle is what tells a screen-reader reader which one this is.
+	// Before that lands, wallName is the reference's rkey, which is at least
+	// something the reader can match against the link they followed.
+	const switchLabel = $derived(
+		onFeed
+			? `Switch wall, currently viewing the ${wallName} feed${feedInfo.creator ? ` by @${feedInfo.creator}` : ''}`
+			: `Switch wall, currently viewing ${wallName}`
+	);
 
 	function openPanel() {
 		open = true;
@@ -82,20 +109,22 @@
 		onclick={() => (open ? closePanel(false) : openPanel())}
 		aria-haspopup="dialog"
 		aria-expanded={open}
-		aria-label="Switch wall, currently viewing @{actor}"
+		aria-label={switchLabel}
 		class="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-pop-pink-quiet p-0.5 font-semibold text-white shadow-brick transition-transform motion-safe:hover:scale-105 motion-safe:active:scale-95 sm:min-h-9 sm:min-w-0 sm:justify-start sm:gap-2 sm:pr-4"
 	>
-		{#if profile.avatar}
-			<img src={profile.avatar} alt="" class="size-8 shrink-0 rounded-full object-cover" />
+		{#if wallFace}
+			<img src={wallFace} alt="" class="size-8 shrink-0 rounded-full object-cover" />
 		{:else}
 			<span
 				class="grid size-8 shrink-0 place-items-center rounded-full bg-white/20 text-base font-bold uppercase"
 				aria-hidden="true"
 			>
-				{(actor ?? '?').slice(0, 1)}
+				{(onFeed ? feedInfo.name : (actor ?? '?')).slice(0, 1) || '?'}
 			</span>
 		{/if}
-		<span class="hidden max-w-[10rem] truncate sm:inline">@{actor}</span>
+		<!-- the name is already spelled with its @ on a graph wall; a feed's is a
+		     display name, and prefixing one would read as a handle -->
+		<span class="hidden max-w-[10rem] truncate sm:inline">{wallName}</span>
 		<Icon name="arrow-left-right" class="hidden size-4 shrink-0 opacity-80 sm:block" />
 	</button>
 

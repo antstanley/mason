@@ -1,11 +1,11 @@
 import { browser } from "$app/environment";
+import { APPVIEW } from "$lib/appview";
 
 /** The wall owner's face for the header. The feed never carries the actor's own
  *  profile (their bricks may not even appear on their wall), so we ask the
  *  public AppView directly, the same surface local mode already talks to. A
  *  miss (bad handle, offline, the demo fixture) leaves `avatar` null and the
  *  switch button falls back to an initial. */
-const APPVIEW = "https://public.api.bsky.app";
 
 /** The reserved self-label an account sets to opt out of logged-out views. */
 const NO_UNAUTHENTICATED = "!no-unauthenticated";

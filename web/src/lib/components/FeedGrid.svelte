@@ -28,6 +28,15 @@
 	const currentActor = $derived(page.url.searchParams.get('actor') ?? '');
 	const currentFeed = $derived(page.url.searchParams.get('feed'));
 
+	// what an empty wall calls itself. A feed wall says "feed" because that is
+	// what the reader chose: telling them their wall is empty names the wrong
+	// thing, and there is no handle behind it to be quiet. Read in two places,
+	// the heading and the live region, so the two can never say different
+	// things about the same wall.
+	const emptyWall = $derived(
+		currentFeed ? 'this feed has no bricks yet' : 'this wall has no bricks yet'
+	);
+
 	// which wall the retry button lays again, with the same precedence the page
 	// routes on: feed wins. Reading it here rather than asking FeedState keeps
 	// the URL the single source of truth for which wall is showing.
@@ -161,7 +170,7 @@
 		} else if (feed.error && n > 0) {
 			wallStatus = 'more bricks did not arrive';
 		} else if (feed.done && !feed.error) {
-			wallStatus = n === 0 ? 'this wall has no bricks yet' : 'that is every brick';
+			wallStatus = n === 0 ? emptyWall : 'that is every brick';
 		} else if (stalled) {
 			wallStatus = 'the wall paused. scroll or retry for more';
 		} else if (n > lastCount) {
@@ -233,18 +242,25 @@
 	{:else if feed.error && feed.items.length === 0}
 		{@const sealed = feed.error === 'login-required'}
 		{@const notFound = feed.error === 'handle-not-found'}
+		{@const noFeed = feed.error === 'feed-not-found'}
 		<div class="mx-auto max-w-md py-20 text-center">
-			<p class="text-5xl" aria-hidden="true">{sealed ? '🧱🔒' : '🧱💥'}</p>
+			<p class="text-5xl" aria-hidden="true">{sealed ? '🧱🔒' : noFeed ? '🧱🔎' : '🧱💥'}</p>
 			<h1 class="font-display mt-4 text-2xl font-bold">
-				{#if notFound}no wall for that handle{:else if sealed}this wall is sealed{:else}the wall wouldn't
-					load{/if}
+				{#if notFound}no wall for that handle{:else if noFeed}no such feed{:else if sealed}this wall is
+					sealed{:else}the wall wouldn't load{/if}
 			</h1>
 			<p class="mt-2 opacity-75">
-				{#if notFound}handles look like name.bsky.social. check the spelling, or try someone else:{:else if sealed}this
-					waller asked to be seen by signed-in visitors only. mason reads walls logged out, so this
-					one stays bricked up. try another wall:{:else}mason could not reach the network. check your
-					connection and try again.{/if}
+				{#if notFound}handles look like name.bsky.social. check the spelling, or try someone else:{:else if noFeed}that
+					link names no feed mason can lay. the generator may have been withdrawn, or the reference
+					mistyped. nothing here is yours to fix.{:else if sealed}this waller asked to be seen by
+					signed-in visitors only. mason reads walls logged out, so this one stays bricked up. try
+					another wall:{:else}mason could not reach the network. check your connection and try
+					again.{/if}
 			</p>
+			<!-- deliberately no handle box on a feed wall: a bad feed link is not a
+			     mistyped handle, and handing back the box would ask the reader to
+			     correct something they never typed. The way out is the switcher in
+			     the header and the demo link below. -->
 			{#if notFound || sealed}
 				<form onsubmit={retrySubmit} class="mt-6 flex gap-2">
 					<label class="sr-only" for="retry-handle">Your Bluesky handle</label>
@@ -266,7 +282,7 @@
 						retry
 					</button>
 				</form>
-			{:else}
+			{:else if !noFeed}
 				<button
 					type="button"
 					onclick={() => feed.reset(currentTarget, currentMode)}
@@ -290,10 +306,11 @@
 		     started -->
 		<div class="mx-auto max-w-md py-20 text-center">
 			<p class="text-5xl" aria-hidden="true">🧱🌱</p>
-			<h1 class="font-display mt-4 text-2xl font-bold">this wall has no bricks yet</h1>
+			<h1 class="font-display mt-4 text-2xl font-bold">{emptyWall}</h1>
 			<p class="mt-2 opacity-75">
-				nothing laid here so far. walls grow as the people behind them post, so check back, or
-				start from another handle:
+				{#if currentFeed}nothing laid here so far. a feed is only as full as what it ranks, so check
+					back, or lay somebody's wall instead:{:else}nothing laid here so far. walls grow as the
+					people behind them post, so check back, or start from another handle:{/if}
 			</p>
 			<form onsubmit={retrySubmit} class="mt-6 flex gap-2">
 				<label class="sr-only" for="retry-handle">Your Bluesky handle</label>

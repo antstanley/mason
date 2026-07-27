@@ -223,12 +223,22 @@ describe("error mapping (FE-3)", () => {
   it.each([
     ["login_required", "login-required"],
     ["actor_not_found", "handle-not-found"],
+    // its own token, not the handle one: the panel a bad feed reference gets
+    // must not ask the reader to check a handle they never typed
+    ["feed_not_found", "feed-not-found"],
     ["rate_limited", "feed-unavailable"],
     ["unknown", "feed-unavailable"], // a static-host 404 is not a bad handle
   ])("maps a FeedError %s wall to the %s token", async (code, token) => {
     const feed = new FeedState();
     mockFetchFeed.mockRejectedValue(new FeedError(code, 400));
-    feed.reset({ actor: "alice" });
+    // laid on the kind of wall the code can actually arrive on: mortar only
+    // emits feed_not_found for a feed target. The mapping reads the code and
+    // never the target, which is why one table covers both kinds of wall.
+    feed.reset(
+      code === "feed_not_found"
+        ? { feed: "at://did:plc:x/app.bsky.feed.generator/gone" }
+        : { actor: "alice" },
+    );
     await vi.advanceTimersByTimeAsync(0);
     expect(feed.error).toBe(token);
     expect(feed.warming).toBe(false);

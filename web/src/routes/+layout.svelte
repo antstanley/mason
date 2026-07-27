@@ -154,7 +154,11 @@
 			<div class="flex flex-nowrap items-center justify-between gap-2 text-sm sm:gap-3 md:flex-wrap md:justify-end">
 				<LayoutPicker />
 				<ClientPicker />
-				<SwitchWall actor={actor ?? ''} />
+				<!-- both parameters, because the switcher names the wall that is laid:
+				     passing only the actor made a feed wall's button read "@" with an
+				     aria-label to match, and a URL carrying both name the actor while
+				     the feed is what is on the screen -->
+				<SwitchWall {actor} {feed} />
 			</div>
 		</header>
 	{/if}
