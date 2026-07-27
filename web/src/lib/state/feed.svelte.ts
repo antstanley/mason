@@ -42,6 +42,19 @@ export class FeedState {
   #generation = 0;
   // per target+mode, the last laid wall this session (for back/forward)
   #cache = new Map<string, Snapshot>();
+  /** The reader asked for this wall on purpose and no cursorless request has
+   *  been ADOPTED since. Read by the two requests that can be cursorless
+   *  (`#warm`'s poll and `freeze`'s commit) and spent when an answer lands,
+   *  never when a request is issued: a request whose result is thrown away
+   *  would otherwise spend the refresh and the wall that finally commits would
+   *  be the unrefreshed one. Spent on a THROW too, in `#warm`'s catch, which is
+   *  a fourth disarm point the spec's three do not name and the one that keeps
+   *  one tap to one fan-out on the error path. */
+  #refreshPending = false;
+  /** A refresh's own cursorless request is in flight. Holds `freeze` off until
+   *  it settles, so one tap can only ever produce one cursorless request. See
+   *  the guard in `freeze` for why holding is the only shape that works. */
+  #refreshInFlight = false;
 
   /** The session cache key for one wall.
    *
@@ -75,6 +88,10 @@ export class FeedState {
     this.#mode = mode;
     this.error = null;
     this.loading = false;
+    // a new wall is not the refreshed one: neither half of a refresh may
+    // survive into it, whether the refresh settled or was superseded mid-flight
+    this.#refreshPending = false;
+    this.#refreshInFlight = false;
     const cached = this.#cache.get(this.#key(target, mode));
     if (cached) {
       // returning to a wall already laid this session (back/forward): rehydrate
@@ -99,6 +116,35 @@ export class FeedState {
     void this.#warm(generation, target);
   }
 
+  /** Lay this wall again, now. The reader asked, so the new wall re-reads the
+   *  fast content caches upstream rather than reshuffling the same bricks.
+   *
+   *  Refuses while loading, while warming, or with no wall at all, and refuses
+   *  without side effects: the control is the whole rate limit, so a double tap
+   *  must not become two hundred-author fan-outs. Guarded in the same shape as
+   *  `loadMore`, minus `done`: a wall that ran out of bricks is exactly the one
+   *  worth asking again. */
+  refresh() {
+    const target = this.#target;
+    if (this.loading || this.warming || !target) return;
+    // BEFORE the generation bump, so a reset that lands mid-refresh (a back
+    // gesture, a re-navigation to the same wall) lays the wall again instead of
+    // handing back the arrangement the reader just asked to replace
+    this.#cache.delete(this.#key(target, this.#mode));
+    this.cursor = null;
+    this.done = false;
+    this.error = null;
+    this.warming = true;
+    // `items` are LEFT ON THE WALL and `initialLoad` is untouched: the outgoing
+    // wall reflows into the new one through the same #replace the warm loop
+    // already uses, rather than collapsing to the twelve-card skeleton grid,
+    // which mid-session reads as something breaking rather than as a refresh
+    this.#refreshPending = true;
+    this.#refreshInFlight = true;
+    const generation = ++this.#generation;
+    void this.#warm(generation, target);
+  }
+
   /** Poll the wall for its current best first screen and reflow it in place,
    *  until it settles, the reader scrolls (see `freeze`), or the ceiling hits.
    *
@@ -112,9 +158,19 @@ export class FeedState {
       // the poll is inherently sequential: each request, the reflow it drives,
       // and the pause before the next depend on the one before
       while (generation === this.#generation && this.warming) {
+        // the flag rides on a cursorless request only, which is the only shape
+        // mortar honours it on: a cursor means a later page, and a refresh is
+        // always a first page
+        const flagged = this.#refreshPending && this.cursor === null;
         // oxlint-disable-next-line no-await-in-loop
-        const page = await fetchFeed(target, this.cursor, this.#mode, "preview");
+        const page = await fetchFeed(target, this.cursor, this.#mode, "preview", flagged);
         if (generation !== this.#generation) return; // a newer wall took over
+        if (flagged) {
+          // adopted, so the refresh is spent on the answer actually being kept,
+          // and the commit held behind the marker is free to go
+          this.#refreshPending = false;
+          this.#refreshInFlight = false;
+        }
         // the preview cursor carries the seed, so the next poll and the freeze
         // land on this same warming snapshot instead of rolling a new one
         this.cursor = page.cursor;
@@ -129,9 +185,34 @@ export class FeedState {
         await sleep(POLL_MS);
       }
     } catch (e) {
+      if (generation !== this.#generation) return; // a newer wall took over
+      if (this.#refreshInFlight) {
+        // the refresh's own request is the first thing this loop awaits, so a
+        // throw with the marker still set IS that request settling. Release the
+        // marker BEFORE asking for the commit: `freeze` is held while it is
+        // set, so a refresh whose preview threw would otherwise leave the wall
+        // warming forever behind its own guard.
+        this.#refreshInFlight = false;
+        // and spend the flag with it. This is a FOURTH disarm point, and the
+        // three the spec names (a cursorless response is ADOPTED, `freeze`'s
+        // `finally`, the next `reset`) reach none of this path in time: the
+        // commit below is cursorless, because `refresh` nulled the cursor, so
+        // an unspent flag would ride it and one tap would have issued two
+        // flagged cursorless requests, sequentially. That is two fresh seeds,
+        // two snapshots and two hundred-author fan-outs, which is the exact
+        // thing the marker exists to prevent, so a flagged request that settles
+        // WITHOUT being adopted has to spend the flag as surely as an adopted
+        // one does. Do not tidy this back to three.
+        // The price is that a refresh whose first request never answered
+        // commits an unrefreshed wall. That is the cheaper half: the control is
+        // live again the moment this freeze settles, so the reader can ask
+        // again, which costs one more tap rather than a second fan-out nobody
+        // asked for.
+        this.#refreshPending = false;
+      }
       // a preview failed; commit what a real request gives us, which also
       // surfaces a real error (a sealed wall, a bad handle) properly
-      if (generation === this.#generation) await this.freeze(generation, e);
+      await this.freeze(generation, e);
     }
   }
 
@@ -145,13 +226,43 @@ export class FeedState {
     // during warming only an in-flight freeze sets loading, so the loading
     // guard makes a second engagement while the freeze fetch runs a no-op
     if (!target || !this.warming || this.loading || generation !== this.#generation) return;
+    // A refresh's own cursorless request is still in flight, so this commit is
+    // HELD rather than sent, with no side effect at all: not the generation
+    // bump, not `loading`. Deferring is the whole mechanism and merely
+    // stripping this request's flag would be worse than doing nothing. A
+    // cursorless request rolls its own fresh seed, builds a second snapshot and
+    // fills it from the untouched five-minute author-feed cache, so it clears
+    // the twelve-author first-paint gate off cache hits alone while the
+    // refreshing fill is still working through a hundred rate-limited AppView
+    // calls: the unflagged one wins, and what it commits is the wall from
+    // BEFORE the refresh. Flagging both is not the answer either, because that
+    // is two seeds, two snapshots and two hundred-author fan-outs from one tap.
+    // Nothing is lost by holding: `#warm` adopts the preview's cursor, which
+    // carries the refreshing snapshot's seed, and freezes from there itself
+    // when the wall settles or the ceiling hits. This is not a rare race, it is
+    // the ordinary path under `prefers-reduced-motion: reduce`, where the grid
+    // freezes the instant `warming` flips true with no scroll event at all.
+    // A held commit is dropped rather than queued, so a reader who engaged
+    // during a refresh waits for the refreshing snapshot (or the 8s ceiling)
+    // instead of committing the moment the marker clears. That is the trade the
+    // hold makes on purpose: what they would commit early is a wall built from
+    // a different seed.
+    if (this.#refreshInFlight) return;
     // supersede the preview loop; from here the wall never moves (the loop
     // rechecks the generation after every poll, so no late preview lands)
     const gen = ++this.#generation;
     this.loading = true;
     this.error = null;
+    // same rule as the poll's: cursorless only. A backstop rather than a live
+    // path today: every way a refresh's own request can settle now spends the
+    // flag (adopted in the loop above, thrown in its catch), and the flag is
+    // never armed without the marker, which holds this commit off, so a refresh
+    // cannot reach here still armed. Kept as the read the spec asks for, so a
+    // future path that releases the marker without spending the flag flags the
+    // request that COMMITS rather than laying an unrefreshed wall.
+    const flagged = this.#refreshPending && this.cursor === null;
     try {
-      const page = await fetchFeed(target, this.cursor, this.#mode, "freeze");
+      const page = await fetchFeed(target, this.cursor, this.#mode, "freeze", flagged);
       if (this.#generation !== gen) return; // a newer wall took over
       this.#replace(page.items);
       this.cursor = page.cursor;
@@ -162,6 +273,10 @@ export class FeedState {
       this.#fail(previewError ?? e);
     } finally {
       if (this.#generation === gen) {
+        // the wall has settled, adopted or failed, so a refresh that reached
+        // this commit is over: disarm here rather than at issue time and the
+        // flag can never leak into a later wall
+        this.#refreshPending = false;
         // warming flips off HERE, in the same synchronous continuation the
         // committed order (or the error) lands, so the wall sees a single
         // update that both ends warming and carries the final arrangement,
