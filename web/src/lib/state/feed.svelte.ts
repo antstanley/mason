@@ -10,6 +10,28 @@ const POLL_MS = 350;
 
 const sleep = (ms: number) => new Promise((resume) => setTimeout(resume, ms));
 
+/** How many laid walls the session cache holds before the least recently used
+ *  one is dropped. Exported for the unit tests, which derive their fixtures
+ *  from it rather than spelling the number a second time.
+ *
+ *  Twelve because that is `MAX_RECENT_FEEDS`, the length of the picker's recents
+ *  row: every wall a reader can reach in one tap from there is one this hands
+ *  back instead of re-warming, which is the whole promise of that row. It is
+ *  also far deeper than back and forward reaches, and it is twelve DISTINCT
+ *  walls, so stepping back and forth between two of them costs two entries
+ *  however long it goes on.
+ *
+ *  There is a bound at all because an entry is a whole laid wall: every brick,
+ *  its text and its image urls, plus a Set of every id seen. A glaze wall asks
+ *  for a hundred at a time and paginates from there, so this is megabytes per
+ *  entry on a phone, held until the tab closes. The cache was written when a
+ *  wall was somewhere a reader arrived; the feed picker made hopping between
+ *  them a habit, and nothing ever took an entry away.
+ *
+ *  The cost of the number being too small is one re-warm of a wall nobody has
+ *  looked at in twelve walls' time. */
+export const MAX_CACHED_WALLS = 12;
+
 /** A laid wall kept for the length of the session, so back/forward returns the
  *  same arrangement (and scroll) instead of rolling a new seed. */
 interface Snapshot {
@@ -75,12 +97,33 @@ export class FeedState {
    *  of rolling a fresh seed. Only ever called for a settled (non-warming) wall. */
   #save() {
     if (!this.#target) return;
-    this.#cache.set(this.#key(this.#target, this.#mode), {
+    this.#remember(this.#key(this.#target, this.#mode), {
       items: this.items.slice(),
       cursor: this.cursor,
       done: this.done,
       seen: new Set(this.#seen),
     });
+  }
+
+  /** Hold one wall as the newest, and drop the oldest past the cap.
+   *
+   *  A Map iterates in insertion order, so "oldest" is just its first key and
+   *  the delete before the set is what makes this least-RECENTLY-USED rather
+   *  than least-recently-saved: without it, re-saving a wall would leave it
+   *  wherever it first went in, and a wall the reader keeps coming back to
+   *  would age out under walls they glanced at once. Every read that hands a
+   *  snapshot back calls this for the same reason.
+   *
+   *  A while and not an if, so the cap still holds if it is ever lowered with
+   *  entries already in hand. */
+  #remember(key: string, snapshot: Snapshot) {
+    this.#cache.delete(key);
+    this.#cache.set(key, snapshot);
+    while (this.#cache.size > MAX_CACHED_WALLS) {
+      const oldest = this.#cache.keys().next();
+      if (oldest.done) break;
+      this.#cache.delete(oldest.value);
+    }
   }
 
   reset(target: FeedTarget, mode?: FeedMode) {
@@ -92,11 +135,18 @@ export class FeedState {
     // survive into it, whether the refresh settled or was superseded mid-flight
     this.#refreshPending = false;
     this.#refreshInFlight = false;
-    const cached = this.#cache.get(this.#key(target, mode));
+    const key = this.#key(target, mode);
+    const cached = this.#cache.get(key);
     if (cached) {
       // returning to a wall already laid this session (back/forward): rehydrate
       // it exactly, keeping the seed, the arrangement and the scroll, rather
       // than rolling a new snapshot that lands the reader on a skeleton.
+      //
+      // and it goes back in as the newest, because coming back to a wall is the
+      // clearest evidence there is that it is worth keeping: a wall reached by
+      // stepping back is otherwise still sitting at the age it was saved at,
+      // and would be evicted ahead of walls the reader passed through once.
+      this.#remember(key, cached);
       this.#generation++; // bow out any in-flight preview/freeze/pagination
       this.items = cached.items.slice();
       this.cursor = cached.cursor;
