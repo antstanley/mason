@@ -491,6 +491,37 @@ browser's own overscroll refresh uses, because this gesture can only start at
 the very top of a wall, where a downward drag is not a scroll and needs no
 margin to be told apart from one.
 
+**On a desktop the same gesture arrives on a wheel.** Keep scrolling up when the
+wall is already at its top and it opens exactly as a finger opens it: same band,
+same threshold, same shelf, same indicator. Two things are forced by what a wheel
+is, and they are the only differences:
+
+- **It reports movement, not position**, so travel accumulates rather than being
+  measured from an origin, and each delta is scaled by 0.4. One notch of a mouse
+  wheel is 100px in chrome, and at 1:1 a stray notch at the top of the wall would
+  arm the gesture. At 0.4 it takes two deliberate notches, while a trackpad, which
+  sends many small deltas, gets a pull that answers continuously.
+- **It never says it is done**, so stopping is the release: past the threshold,
+  140ms of quiet lays the wall. The indicator says "stop to lay again" rather
+  than "let go to lay again", because telling somebody holding no button to let
+  go is an instruction they cannot follow.
+
+**A wheel pull starts from rest, and that is the whole defence against
+momentum.** A trackpad flick that reaches the top keeps delivering wheel events
+after the fingers have left the glass: upward, at `scrollY === 0`, exactly the
+shape of a pull and nobody asked for it. What a momentum tail structurally cannot
+have is a gap in front of it, because it is the continuation of the scroll that
+just arrived, so a wheel gesture may only begin after 200ms of quiet. A reader
+who means to pull always has that gap: they reach the top, the wall stops, and
+then they push again.
+
+The two inputs also ask "where" differently, which is not an inconsistency: a
+finger grabs what is under it, so a touch pull must start inside `main#wall`; a
+wheel only points, and the cursor sits wherever it was last left, very often over
+the bar. Requiring the pointer to be over the wall would make the gesture fail
+for a reason no reader could see, so a wheel is refused only over a screen with
+its own scroll (the switcher's panel and its scrim).
+
 **What is a pull, decided once.** A gesture is read in its first 8px of travel
 and the answer holds for the rest of it: downward and more down than across is a
 pull, anything else is handed straight back to the browser and stays handed back
@@ -543,6 +574,36 @@ move under a document that scrolled anyway. `preventDefault` is called only on a
 claimed move and only when the event is cancelable: once a scroll is under way
 iOS hands over uncancelable moves, and the pull rides the platform's rubber band
 there instead of replacing it.
+
+---
+
+## The control bar
+
+One `<header>`, two shapes, chosen by the same `md` breakpoint the rest of the
+chrome uses.
+
+**On a phone it is fixed to the bottom**, where a thumb is, with a top border, an
+opaque background and `env(safe-area-inset-bottom)` under it. It never wraps, so
+every control on it has to earn its width at 375px: that constraint is why the
+layout picker is a dropdown there, why refresh is icon-only, and why the client
+picker moved behind the cog.
+
+**From `md` it sticks to the top of the scroll** rather than scrolling away with
+the wall, so the layout picker, the switcher, refresh and settings are reachable
+from anywhere in an endless scroll instead of only from the top of one. It sits
+at `z-20`: under the switcher's own scrim (`z-30`) and panel (`z-40`), so an open
+panel still dims the bar it hangs off, and over the wall, which has no z of its
+own. Its background is the page's own colour at 80% with a blur behind it, which
+means it reads as nothing at all at the top of a wall, where it sits on the same
+colour, and veils the bricks that pass under it once the reader moves. No border:
+a rule drawn across a page nobody has scrolled yet is a line for its own sake.
+
+A sticky bar changes where the top of the wall is, and the pull gesture reads
+that rather than assuming it. `PullToRefresh` measures `main#wall`'s own top edge
+when a gesture starts, which is zero on a phone (the bar is at the bottom) and
+the height of the bar on a desktop, and hangs the indicator off that. One
+measurement, no breakpoint named twice, and no bar height written down anywhere
+it could go stale.
 
 ---
 
@@ -851,11 +912,11 @@ appears and the form still works.
   a reader taken to the top does not watch the reflow they asked for. Open: a
   reader deep in a long wall probably wants the top, and a reader who tapped
   refresh to see what is new probably does not.
-- *Pull to refresh on a trackpad.* The gesture is touch only. A desktop reader
-  overscrolling at the top of the wall with a wheel or a two-finger swipe gets
-  nothing, and the header control is their way to ask. Whether a wheel-driven
-  pull is worth having is open: the button is never more than a glance away
-  there, and a wheel has no equivalent of letting go.
+- *The two ends of a wheel gesture are timers, and timers are guesses.* 200ms of
+  quiet before a wheel pull may start, 140ms of quiet before it lays. Both were
+  reasoned from how fast a trackpad reports (~8-16ms) rather than measured
+  against readers, and a mouse wheel's cadence is nothing like a trackpad's. Open
+  whether either wants tuning per input.
 - *What a pull should do at the end of a long wall.* Nothing, currently: the
   gesture only starts at the top. Pulling UP at the bottom to ask for the next
   cohort is the symmetric idea, and the scroll pump already does that job

@@ -68,7 +68,7 @@ function control(page: Page): Locator {
  *  is found by its class rather than by a role. */
 async function indicator(page: Page): Promise<string | null> {
 	return await page.evaluate(() => {
-		const pill = document.querySelector("[aria-hidden='true'].fixed.inset-x-0.top-0");
+		const pill = document.querySelector("[aria-hidden='true'].fixed.inset-x-0.z-30");
 		return pill?.textContent?.trim() ?? null;
 	});
 }
@@ -192,7 +192,7 @@ async function letGo(page: Page): Promise<Released> {
 		await Promise.resolve();
 		await Promise.resolve();
 		const style = document.querySelector("#wall")?.getAttribute("style") ?? "";
-		const pill = document.querySelector("[aria-hidden='true'].fixed.inset-x-0.top-0");
+		const pill = document.querySelector("[aria-hidden='true'].fixed.inset-x-0.z-30");
 		return {
 			target: Number(/translateY\((-?[\d.]+)px\)/.exec(style)?.[1] ?? Number.NaN),
 			pill: pill?.textContent?.trim() ?? null,
@@ -391,4 +391,175 @@ test("the front door has nothing to pull", async ({ page }) => {
 	const asked = await feedRequests(page);
 	expect(asked).toHaveLength(before);
 	expect(asked.filter((url) => url.includes("refresh=1"))).toHaveLength(0);
+});
+
+// The desktop half of the same gesture. A wheel is the input a reader without a
+// touchscreen has, and the whole thing is here rather than in the touch block
+// because the two differ in exactly two places a browser can see: there is no
+// down and no up, so a pull starts from rest and commits when the wheel stops.
+//
+// hasTouch is off and the viewport is a desktop one, so these run the path a
+// mouse and a trackpad take. `page.mouse.wheel` dispatches a real wheel event,
+// which is what makes this worth having: the deltas, their sign and their
+// timestamps are the browser's rather than a fixture's.
+test.describe("the wheel pull, on a desktop", () => {
+	test.use({ viewport: { width: 1280, height: 800 }, hasTouch: false });
+
+	/** Watch the wall's own inline transform, keeping the furthest it ever got and
+	 *  the words the pill said there.
+	 *
+	 *  Sampled on every write rather than read afterwards, and that is not
+	 *  belt-and-braces: a wheel pull commits 140ms after the last event, so an
+	 *  `expect` that arrives late reads a wall that has already been let down and
+	 *  cannot tell that from a pull that never happened. */
+	async function watchPull(page: Page): Promise<void> {
+		await page.evaluate(() => {
+			const wall = document.querySelector("#wall");
+			if (!wall) throw new Error("no #wall to watch");
+			const seen = { offset: 0, pill: "" };
+			(window as unknown as { masonPullWatch: typeof seen }).masonPullWatch = seen;
+			const sample = () => {
+				const style = wall.getAttribute("style") ?? "";
+				const at = Number(/translateY\((-?[\d.]+)px\)/.exec(style)?.[1] ?? 0);
+				if (at > seen.offset) {
+					seen.offset = at;
+					seen.pill =
+						document
+							.querySelector("[aria-hidden='true'].fixed.inset-x-0.z-30")
+							?.textContent?.trim() ?? "";
+				}
+			};
+			new MutationObserver(sample).observe(wall, { attributes: true, attributeFilter: ["style"] });
+		});
+	}
+
+	/** The furthest the wall was pulled, and what the pill said there. */
+	async function watched(page: Page): Promise<{ offset: number; pill: string }> {
+		return await page.evaluate(
+			() => (window as unknown as { masonPullWatch: { offset: number; pill: string } }).masonPullWatch,
+		);
+	}
+
+	/** Keep scrolling up at the top of the wall, `notches` times, AT A TRACKPAD'S
+	 *  CADENCE: 16ms apart, in one evaluate.
+	 *
+	 *  Dispatched rather than driven through `page.mouse.wheel`, and the reason is
+	 *  the gesture's own clock. Every mouse.wheel call is a round trip to the
+	 *  browser, which puts tens to hundreds of milliseconds between events; the
+	 *  pull commits 140ms after the wheel stops and starts afresh only after 200ms
+	 *  of quiet, so a driven sequence lands on the wrong side of both and reads as
+	 *  a reader who pushed once, stopped, and pushed again. A real trackpad reports
+	 *  every ~8-16ms. The timing is the thing under test here, so the timing is
+	 *  what this reproduces; `page.mouse.wheel` is still used below, where what
+	 *  matters is that the page really scrolls. */
+	async function keepPullingUp(page: Page, notches: number, delta = -40): Promise<void> {
+		await page.evaluate(
+			async ({ notches, delta }) => {
+				const target = document.querySelector("#wall") ?? document.body;
+				for (let i = 0; i < notches; i++) {
+					target.dispatchEvent(
+						new WheelEvent("wheel", { deltaY: delta, deltaMode: 0, bubbles: true, cancelable: true }),
+					);
+					// oxlint-disable-next-line no-await-in-loop
+					await new Promise((resume) => setTimeout(resume, 16));
+				}
+			},
+			{ notches, delta },
+		);
+	}
+
+	test("keeping the wheel scrolling up at the top lays the wall again", async ({ page }) => {
+		await countFeedRequests(page);
+		await laidWall(page);
+		const before = (await feedRequests(page)).length;
+		const laid = await cards(page).count();
+		expect(laid).toBeGreaterThan(0);
+		await watchPull(page);
+
+		// 8 x 40px of wheel, scaled to 0.4, is 128px of pull: comfortably past the
+		// 72px threshold and into the band
+		await keepPullingUp(page, 8);
+
+		// the wall moved past the threshold, and the pill said so there. "stop"
+		// rather than "let go", because there is nothing held to let go of
+		const pulled = await watched(page);
+		expect(pulled.offset).toBeGreaterThanOrEqual(THRESHOLD);
+		expect(pulled.pill).toBe("stop to lay again");
+
+		// STOPPING IS THE RELEASE: nothing else happens here. The wall is waited
+		// for by the request it sends rather than by the control's disabled
+		// window, which on this wall is about ten milliseconds wide: its bricks are
+		// compiled into the wasm, so a poll would miss it and report a control that
+		// behaved perfectly as broken. refresh.test.ts pins that window where it
+		// can be seen, synchronously, at the button.
+		await expect
+			.poll(async () => (await feedRequests(page)).filter((url) => url.includes("refresh=1")).length, {
+				timeout: 30_000,
+			})
+			.toBe(1);
+		await expect(control(page)).toBeEnabled({ timeout: 30_000 });
+
+		// the bricks never left, and one gesture is one refresh
+		await expect(cards(page).first()).toBeVisible();
+		await expect.poll(async () => Math.round(await wallOffset(page)), { timeout: 5000 }).toBe(0);
+		const asked = (await feedRequests(page)).slice(before);
+		expect(asked).toHaveLength(2);
+	});
+
+	test("a single notch moves the wall a little and lays nothing", async ({ page }) => {
+		await countFeedRequests(page);
+		await laidWall(page);
+		const before = (await feedRequests(page)).length;
+		await watchPull(page);
+
+		await keepPullingUp(page, 1);
+
+		// it answered, because the wall is at its top and the reader pushed up,
+		// and it never reached the line
+		const pulled = await watched(page);
+		expect(pulled.offset).toBeGreaterThan(0);
+		expect(pulled.offset).toBeLessThan(THRESHOLD);
+		expect(pulled.pill).toBe("pull to lay again");
+
+		// and stopping there costs nothing: the threshold is the whole rate limit
+		await expect.poll(async () => Math.round(await wallOffset(page)), { timeout: 5000 }).toBe(0);
+		expect(await indicator(page)).toBeNull();
+		expect(await feedRequests(page)).toHaveLength(before);
+	});
+
+	test("a wheel scrolling down the wall never pulls it", async ({ page }) => {
+		await countFeedRequests(page);
+		await laidWall(page);
+		const before = (await feedRequests(page)).length;
+
+		await page.mouse.move(640, 400);
+		await page.mouse.wheel(0, 300);
+		await page.mouse.wheel(0, 300);
+
+		expect(await indicator(page)).toBeNull();
+		expect(Math.round(await wallOffset(page))).toBe(0);
+		// scrolled the wall, which is what a wheel going down is for
+		expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+		// and pagination is allowed to have fetched, so this asserts the one thing
+		// a scroll must never do rather than that nothing happened at all
+		const asked = (await feedRequests(page)).slice(before);
+		expect(asked.filter((url) => url.includes("refresh=1"))).toHaveLength(0);
+	});
+
+	test("the bar sticks to the top of a desktop wall", async ({ page }) => {
+		await laidWall(page);
+		const bar = page.locator("header");
+		const atRest = await bar.boundingBox();
+		expect(atRest?.y ?? -1).toBeGreaterThanOrEqual(0);
+
+		// scroll well down the wall, past several screens
+		await page.evaluate(() => window.scrollTo(0, 2000));
+		await expect.poll(async () => page.evaluate(() => window.scrollY)).toBeGreaterThan(500);
+
+		const stuck = await bar.boundingBox();
+		// still at the top of the viewport, and still the same bar
+		expect(stuck?.y ?? -1).toBeGreaterThanOrEqual(0);
+		expect(stuck?.y ?? -1).toBeLessThanOrEqual(1);
+		await expect(page.getByRole("button", { name: "lay this wall again" })).toBeVisible();
+	});
 });

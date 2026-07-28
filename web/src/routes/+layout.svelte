@@ -153,8 +153,21 @@
 		>
 			skip to the wall
 		</a>
+		<!-- Two bars, one element. On a phone it is fixed to the BOTTOM, where a
+		     thumb is; from md it sticks to the top of the scroll instead of
+		     scrolling away with the wall, so the layout picker, the switcher and
+		     refresh are reachable from anywhere in an endless scroll rather than
+		     only from the top of it.
+		     `top-0` and `z-20`: under the switcher's own scrim (z-30) and its panel
+		     (z-40), so an open panel still dims the bar it hangs off, and over the
+		     wall, which has no z of its own. The background is the page's own
+		     colour at 80% with a blur behind it, which reads as nothing at all at
+		     the top of the wall (where it sits on the same colour) and veils the
+		     bricks that pass under it once the reader moves. No border: a rule
+		     across the top of a page that has not been scrolled yet is a line
+		     drawn for no reason. -->
 		<header
-			class="fixed inset-x-0 bottom-0 z-20 flex flex-col gap-2 border-t border-ink/10 bg-plaster/95 px-4 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] md:static md:z-auto md:flex-row md:flex-wrap md:items-center md:justify-between md:border-0 md:bg-transparent md:px-0 md:py-3 dark:border-chalk/10 dark:bg-kiln-deep/95 md:dark:bg-transparent"
+			class="fixed inset-x-0 bottom-0 z-20 flex flex-col gap-2 border-t border-ink/10 bg-plaster/95 px-4 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] md:sticky md:top-0 md:bottom-auto md:z-20 md:flex-row md:flex-wrap md:items-center md:justify-between md:border-0 md:bg-plaster/80 md:px-0 md:py-3 md:backdrop-blur-sm dark:border-chalk/10 dark:bg-kiln-deep/95 md:dark:bg-kiln-deep/80"
 		>
 			<a href="/" class="hidden min-h-11 items-center font-display text-2xl font-black tracking-tight md:inline-flex">
 				mason&nbsp;<span aria-hidden="true">🧱</span>

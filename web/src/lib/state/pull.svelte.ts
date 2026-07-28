@@ -57,6 +57,44 @@ export const PULL_SLOP = 8;
  *  this one is made of. */
 export const PULL_LAYING = 54;
 
+/** How much of a wheel's delta becomes pull.
+ *
+ *  A wheel is not a finger and cannot be treated like one. One notch of a mouse
+ *  wheel is 100px in chrome, so at 1:1 a single stray notch at the top of the
+ *  wall would arm the gesture and a second would lay a hundred-author fan-out
+ *  nobody asked for. At 0.4 it takes two deliberate notches, and a trackpad,
+ *  which sends many small deltas rather than few large ones, gets a pull that
+ *  answers continuously the way the touch one does. */
+export const PULL_WHEEL_SCALE = 0.4;
+
+/** How long the wheel must have been quiet before a wheel gesture may START a
+ *  pull, in milliseconds.
+ *
+ *  THIS IS THE WHOLE DEFENCE AGAINST MOMENTUM, and without it the desktop
+ *  gesture is unusable. A trackpad flick that reaches the top of the wall keeps
+ *  delivering wheel events after the fingers have left the glass, all of them
+ *  pointing up, all of them at `scrollY === 0`: exactly the shape of a pull, and
+ *  nobody asked for it. What a momentum tail never has is a gap before it,
+ *  because it is the continuation of the scroll that just arrived. A reader who
+ *  means to pull has one: they reach the top, the wall stops, and then they push
+ *  again. So the pull starts from REST, and momentum is excluded by the one
+ *  property it structurally cannot have.
+ *
+ *  200ms is comfortably longer than the gap between events inside one flick
+ *  (~8-16ms) and shorter than the pause a reader takes before pushing again. */
+export const PULL_REST_MS = 200;
+
+/** How long the wheel must be quiet before an armed wheel pull lays the wall,
+ *  in milliseconds.
+ *
+ *  A wheel has no equivalent of letting go, so stopping is the release: push
+ *  past the threshold, stop pushing, and the wall lays. Short enough that it
+ *  follows the reader's hand rather than making them wait, long enough that the
+ *  gaps inside one gesture do not fire it early. It is a real difference from
+ *  the touch path and the only one: a finger says when it is done, a wheel is
+ *  only ever observed to have stopped. */
+export const PULL_SETTLE_MS = 140;
+
 /** Where a finger is. Structural and flat, so the caller hands over two numbers
  *  read off a touch rather than the event itself, which is a DOM type this
  *  module deliberately cannot name. */
@@ -64,6 +102,10 @@ export interface PullPoint {
   x: number;
   y: number;
 }
+
+/** What is pulling the wall, or null between gestures. Read by the indicator,
+ *  which has one word to change: a finger lets go and a wheel stops. */
+export type PullBy = "touch" | "wheel" | null;
 
 /** The rubber band.
  *
@@ -86,10 +128,10 @@ export class PullState {
    *  it, so one number is the whole of what the gesture looks like. */
   distance = $state(0);
 
-  /** A finger is down and this gesture is a pull: the wall is following it.
-   *  Read by the component to leave the snap-back transition off while the
-   *  finger is driving (a transition mid-drag is lag) and to promote the wall
-   *  to its own layer only for as long as it is moving. */
+  /** The wall is being pulled right now, by a finger or by a wheel. Read by the
+   *  component to leave the snap-back transition off while the reader is driving
+   *  (a transition mid-gesture is lag) and to promote the wall to its own layer
+   *  only for as long as it is moving. */
   pulling = $state(false);
 
   /** Far enough that letting go lays the wall again. The indicator says so
@@ -127,6 +169,23 @@ export class PullState {
    *  back up through its own origin would turn into a pull halfway. */
   #tracking = false;
 
+  /** What is pulling the wall, or null between gestures. It decides which
+   *  release is allowed to lay the wall: a finger says when it is done and a
+   *  wheel is only ever observed to have stopped, so `settle` must not fire for
+   *  a finger that paused mid-drag, and `release` has nothing to do with a
+   *  wheel. Two inputs, two releases, and neither may answer for the other. */
+  by = $state<PullBy>(null);
+
+  /** The wheel pull's raw travel before the band, in px. Accumulated rather than
+   *  measured, because a wheel reports movement and not position: there is no
+   *  origin to subtract, only a running total to add to and unwind. */
+  #travel = 0;
+
+  /** When the last wheel event arrived, in the caller's own clock. The gap
+   *  before the next one is what tells a deliberate pull from a momentum tail;
+   *  see `PULL_REST_MS`. */
+  #lastWheel = Number.NEGATIVE_INFINITY;
+
   /** A finger went down.
    *
    *  `ready` is everything this module cannot see, answered by the caller in one
@@ -138,6 +197,7 @@ export class PullState {
   start(point: PullPoint, ready: boolean): void {
     this.#reset();
     if (!ready) return;
+    this.by = "touch";
     this.#origin = point;
     this.#tracking = true;
   }
@@ -171,13 +231,70 @@ export class PullState {
     return true;
   }
 
+  /** A wheel turned. Returns whether the pull claimed it.
+   *
+   *  The desktop gesture, and the same one: keep scrolling up when the wall is
+   *  already at the top and it opens exactly as a finger opens it, with the same
+   *  band, the same threshold and the same shelf. Only the ends differ, because
+   *  a wheel has neither a down nor an up.
+   *
+   *  `deltaY` in PIXELS and negative for up, which is the wheel's own sign
+   *  convention; the caller normalises a line-mode or page-mode wheel before it
+   *  gets here, since that conversion needs a viewport and this module has none.
+   *  `at` is the event's own timestamp, passed in for the same reason: a clock
+   *  is a global, and this module does without one.
+   *
+   *  `ready` is read only when a gesture STARTS, exactly as it is for touch, so
+   *  a wall that starts warming under a pull still lets the reader finish it. */
+  wheel(deltaY: number, at: number, ready: boolean): boolean {
+    // Recorded before any decision below, and for EVERY wheel event rather than
+    // only the ones that pull: a scroll down the wall is what makes the next
+    // scroll up not-from-rest, and that is precisely what stops a flick to the
+    // top from turning into a pull on its own momentum.
+    const rested = at - this.#lastWheel > PULL_REST_MS;
+    this.#lastWheel = at;
+
+    if (this.by === "wheel" && this.pulling) {
+      // up adds, down unwinds. Clamped at zero and abandoned there rather than
+      // held, because a reader who has scrolled the wall back down is scrolling,
+      // and the rest of that gesture is not ours.
+      this.#travel = Math.max(0, this.#travel - deltaY * PULL_WHEEL_SCALE);
+      if (this.#travel === 0) {
+        this.#reset();
+        return false;
+      }
+      this.distance = band(this.#travel);
+      return true;
+    }
+
+    // A new gesture: upward, allowed, and from rest.
+    if (!ready || deltaY >= 0 || !rested) return false;
+    this.by = "wheel";
+    this.pulling = true;
+    this.#travel = -deltaY * PULL_WHEEL_SCALE;
+    this.distance = band(this.#travel);
+    return true;
+  }
+
   /** The finger lifted. Returns whether the wall should be laid again.
    *
    *  Reports rather than acts: `feed.refresh()` and closing an open reader are
    *  the trigger's job, the same way they are the button's, so this module
    *  imports neither and cannot start a fan-out by being poked in a test. */
   release(): boolean {
-    const lay = this.pulling && this.armed;
+    const lay = this.by === "touch" && this.pulling && this.armed;
+    this.#reset();
+    return lay;
+  }
+
+  /** The wheel has gone quiet. Returns whether the wall should be laid again.
+   *
+   *  Stopping IS the release on a wheel, which is the one place the two inputs
+   *  are not the same gesture. It answers only for a wheel pull: a finger that
+   *  rests mid-drag has not let go of anything, and laying the wall under a
+   *  motionless thumb would be a refresh nobody asked for. */
+  settle(): boolean {
+    const lay = this.by === "wheel" && this.pulling && this.armed;
     this.#reset();
     return lay;
   }
@@ -198,6 +315,12 @@ export class PullState {
     this.#tracking = false;
     this.pulling = false;
     this.distance = 0;
+    this.by = null;
+    this.#travel = 0;
+    // NOT #lastWheel. It outlives the gesture on purpose: it is a record of when
+    // the wheel last turned, not of what the wall was doing, and clearing it
+    // here would hand a momentum tail its rest and let the flick that ended a
+    // gesture start the next one.
   }
 }
 

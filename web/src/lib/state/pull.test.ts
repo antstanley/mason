@@ -5,7 +5,15 @@
 // decisions live in a rune module and are pinned here.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { PULL_LAYING, PULL_MAX, PULL_SLOP, PULL_THRESHOLD, PullState } from "./pull.svelte";
+import {
+  PULL_LAYING,
+  PULL_MAX,
+  PULL_REST_MS,
+  PULL_SLOP,
+  PULL_THRESHOLD,
+  PULL_WHEEL_SCALE,
+  PullState,
+} from "./pull.svelte";
 
 /** A gesture, played through a fresh state: where the finger went down, then
  *  every place it moved to. Returns the state so a case can read what it did. */
@@ -212,6 +220,7 @@ describe("PullState", () => {
   });
 
   it("names no DOM global", () => {
+    // (the wheel path is below; this grep covers the whole module)
     // The gesture arrives as touch events and this module reads none of them:
     // the caller hands over two numbers and one boolean. That is what keeps
     // these cases running for real in node rather than against a fake DOM, and
@@ -222,5 +231,157 @@ describe("PullState", () => {
         /\b(?:window|document|navigator|history|location|localStorage|sessionStorage|scrollTo|scrollBy|scrollIntoView|requestAnimationFrame|TouchEvent|HTMLElement)\b/,
       ),
     ).toBeNull();
+  });
+});
+
+// The desktop half. A wheel is the same gesture through a different input: same
+// band, same threshold, same shelf, and two differences that are forced by what
+// a wheel IS. It reports movement rather than position, so travel accumulates
+// instead of being measured from an origin; and it never says it is done, so
+// stopping is the release.
+describe("PullState, driven by a wheel", () => {
+  /** One wheel event: pixels (negative is up, the wheel's own convention) at a
+   *  timestamp, played into a state. */
+  function turn(pull: PullState, deltaY: number, at: number, ready = true): boolean {
+    return pull.wheel(deltaY, at, ready);
+  }
+
+  /** A gesture that starts from rest and keeps pushing up, `steps` events of
+   *  `deltaY` each, 16ms apart, which is roughly how fast a trackpad reports. */
+  function wheelUp(steps: number, deltaY = -30, ready = true): PullState {
+    const pull = new PullState();
+    for (let i = 0; i < steps; i++) turn(pull, deltaY, 1000 + i * 16, ready);
+    return pull;
+  }
+
+  it("starts a pull when the wheel pushes up from rest", () => {
+    const pull = wheelUp(1, -50);
+    expect(pull.pulling).toBe(true);
+    expect(pull.by).toBe("wheel");
+    // scaled, because one notch of a mouse wheel is 100px and a stray notch must
+    // not arm a hundred-author fan-out
+    expect(pull.distance).toBeCloseTo(50 * PULL_WHEEL_SCALE);
+  });
+
+  it("accumulates, because a wheel reports movement rather than position", () => {
+    const pull = wheelUp(3, -30);
+    expect(pull.distance).toBeCloseTo(3 * 30 * PULL_WHEEL_SCALE);
+  });
+
+  it("arms at the same threshold the finger does", () => {
+    // 72px of pull, through the scale, is 180px of wheel
+    const under = wheelUp(5, -35);
+    expect(under.armed).toBe(false);
+    const over = wheelUp(7, -35);
+    expect(over.armed).toBe(true);
+  });
+
+  it("REFUSES A MOMENTUM TAIL, which is the whole reason the rest gate exists", () => {
+    // A flick that reaches the top keeps delivering upward deltas after the
+    // fingers have left the glass. Every one of them looks like a pull: upward,
+    // at the top, plenty of travel. What they never have is a gap in front of
+    // them, because they are the continuation of the scroll that just arrived.
+    const pull = new PullState();
+    // the scroll that brought the wall to its top, still arriving
+    turn(pull, -400, 1000);
+    // ...its tail, decaying, every 16ms, with no pause anywhere
+    let at = 1016;
+    for (const delta of [-300, -220, -160, -120, -90, -60, -40, -25, -15, -8]) {
+      turn(pull, delta, at);
+      at += 16;
+    }
+    // the first event started a pull (nothing before it), so what this pins is
+    // that a tail cannot start one of its own after a scroll
+    const afterTail = new PullState();
+    afterTail.wheel(-400, 1000, true); // the flick
+    afterTail.cancel(); // the wall reaching its top ends that gesture
+    afterTail.wheel(-300, 1016, true); // the tail, 16ms later
+    expect(afterTail.pulling).toBe(false);
+    expect(afterTail.distance).toBe(0);
+    expect(afterTail.settle()).toBe(false);
+  });
+
+  it("lets the reader push again after the wheel has rested", () => {
+    const pull = new PullState();
+    pull.wheel(-400, 1000, true); // a scroll
+    pull.cancel();
+    // the pause: the wall stopped, and then they pushed again
+    pull.wheel(-40, 1000 + PULL_REST_MS + 1, true);
+    expect(pull.pulling).toBe(true);
+    expect(pull.distance).toBeCloseTo(40 * PULL_WHEEL_SCALE);
+  });
+
+  it("ignores a wheel going down, and one the caller will not allow", () => {
+    const down = new PullState();
+    turn(down, 120, 1000);
+    expect(down.pulling).toBe(false);
+
+    const blocked = new PullState();
+    turn(blocked, -120, 1000, false);
+    expect(blocked.pulling).toBe(false);
+  });
+
+  it("unwinds when the wheel turns back down, and hands the rest back", () => {
+    const pull = wheelUp(4, -40); // 64px of pull
+    expect(pull.distance).toBeCloseTo(64);
+    turn(pull, 40, 1100); // back down a notch
+    expect(pull.distance).toBeCloseTo(48);
+    turn(pull, 200, 1120); // and past its own start
+    expect(pull.pulling).toBe(false);
+    expect(pull.distance).toBe(0);
+    // the gesture is over, so the rest of that scroll belongs to the browser
+    expect(pull.settle()).toBe(false);
+  });
+
+  it("lays the wall when the wheel stops past the threshold", () => {
+    const pull = wheelUp(7, -35);
+    expect(pull.armed).toBe(true);
+    expect(pull.settle()).toBe(true);
+    // and the gesture is spent: a second settle cannot re-fire it
+    expect(pull.settle()).toBe(false);
+    expect(pull.distance).toBe(0);
+  });
+
+  it("lays nothing when the wheel stops short of the threshold", () => {
+    const pull = wheelUp(3, -35);
+    expect(pull.armed).toBe(false);
+    expect(pull.settle()).toBe(false);
+  });
+
+  it("keeps the two releases apart, because the two inputs commit differently", () => {
+    // a finger that pauses mid-drag has not let go of anything, and the wheel's
+    // release is a timer: without this, resting a thumb on the glass past the
+    // threshold would lay the wall under it
+    const finger = new PullState();
+    finger.start({ x: 0, y: 0 }, true);
+    finger.move({ x: 0, y: PULL_THRESHOLD + 40 });
+    expect(finger.armed).toBe(true);
+    expect(finger.settle()).toBe(false);
+
+    // and a wheel pull is not released by a touchend it never had
+    const wheel = wheelUp(7, -35);
+    expect(wheel.armed).toBe(true);
+    expect(wheel.release()).toBe(false);
+  });
+
+  it("hands the wall to a finger that lands mid-wheel-pull", () => {
+    const pull = wheelUp(4, -40);
+    expect(pull.by).toBe("wheel");
+    pull.start({ x: 0, y: 0 }, true);
+    expect(pull.by).toBe("touch");
+    expect(pull.distance).toBe(0);
+  });
+
+  it("stretches and caps exactly as the finger's pull does", () => {
+    const far = wheelUp(40, -50);
+    expect(far.distance).toBeLessThan(PULL_MAX);
+    expect(far.distance).toBeGreaterThan(PULL_MAX - 10);
+  });
+
+  it("rests the wall on the same shelf while it lays", () => {
+    const pull = wheelUp(7, -35);
+    expect(pull.settle()).toBe(true);
+    pull.laying = true;
+    expect(pull.offset).toBe(PULL_LAYING);
   });
 });
