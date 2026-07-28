@@ -387,9 +387,18 @@ changes need none; a forgotten one can be added in a follow-up PR.
 
 - `vitest run` for unit tests (`just test`), riding the app's own vite config so
   `.svelte.ts` rune modules compile as they do in the build.
-- `playwright test` for the five browser specs against the real static build
+- `playwright test` for the eight browser specs against the real static build
   (`just test-e2e`), chromium only: the service-worker smoke, the brick reader,
-  the feed picker, the refresh control, and repeated blog tags.
+  the feed picker, the refresh control, repeated blog tags, the header bar,
+  settings, and link previews.
+- **The build is the subject, so it has to be the current one.** `vite preview`
+  serves `web/build/` and never compiles, so `pnpm exec playwright test` run
+  straight after a source edit answers about the previous build: green, fast and
+  wrong. `web/playwright.setup.ts` is a `globalSetup` that compares the build
+  against everything it was made from, `server/crates` included, and refuses the
+  run rather than letting it lie. Its own cases are in
+  `web/src/lib/stale-build.test.ts`, because a guard that fails open is worse
+  than none.
 - **Determinism.** No wall-clock assertions; `FeedState` tests drive a stubbed
   `fetchFeed`.
 - **Positive and negative space.** Every state-machine happy path is paired with
