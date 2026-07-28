@@ -136,6 +136,15 @@
 	// re-run on the empty list `#ask` starts with and ask again forever.
 	$effect(() => {
 		if (!isOpen) return;
+		// and the end-of-list flag goes with the question it was about. This
+		// component is mounted once in +layout.svelte and never unmounts, so every
+		// piece of its own state outlives the dialog: `atEnd` set on a cursorless
+		// search was still set the next time the picker opened, over a fresh
+		// popular list that DOES have a cursor, and "more feeds" stayed hidden for
+		// the rest of the session. Reopening is a new question the same way
+		// submitting one is, which is what the spec means by paging being forgotten
+		// the moment the picker closes.
+		atEnd = false;
 		untrack(() => void feeds.browse());
 	});
 

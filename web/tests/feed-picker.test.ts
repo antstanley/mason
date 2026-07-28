@@ -650,3 +650,65 @@ test("middle-clicking the second recent card sends that same feed to the tab", a
 	await expect(panel(page)).toBeVisible();
 	expect(await neverLeft(page)).toBe(true);
 });
+
+// "more feeds", and the flag behind it. NOTHING else in the repo touches this
+// control: the picker's paging decision lives in a component body, where tsc
+// cannot see it, and the vitest cases drive the rune, which has no `atEnd` on
+// it at all. That gap is why the bug below lived here.
+//
+// The picker is mounted once in +layout.svelte and never unmounts, so its own
+// `$state` outlives the dialog. Every case here therefore closes and reopens,
+// which is the gesture the flag has to survive.
+test("the end of one list is forgotten by the time the picker opens again", async ({ page }) => {
+	// popular has another page waiting; the search answer is the end of its own
+	// list. The distinction is the whole case: one control, two questions.
+	await page.route(/public\.api\.bsky\.app/, async (route) => {
+		const url = new URL(route.request().url());
+		const searching = url.searchParams.has("query");
+		await route.fulfill({
+			json: searching ? { feeds: [QUIET] } : { feeds: [generator()], cursor: "page-2" },
+			headers: { "access-control-allow-origin": "*" },
+		});
+	});
+	await landing(page);
+	await openPicker(page);
+
+	const more = panel(page).getByRole("button", { name: "more feeds" });
+	// popular carries a cursor, so there is more to ask for
+	await expect(more).toBeVisible();
+
+	// a search whose answer is the end of the list: asking for more adds nothing,
+	// which IS the end, and the control takes itself away
+	await ask(page, "quiet");
+	await expect(panel(page).getByRole("link", { name: /Quiet Kiln/ })).toBeVisible();
+	await more.click();
+	await expect(more).toBeHidden();
+
+	// close, reopen. The results are popular's again, cursor and all, so the
+	// control belongs back on the screen: it was hidden by an answer to a question
+	// nobody is asking any more.
+	await page.getByRole("button", { name: "Close the feed picker" }).last().click();
+	await expect(panel(page)).toHaveCount(0);
+	await openPicker(page);
+
+	await expect(panel(page).getByRole("link", { name: /What's Hot/ })).toBeVisible();
+	await expect(more).toBeVisible();
+});
+
+test("a list with no more pages still hides the control while it is the question", async ({
+	page,
+}) => {
+	// the other half, so the case above cannot pass by the flag never being set:
+	// a cursorless popular list hides the control on the first ask and keeps it
+	// hidden while that list is what the picker is showing.
+	await appView(page, { popular: [generator()] });
+	await landing(page);
+	await openPicker(page);
+
+	const more = panel(page).getByRole("button", { name: "more feeds" });
+	await more.click();
+	await expect(more).toBeHidden();
+	// still hidden a moment later: nothing reopened, so nothing changed the question
+	await expect(panel(page).getByRole("link", { name: /What's Hot/ })).toBeVisible();
+	await expect(more).toBeHidden();
+});
