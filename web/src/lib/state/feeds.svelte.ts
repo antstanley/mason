@@ -84,33 +84,51 @@ interface UnlayableFeed {
  *  is the same mistake the hidden-tier filter above exists to prevent, so it is
  *  fixed in the same place.
  *
- *  Measured against the public AppView on 2026-07-27, not assumed. `getFeed`
- *  with no viewer answers **502 InternalServerError** for most of them and
- *  **401 AuthRequiredError** for skyfeed's Discover. Neither is a 404, so mortar
- *  classifies both `upstream` and the reader gets "the wall wouldn't load" for a
- *  feed that was never layable.
+ *  **Measured, not assumed, and re-measurable: `pnpm feeds:audit`.** That script
+ *  (`web/scripts/audit-feeds.mjs`) pages the popular list to fifty, asks each
+ *  feed for a logged-out `getFeed`, and prints which ones clear the bar. This
+ *  list is its output, last run 2026-07-28: of the top fifty, **eleven** do not
+ *  lay a wall.
  *
- *  **`Teams` is the exception and is here for a different reason**, recorded
- *  rather than smoothed over: it answers 200, but with a single brick logged
- *  out. That is a wall in name only, and a card promising one is worse than no
- *  card. If it ever fills out logged out, this entry is the thing to remove.
+ *  **The bar is more than five posts**, and it is one bar over two failures that
+ *  look different from the outside:
+ *
+ *  - **It does not answer.** `getFeed` with no viewer gives **502
+ *    InternalServerError** for most of them and **401 AuthRequiredError** for
+ *    skyfeed's. Neither is a 404, so mortar classifies both `upstream` and the
+ *    reader gets "the wall wouldn't load" for a feed that was never layable.
+ *  - **It answers with almost nothing.** `Teams` gives one brick, spacecowboy17's
+ *    `For You` one, `Trans+Queer Shitposters` three, every time it is asked.
+ *    That is a wall in name only, and a card promising one is worse than no card.
+ *
+ *  Five is the bar because mason lays a *wall*: a card that opens onto three
+ *  bricks reads as a broken feed rather than a quiet one, whichever it is.
+ *
+ *  **The second kind goes stale and the first does not**, which is the honest
+ *  cost of a static list. An auth-gated feed will still be auth-gated next month;
+ *  a quiet feed may not still be quiet. Re-run the audit rather than trusting
+ *  this list's age, and drop any entry it clears.
  *
  *  **Keyed by name rather than AT-URI**, which is the opposite of what this file
  *  does everywhere else and needs its reason on the record. The same
  *  viewer-shaped feed ships from several publishers: the popular list carries
- *  two "Mutuals" (bsky.app's and skyfeed.xyz's), and its "For You" is
- *  spacecowboy17's rather than Bluesky's own. A URI denylist would hide one
+ *  two "Mutuals" (bsky.app's and skyfeed.xyz's). A URI denylist would hide one
  *  copy, leave the rest broken in the list, and need a new entry every time
- *  somebody published another. The name is what identifies the *idea*, and the
- *  idea is what cannot work logged out.
+ *  somebody published another. The name is what identifies the *idea*, and some
+ *  ideas cannot work logged out.
  *
  *  **The creator field is what keeps that from overreaching, and it is
  *  load-bearing.** "Discover" is skyfeed's auth-gated feed and it is also
  *  `bsky.app`'s `whats-hot`, which answers 200 and is the single most useful
  *  wall in the list. Denying the name alone would hide the best feed mason has.
- *  So a name is only ever denied outright when the name itself describes the
- *  viewer-shaped idea; anything a working feed could plausibly also be called is
- *  pinned to its publisher.
+ *
+ *  So the split below is between a name that names the VIEWER (mutuals,
+ *  mentions, what your friends liked) and a name that merely describes a KIND of
+ *  feed. The first cannot work here whoever publishes it; the second is a
+ *  question only a request can answer, and it is answered per publisher.
+ *  Measurement beats the idea when they disagree, and it did twice: "For You"
+ *  and "Only Posts" were both name-only rules hiding a publisher's copy that
+ *  answers nineteen and twenty posts.
  *
  *  The residual cost is accepted rather than overlooked: a working third-party
  *  feed genuinely called "Mentions" would be hidden from browse and search. It
@@ -122,19 +140,46 @@ interface UnlayableFeed {
  *  retyped copy, the way the hidden tier above is: an entry added here gets its
  *  case for free, and one removed cannot leave a stale case behind. */
 export const UNLAYABLE_FEEDS: readonly UnlayableFeed[] = [
-  // viewer-shaped by name, whoever published them
-  { name: "for you" },
+  // DENIED BY NAME, whoever published it, because the name names the VIEWER: a
+  // feed of your mutuals, your mentions, what your friends liked, which of the
+  // people you follow post rarely. There is no viewer here, so there is nothing
+  // for these to be about, and the audit found every publisher of each that the
+  // directory returned failing: "Popular With Friends" from bsky.app and urguy,
+  // "Mutuals" from bsky.app, skyfeed and shreyanjain.
   { name: "popular with friends" },
   { name: "mutuals" },
   { name: "quiet posters" },
   { name: "mentions" },
-  { name: "only posts" },
-  { name: "the 'gram" },
-  // one publisher's copy only, because the name alone is not a safe signal
+  // DENIED BY PUBLISHER, because the name describes a KIND of feed that a
+  // logged-out algorithm can perfectly well produce, so measurement decides and
+  // the idea does not. Two of these moved here from the list above when the
+  // audit first ran, and both were feeds mason was hiding for nothing:
+  //
+  // - skygaze.io's "For You" answers 19 posts. Two other publishers' copies give
+  //   1 post and an error, so those two are named and the name is not.
+  // - moonandbaboon's "Only Posts" answers 20, four times out of four. mackuba's
+  //   gives 1 and dogcuddlelover's gives 2.
+  //
+  // skyfeed's copy is spelled "OnlyPosts", one word, which is why it has its own
+  // entry: the match is exact after case-folding, so the spaced name never hid
+  // it and the old name-only rule was letting the one auth-gated copy through
+  // while hiding two that worked.
+  { name: "for you", creator: "spacecowboy17.bsky.social" },
+  { name: "for you", creator: "flicknow.xyz" },
+  { name: "only posts", creator: "mackuba.eu" },
+  { name: "only posts", creator: "dogcuddlelover.bsky.social" },
+  { name: "onlyposts", creator: "skyfeed.xyz" },
+  { name: "the 'gram", creator: "why.bsky.world" },
   { name: "discover", creator: "skyfeed.xyz" },
   { name: "latest from follows", creator: "why.bsky.world" },
   { name: "teams", creator: "retr0.id" },
   { name: "best of follows", creator: "bsky.app" },
+  // 502 on every attempt, three runs apart
+  { name: "media", creator: "jcsalterego.bsky.social" },
+  // 200 with exactly three posts, every time it is asked. Quiet rather than
+  // gated, so this is the entry most likely to be wrong later: it is the first
+  // one to re-check when the audit is next run.
+  { name: "trans+queer shitposters", creator: "jaz.sh" },
 ];
 
 /** Whether this feed is one mason cannot lay a wall from logged out. */

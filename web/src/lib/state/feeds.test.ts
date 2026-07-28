@@ -598,7 +598,10 @@ describe("feeds mason cannot lay a wall from", () => {
   const denied = UNLAYABLE_FEEDS.map((f) => [f.name, f.creator ?? "anybody.test"] as const);
 
   it("has one case per denied feed", () => {
-    expect(denied).toHaveLength(11);
+    // sixteen, from the 2026-07-28 audit of the top fifty popular feeds
+    // (`pnpm feeds:audit`): four names that name the viewer, and twelve
+    // publishers' copies measured one at a time
+    expect(denied).toHaveLength(16);
   });
 
   it.each(denied)("does not list %s by @%s", async (name, creator) => {
@@ -633,6 +636,38 @@ describe("feeds mason cannot lay a wall from", () => {
     expect(picker.results.map((f) => f.uri)).toEqual(["at://hot"]);
   });
 
+  it("keeps the copies of a pinned name that measured fine", async () => {
+    // The two the audit caught, and the reason "for you" and "only posts" are no
+    // longer name-only rules: skygaze's For You answers 19 posts logged out and
+    // moonandbaboon's Only Posts answers 20, four times out of four, while the
+    // publishers' copies named in the list give 1, 2 and an error. A name-only
+    // rule hid all of them together.
+    fetchMock.mockResolvedValue(
+      answer([
+        view({ displayName: "For You", creator: { handle: "skygaze.io" }, uri: "at://gaze" }),
+        view({
+          displayName: "For You",
+          creator: { handle: "spacecowboy17.bsky.social" },
+          uri: "at://cowboy",
+        }),
+        view({
+          displayName: "Only Posts",
+          creator: { handle: "moonandbaboon.bsky.social" },
+          uri: "at://moon",
+        }),
+        view({ displayName: "Only Posts", creator: { handle: "mackuba.eu" }, uri: "at://mackuba" }),
+        // one word, which is how skyfeed spells theirs, and the spelling the
+        // spaced entry never matched
+        view({ displayName: "OnlyPosts", creator: { handle: "skyfeed.xyz" }, uri: "at://sky" }),
+      ]),
+    );
+    const picker = new FeedsState();
+
+    await picker.browse();
+
+    expect(picker.results.map((f) => f.uri)).toEqual(["at://gaze", "at://moon"]);
+  });
+
   it("denies a name-only entry whoever published it", async () => {
     // the popular list really does carry two "Mutuals", bsky.app's and
     // skyfeed.xyz's, which is why these entries carry no creator
@@ -665,7 +700,13 @@ describe("feeds mason cannot lay a wall from", () => {
       answer([
         view({ displayName: "MUTUALS", uri: "at://shout" }),
         view({ displayName: "  Quiet Posters  ", uri: "at://padded" }),
-        view({ displayName: "tHe 'gRaM", uri: "at://mixed" }),
+        // cased and padded on BOTH halves at once, which is the pinned entries'
+        // version of this claim: the creator is free text too
+        view({
+          displayName: "tHe 'gRaM",
+          creator: { handle: " WHY.BSKY.WORLD " },
+          uri: "at://mixed",
+        }),
         view({ displayName: "Teams", creator: { handle: "  RETR0.ID " }, uri: "at://creator" }),
         view({ uri: "at://ok" }),
       ]),
@@ -731,7 +772,7 @@ describe("feeds mason cannot lay a wall from", () => {
 
   it("leaves the stored list alone, so undenying a feed brings its card back", () => {
     const raw = JSON.stringify([
-      { ...feedListing("at://viewer", "For You"), creator: "bsky.app" },
+      { ...feedListing("at://viewer", "For You"), creator: "spacecowboy17.bsky.social" },
       feedListing("at://ok", "Science"),
     ]);
     stored.set(STORAGE_KEY, raw);
@@ -748,7 +789,7 @@ describe("feeds mason cannot lay a wall from", () => {
     stored.set(
       STORAGE_KEY,
       JSON.stringify([
-        { ...feedListing("at://viewer", "For You"), creator: "bsky.app" },
+        { ...feedListing("at://viewer", "For You"), creator: "spacecowboy17.bsky.social" },
         feedListing("at://ok", "Science"),
       ]),
     );

@@ -647,15 +647,39 @@ shape of a bug, so it is pinned rather than copied: the contract fixture carries
 TypeScript list equals it, the same mechanism that already keeps the error codes
 and the video sources in step (see [06-wire-contract.md](06-wire-contract.md)).
 
-A second, smaller list (`UNLAYABLE_FEEDS`) covers feeds that rank by *who is
-asking*, which mason has no viewer for: `getFeed` answers 502 or 401 for them
-logged out, so listing one promises a wall that cannot be laid. It applies to
-browse, search, a creator's own list, **and** recents, and against recents it is
-a filter on the way out rather than a delete on the way in: `mason:feeds` keeps
-the entry, and the picker hides it. Removing a name from the list therefore
-brings the card straight back rather than asking a reader to find the feed again,
-which is only true because `remember()` writes the stored list and not the
-filtered one.
+A second, smaller list (`UNLAYABLE_FEEDS`) covers feeds that do not lay a wall
+logged out. It applies to browse, search, a creator's own list, **and** recents,
+and against recents it is a filter on the way out rather than a delete on the way
+in: `mason:feeds` keeps the entry, and the picker hides it. Removing a name from
+the list therefore brings the card straight back rather than asking a reader to
+find the feed again, which is only true because `remember()` writes the stored
+list and not the filtered one.
+
+**The bar is more than five posts, measured rather than reasoned.**
+`pnpm feeds:audit` (`web/scripts/audit-feeds.mjs`) pages the popular list to
+fifty, asks each feed for a logged-out `getFeed`, and prints which clear the bar;
+the list is its output. On 2026-07-28, eleven of the top fifty did not. They fail
+two ways and the bar covers both: most do not answer at all (**502
+InternalServerError**, or **401 AuthRequiredError** for skyfeed's, neither of
+which is a 404, so mortar classifies both `upstream` and the reader gets "the
+wall wouldn't load"), and a few answer 200 with almost nothing (one post, three
+posts, every time they are asked). A card that opens onto three bricks reads as a
+broken feed whether the feed is gated or merely quiet.
+
+**A name is denied outright only when the name names the viewer** (mutuals,
+mentions, popular with friends, quiet posters): those cannot mean anything
+without a viewer, whoever publishes them. Every other entry is pinned to the
+publisher that was measured, because a name like "For You" or "Only Posts"
+describes a *kind* of feed that a logged-out algorithm can produce perfectly
+well. Measurement beats the idea where they disagree, and it did twice: both were
+name-only rules, and both were hiding a working copy (skygaze.io's "For You"
+answers 19 posts, moonandbaboon's "Only Posts" answers 20).
+
+The audit re-tests the existing list as well as the popular one, which is the
+half that keeps a denylist from only ever growing: an entry that starts working
+again is a feed mason hides for nothing. The static list is what keeps the picker
+at one request rather than fifty-one, and its cost is that the quiet entries go
+stale in a way the gated ones do not. Re-run it rather than trusting its date.
 
 ### States
 
