@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchFeed, FeedError, type FeedTarget } from "$lib/api";
-import { FeedState } from "./feed.svelte";
+import { FeedState, MAX_CACHED_WALLS } from "./feed.svelte";
 import type { Brick, FeedResponse } from "$lib/types";
 
 vi.mock("$lib/api", () => {
@@ -373,6 +373,82 @@ describe("session cache (FE-9)", () => {
     feed.reset({ feed: "alice" });
     expect(mockFetchFeed).toHaveBeenCalledTimes(laid);
     expect(ids(feed)).toEqual(["feed-alice-1"]);
+  });
+});
+
+describe("session cache eviction", () => {
+  /** Lay `count` walls, each a different actor, newest last. Returns the feed
+   *  and the number of requests it took, so a later rehydration can be told
+   *  from a re-warm by the request count alone. */
+  async function layWalls(count: number) {
+    const feed = new FeedState();
+    settleImmediately();
+    for (let i = 0; i < count; i++) {
+      feed.reset({ actor: `actor-${i}` });
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    return feed;
+  }
+
+  /** Whether returning to this wall came out of the cache. A rehydration costs
+   *  no request and leaves `warming` false; a re-warm does the opposite. Read
+   *  as a pair, because either alone is satisfied by a wall that failed. */
+  async function rehydrates(feed: FeedState, actor: string) {
+    const before = mockFetchFeed.mock.calls.length;
+    feed.reset({ actor });
+    const cached = !feed.warming && mockFetchFeed.mock.calls.length === before;
+    await vi.advanceTimersByTimeAsync(0);
+    return cached;
+  }
+
+  it("holds MAX_CACHED_WALLS walls and drops the one past it", async () => {
+    // exactly the cap fits, so the first wall is still there
+    const feed = await layWalls(MAX_CACHED_WALLS);
+    expect(await rehydrates(feed, "actor-0")).toBe(true);
+
+    // that rehydration made actor-0 the newest, so laying one more wall must
+    // evict actor-1, which is now the oldest, and leave actor-0 alone
+    feed.reset({ actor: "spillover" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await rehydrates(feed, "actor-1")).toBe(false);
+    expect(await rehydrates(feed, "actor-0")).toBe(true);
+  });
+
+  it("evicts by least recently used, not by when a wall was first laid", async () => {
+    // the whole difference between this and a plain FIFO. actor-0 is the oldest
+    // by insertion and stays, because it is the one the reader keeps returning
+    // to; actor-1 is younger by insertion and goes.
+    const feed = await layWalls(MAX_CACHED_WALLS);
+    expect(await rehydrates(feed, "actor-0")).toBe(true);
+    feed.reset({ actor: "one-past-the-cap" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(await rehydrates(feed, "actor-0")).toBe(true);
+    expect(await rehydrates(feed, "actor-1")).toBe(false);
+  });
+
+  it("stepping between two walls costs two entries however long it goes on", async () => {
+    // the gesture the cache exists for. Back and forth twenty times must not
+    // evict anything: it is the same two walls, not twenty.
+    const feed = await layWalls(3);
+    for (let i = 0; i < 20; i++) {
+      feed.reset({ actor: "actor-1" });
+      await vi.advanceTimersByTimeAsync(0);
+      feed.reset({ actor: "actor-2" });
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(await rehydrates(feed, "actor-0")).toBe(true);
+  });
+
+  it("a rehydrated wall is still the whole wall, not a husk", async () => {
+    // eviction must not touch what a surviving entry holds: the snapshot handed
+    // back after a cache under pressure is the same one that went in.
+    const feed = await layWalls(MAX_CACHED_WALLS);
+    const last = `actor-${MAX_CACHED_WALLS - 1}`;
+    feed.reset({ actor: last });
+    expect(ids(feed)).toEqual([`${last}-1`]);
+    expect(feed.cursor).toBe(`${last}-c`);
+    expect(feed.initialLoad).toBe(false);
   });
 });
 
