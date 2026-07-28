@@ -1,6 +1,6 @@
 # mason - Design Overview
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley · **Scope:** Repo-wide
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley · **Scope:** Repo-wide
 
 **mason** is an atproto discovery app: one masonry wall that mixes Bluesky
 posts, standard.site blog documents, and video (Bluesky clips plus Streamplace
@@ -51,6 +51,17 @@ reader's own browser, so a wall is a link you can hand to somebody.
 7. Keep the shipped artifact one thing at one version: root `package.json` is
    the source of truth and merging the release PR bumps, tags, releases and
    deploys together.
+8. Let a reader read a brick without leaving the wall: an in-place reader
+   renders the brick's own content at full size, and the trip to the source
+   becomes a choice rather than the only option.
+9. Split a wall into a source and a view. The source is either the reader's
+   follow graph (mixed posts, blogs and video) or any Bluesky feed generator
+   (`?feed=<at-uri>`, posts and Bluesky video only, in the feed's own order).
+   All three views (bento, masonry, glaze) apply to either. On a feed wall the
+   generator is the algorithm, so mason contributes the wall and nothing else.
+10. Offer a feed picker as a second front door beside the handle box: browse what
+    the network ranks, search it, list one person's feeds, or paste a link. Still
+    no account and no sign-in.
 
 ## Non-goals
 
@@ -62,9 +73,11 @@ reader's own browser, so a wall is a link you can hand to somebody.
   it in CI.
 - **No server-side rendering.** The SPA is fully client-rendered; the shell in
   `web/src/app.html` carries the crawler-visible metadata.
-- **No blog content rendering.** A blog brick is metadata plus a link out; the
-  `site.standard.document` content union is platform-specific and is never
-  parsed.
+- **No blog content rendering.** A blog brick is metadata plus a link out,
+  on the wall and in the reader alike. The `site.standard.document` content
+  union is platform-specific (Leaflet, pckt.blog, Offprint and WordPress all
+  differ) and is never parsed, so the reader shows a blog's metadata at full
+  size and makes the publication the primary destination.
 - **No cross-kind score comparison.** Kinds compete only with themselves; the
   mixer decides the ratio.
 
@@ -79,7 +92,7 @@ Local mode is the default and needs no server at all.
   │ browser tab: SvelteKit SPA (static, no SSR)                 │
   │   /?actor=<handle>   layout picker · client picker · wall   │
   └───────────────┬─────────────────────────────────────────────┘
-                  │ fetch /api/feed?actor=&cursor=&mode=&intent=
+                  │ fetch /api/feed?actor=|feed=&cursor=&mode=&intent=
                   ▼
   ┌─────────────────────────────────────────────────────────────┐
   │ service worker (web/src/service-worker.ts)                  │
@@ -97,9 +110,11 @@ Local mode is the default and needs no server at all.
                                streams)
 ```
 
-Server mode swaps only the box in the middle. Setting
-`PUBLIC_MASON_SERVER_URL` in `web/.env` makes the same SPA call a native mortar
-over CORS instead of its own service worker:
+Server mode swaps only the box in the middle. Setting the
+`PUBLIC_MASON_SERVER_URL` environment variable, which `just dev-server` does,
+makes the same SPA call a native mortar over CORS instead of its own service
+worker. It is a real environment variable read at build time, not a `.env` file:
+see [07-web-client.md](07-web-client.md).
 
 ```
  browser tab (same SPA) ──CORS GET /api/feed──▶ mortar-server (axum, :8787)
@@ -147,11 +162,12 @@ in page-sized slices. Laid bricks never move.
 
 | Area | Implementation | Notes |
 |---|---|---|
-| Brick kinds | Post, Blog, Video (Bluesky and Streamplace, live and archived) | Five mix slots; live is its own slot |
-| Walls | `wall` (mixed, default) and `glaze` (Bluesky image posts only) | One `Mode` enum, threaded to the snapshot cache key |
+| Wall source | The reader's follow graph (default), or any Bluesky feed generator | `actor` or `feed`, exactly one of them |
+| Wall views | `bento`, `masonry`, `glaze`, all three on either source | `Mode` carries glaze to the engine; bento and masonry are pure presentation |
+| Brick kinds | Graph wall: post, blog, video (Bluesky and Streamplace, live and archived), five mix slots. Feed wall: post and Bluesky video only | A feed generator returns post URIs, so blogs and streams structurally cannot appear |
 | Auth | None, in either direction | No sign-in; every upstream read is public |
 | Storage | In-memory TTL caches; IndexedDB persistence for the browser build | No database, no server-side state |
-| Pagination | Opaque base64url cursor carrying `{seed, offset}` | Page size 24; laid bricks never move |
+| Pagination | Two opaque base64url cursor shapes: `{seed, offset}` for a graph wall, `{feed}` for a feed wall | Page size 24, except glaze on a feed wall; laid bricks never move |
 | Moderation | Account and post labels; hidden tier dropped, `!warn` tier blurred | Mirrors what logged-out Bluesky shows |
 | Captions | `CaptionTrack` modelled and rendered; no upstream supplies data | The one declared WCAG exception |
 | Deployment | Static site to S3 + CloudFront via blogwright | PR previews per pull request, production by release |

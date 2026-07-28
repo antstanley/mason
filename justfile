@@ -31,7 +31,15 @@ build: wasm
     cd web && pnpm build
 
 # full test + check suite
-test:
+#
+# depends on `wasm` because the web lane reads the generated pkg, which is
+# gitignored and so absent from a fresh clone. `pnpm check:ci` now typechecks
+# the service worker in a second tsc project (web/tsconfig.worker.json), and the
+# worker is the one file that imports mortar_wasm, so without this dependency a
+# tree that has never run `just wasm` fails on an unresolved module rather than
+# on anything the change touched. `guard-wasm` cannot stand in: it is a
+# `cargo check` and emits no pkg/.
+test: wasm
     cd server && cargo nextest run
     cd web && pnpm check:ci
     cd web && pnpm test
@@ -45,7 +53,14 @@ test-e2e: build
 test-wasm:
     cd server && wasm-pack test --headless --chrome crates/mortar-core
 
-lint:
+# the same dependency as `test`, and it has to be declared HERE too rather than
+# left to ride in on that one: `just` runs a recipe's dependencies immediately
+# before that recipe, it does not hoist a shared one to the front of `check`, so
+# with `test: wasm` alone `lint` still meets a missing pkg/. Measured on a
+# never-built tree: knip reported two unresolved imports, src/service-worker.ts
+# :18 and :19, and the run never reached `test`. Declared on both, `wasm` still
+# runs exactly once per invocation (just dedupes), now ahead of `lint`.
+lint: wasm
     cd web && pnpm oxlint src
     cd web && pnpm knip
     cd server && cargo clippy --workspace --all-targets -- -D warnings
@@ -144,10 +159,14 @@ guard-toolchain:
 # takes the run past a minute, and a gate that slow is one people learn to skip
 # around. CI still runs those two lanes, and CI is the authority.
 # Ordered cheapest first, measured rather than guessed: the two greps are ~0.2s
-# each, fmt-check ~1s, guard-wasm ~1.4s, lint ~2s (clippy, and minutes on a cold
-# target dir), test ~3.5s. The whole gate is ~8s warm. An em dash used to cost a
-# full clippy pass before anything reported it. guard-wasm sits ahead of lint
-# because both compile and clippy is the heavier of the two from cold.
+# each, fmt-check ~1s, guard-wasm ~1.4s, wasm ~2s, lint ~2s (clippy, and minutes
+# on a cold target dir), test ~3.5s. The whole gate is ~9s warm, re-measured over
+# three runs when `wasm` joined it; it was ~8s before. `lint` and `test` both
+# depend on `wasm` (each says why), and just runs it once, between guard-wasm and
+# lint. Nearly all of that 2s is wasm-opt: the compile is 0.1s on an unchanged
+# engine. An em dash used to cost a full clippy pass before anything reported it.
+# guard-wasm sits ahead of lint because both compile and clippy is the heavier of
+# the two from cold.
 [doc('the local gate: the guards, fmt-check, lint, test. cheapest first')]
 check: guard-dashes guard-autoplay guard-toolchain fmt-check guard-wasm lint test
 

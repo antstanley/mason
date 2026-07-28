@@ -1,5 +1,6 @@
-// fetchFeed's two edges: error classification off the wire (FE-3) and the
-// service-worker control race that must never hang a page (FE-4).
+// fetchFeed's three edges: error classification off the wire (FE-3), the
+// request it builds for each of the two wall sources, and the service-worker
+// control race that must never hang a page (FE-4).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchFeed, FeedError } from "$lib/api";
 
@@ -33,7 +34,7 @@ describe("error classification (FE-3)", () => {
           new Response(JSON.stringify({ error: "actor_not_found" }), { status: 404 }),
         ),
     );
-    const failure = fetchFeed("nobody.test");
+    const failure = fetchFeed({ actor: "nobody.test" });
     await expect(failure).rejects.toBeInstanceOf(FeedError);
     await expect(failure).rejects.toMatchObject({ code: "actor_not_found", status: 404 });
   });
@@ -45,16 +46,67 @@ describe("error classification (FE-3)", () => {
       "fetch",
       vi.fn().mockResolvedValue(new Response("<html>not found</html>", { status: 404 })),
     );
-    await expect(fetchFeed("demo")).rejects.toMatchObject({ code: "unknown", status: 404 });
+    await expect(fetchFeed({ actor: "demo" })).rejects.toMatchObject({
+      code: "unknown",
+      status: 404,
+    });
   });
+});
 
-  it("passes actor, cursor, mode and intent on the wire", async () => {
+// The query string is the whole of what the client says about which wall it
+// wants, so both target kinds are asserted against the exact URL rather than
+// against a substring: exactly one of `actor` and `feed` may reach it, and a
+// request carrying both would name a different wall than the reader asked for.
+describe("request shaping", () => {
+  it("passes an actor target, cursor, mode and intent on the wire", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(okBody, { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
-    await expect(fetchFeed("demo", "cur1", "glaze", "preview")).resolves.toEqual({
+    await expect(fetchFeed({ actor: "demo" }, "cur1", "glaze", "preview")).resolves.toEqual({
       items: [],
       cursor: null,
     });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/feed?actor=demo&cursor=cur1&mode=glaze&intent=preview",
+    );
+  });
+
+  it("passes a feed target instead of an actor, encoded", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(okBody, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const uri = "at://did:plc:abc/app.bsky.feed.generator/hot";
+    await expect(fetchFeed({ feed: uri }, "cur1", "glaze", "freeze")).resolves.toEqual({
+      items: [],
+      cursor: null,
+    });
+    // percent-encoded by URLSearchParams, and with no `actor=` anywhere in it
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/feed?feed=at%3A%2F%2Fdid%3Aplc%3Aabc%2Fapp.bsky.feed.generator%2Fhot&cursor=cur1&mode=glaze&intent=freeze",
+    );
+  });
+
+  it("asks for a refresh on a cursorless request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(okBody, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchFeed({ actor: "demo" }, null, "glaze", "preview", true)).resolves.toEqual({
+      items: [],
+      cursor: null,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/feed?actor=demo&mode=glaze&intent=preview&refresh=1",
+    );
+  });
+
+  it("drops the refresh flag when a cursor rides along", async () => {
+    // handle_feed ignores the flag once a cursor decodes, so putting it on the
+    // wire anyway would make the network tab claim a mid-scroll page asked for
+    // a hundred-author re-read that never happened
+    const fetchMock = vi.fn().mockResolvedValue(new Response(okBody, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchFeed({ actor: "demo" }, "cur1", "glaze", "preview", true)).resolves.toEqual({
+      items: [],
+      cursor: null,
+    });
+    // the whole URL, so `refresh` is absent rather than merely not-first
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/feed?actor=demo&cursor=cur1&mode=glaze&intent=preview",
     );
@@ -75,7 +127,7 @@ describe("service-worker control race (FE-4)", () => {
       },
     });
 
-    const pending = fetchFeed("demo");
+    const pending = fetchFeed({ actor: "demo" });
     await vi.advanceTimersByTimeAsync(1999);
     expect(fetchMock).not.toHaveBeenCalled(); // still hoping for control
 
@@ -98,7 +150,7 @@ describe("service-worker control race (FE-4)", () => {
     });
 
     // no timer advance at all: the controlled page must not wait
-    await expect(fetchFeed("demo")).resolves.toEqual({ items: [], cursor: null });
+    await expect(fetchFeed({ actor: "demo" })).resolves.toEqual({ items: [], cursor: null });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

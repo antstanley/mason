@@ -1,6 +1,6 @@
 # 01 - Domain Model
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley
 
 This page defines the entities mason manages, how they are identified, how they
 relate, and what lookups the cache layer must serve. The wire shape of the
@@ -42,7 +42,7 @@ Authors are identified by DID (`did:plc:…` or `did:web:…`). Handles are disp
 data and are resolved to a DID once, then cached; they are never a key.
 
 Cursors carry no identity of their own: they are an opaque base64url encoding of
-`{seed, offset}`.
+whichever payload shape the wall's source uses.
 
 ### Wire primitives
 
@@ -153,10 +153,15 @@ handle to a DID and reads the wall owner's logged-out opt-out at the same time.
 
 One viewer's wall in progress. Not serialised; it lives only in the engine.
 
-Identity: `snapshot_id = "<mode-tag>-<xxh3_64(did, seed) as 16 hex>"`, so a glaze
-wall and a full wall for the same actor and seed can never collide.
+Identity: `snapshot_id = "<mode-tag>-<xxh3_64(did, seed) as 16 hex>"`, so a
+glaze wall and a full wall for the same actor and seed can never collide.
+Beside it the snapshot carries `refresh`, set once at construction: this wall
+was asked for explicitly, so its fill re-reads the fast content caches instead
+of trusting them. It is immutable for the snapshot's life and therefore not
+guarded state.
 
-State it owns:
+State it owns, all of it inside one mutex-guarded `Inner`, which is why
+`refresh` is described above rather than listed below:
 
 | Field | Meaning |
 |---|---|
@@ -173,19 +178,55 @@ State it owns:
 | `max_age_hours` | Admission window override; `None` uses the per-kind default |
 | `max_per_author` | 4 on the full wall, 8 on glaze |
 
+### FeedRef
+
+A validated pointer to a Bluesky feed generator record: an `AtUri` whose
+collection is exactly `app.bsky.feed.generator`. It is the one request
+parameter besides `actor` and `cursor` that reaches an upstream query, so it is
+parsed rather than forwarded.
+
+Three spellings are accepted, because two of them are what people have in
+their clipboard:
+
+| Given | Handled |
+|---|---|
+| `at://<did>/app.bsky.feed.generator/<rkey>` | Used as is |
+| `at://<handle>/app.bsky.feed.generator/<rkey>` | A legal AT-URI spelling; the authority is resolved to a DID and the AT-URI is rebuilt from it |
+| `https://bsky.app/profile/<handle\|did>/feed/<rkey>` | The profile segment is resolved to a DID (the `did` cache, then `getProfile`) and the AT-URI is built from it |
+
+Anything else, including an AT-URI naming a different collection, is a
+`bad_request`. A `FeedRef` is not an identity mason keys on: it is a cache key
+component and a query parameter, and the bricks it yields carry their own
+author DIDs as always.
+
 ### Cursor
 
-The `CursorPayload` is `{seed: u64, offset: usize}`, JSON-serialised and
+The `CursorPayload` has two shapes, one per wall source, JSON-serialised and
 base64url (no padding) encoded into the opaque `Cursor` string the client sees.
 It is attacker-writable, so every consumer treats it defensively: a garbage or
-tampered cursor decodes to `None` and falls back to a fresh wall, and the offset
-is added with `checked_add` / `saturating_add`.
+tampered cursor decodes to `None` and falls back to a fresh wall.
 
-`seed` is the load-bearing field. It drives the cohort shuffle and the mixer's
-jitter, so a snapshot evicted mid-scroll rebuilds into a closely-matching wall
-from the same seed and the still-warm per-author caches. The snapshot id itself
-is not carried: `handle_feed` derives it from the resolved DID, the seed and the
-mode, which are all it has ever used.
+| Shape | Wall | Carries |
+|---|---|---|
+| `{seed: u64, offset: usize}` | A graph wall (`wall` or `glaze`) | The seed and the next offset into the snapshot's wall |
+| `{feed: String}` | A feed wall | The upstream `getFeed` cursor, verbatim and opaque |
+
+The two are distinguished structurally (`#[serde(untagged)]`, the feed shape
+tried first), so no discriminator field has to be carried and a cursor issued
+before this change still decodes to the graph shape.
+
+On a graph wall, `seed` is the load-bearing field: it drives the cohort shuffle
+and the mixer's jitter, so a snapshot evicted mid-scroll rebuilds into a
+closely-matching wall from the same seed and the still-warm per-author caches.
+The snapshot id itself is not carried: `handle_feed` derives it from the
+resolved DID, the seed and the mode. The offset is attacker-writable like the
+rest of it, so it is added with `checked_add` / `saturating_add` and never
+plainly.
+
+On a feed wall there is nothing to rebuild. The feed generator holds the order
+and the upstream cursor is the whole of mason's position in it, so the offset
+and the seed have no meaning and are not carried. The `offset` is not preserved
+across an eviction because there is no snapshot to evict.
 
 ---
 
@@ -280,10 +321,17 @@ through the browser build's IndexedDB export.
 | One author's archived streams | author DID | `caches.streams` |
 | Who is live, network-wide | the single key `0u8` | `caches.live` |
 | A wall in progress | `snapshot_id` | `caches.snapshots` |
+| One page of a feed generator | `(feed uri, limit, upstream cursor)` | `caches.feed_pages` |
 
 The live list is the only viewer-independent cache, which is what makes a single
 key safe. Turning it into bricks is per-viewer and happens downstream of the
 cache, in `fetch::live_bricks`.
+
+The `limit` sits inside the `feed_pages` key rather than beside it because the
+two views ask a generator for different depths: the mixed views ask for
+`PAGE_SIZE` and glaze asks for 100. A key of (feed uri, upstream cursor) alone
+would serve a glaze request the 24-item page a mixed request cached a moment
+earlier, and the image wall would silently run a quarter as deep.
 
 ---
 

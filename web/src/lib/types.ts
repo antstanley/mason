@@ -33,7 +33,13 @@ interface ImageEmbed {
   aspectRatio: AspectRatio | null;
 }
 
-interface ExternalEmbed {
+/** A link a post carries, as the AppView resolved it: the Open Graph title,
+ *  description and image it read from the page's headers. Exported because
+ *  `LinkPreview.svelte` takes one as a prop, and a component prop is a type
+ *  nothing in this repo checks: tsc cannot parse a `.svelte` file and vite
+ *  strips types without checking them, so an unexported one would compile,
+ *  ship, and be `any` all the way down. */
+export interface ExternalEmbed {
   uri: string;
   title: string;
   description: string;
@@ -129,12 +135,39 @@ export interface FeedResponse {
  *  server/crates/mortar-core/src/mode.rs; pinned by the contract fixture. */
 export type FeedMode = "glaze";
 
+/** The one token `?refresh=` takes: the reader asked for this wall on purpose,
+ *  so mortar lays a new one and re-reads the fast content caches. Anything
+ *  else, including absent, is no refresh, and it is honoured only on a
+ *  cursorless request because a refresh is always a first page. Mirrors
+ *  refresh_from_query in server/crates/mortar-core/src/feed.rs; pinned by the
+ *  contract fixture. */
+export type FeedRefresh = "1";
+
+/** The hidden moderation tier: a subject carrying any of these never reaches
+ *  the wall. Mirrors HIDDEN_LABELS in
+ *  server/crates/mortar-core/src/sources/bluesky.rs; pinned by the contract
+ *  fixture, in both directions, so the two lists cannot drift.
+ *
+ *  It is on the wire only as vocabulary, because the engine applies it and the
+ *  web never sees a hidden brick. The feed picker is the exception and the
+ *  reason this list exists here at all: it reads a feed generator's own labels
+ *  from the AppView, and must not list a feed mason would then refuse to lay.
+ *
+ *  `nudity` is deliberately absent: Bluesky shows it to logged-out viewers, so
+ *  mason does too. */
+export type HiddenLabel = "!hide" | "!no-unauthenticated" | "porn" | "sexual" | "graphic-media";
+
 /** The machine codes mortar itself can emit in an ErrorEnvelope. Mirrors
  *  AppError::status_and_code in server/crates/mortar-core/src/error.rs; pinned
  *  by the contract fixture. The web adds its own out-of-band codes ("wasm",
  *  "unknown") for failures that never reached mortar, so ErrorEnvelope.error
  *  stays a plain string. */
-export type MortarErrorCode = "bad_request" | "actor_not_found" | "login_required" | "upstream";
+export type MortarErrorCode =
+  | "bad_request"
+  | "actor_not_found"
+  | "feed_not_found"
+  | "login_required"
+  | "upstream";
 
 /** The one error shape mortar emits in both build modes: the native server
  *  sends it as a JSON body (status on the response line), the wasm build

@@ -2,18 +2,42 @@
 //! feeds mapped into bricks. All URLs are built from `Config::appview_base`
 //! so wiremock tests can stand in for the real network.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 use crate::http::{Bucket, Http, HttpError};
 use crate::model::{
     AspectRatio, Author, Blur, Brick, ExternalEmbed, ImageEmbed, PostBrick, VideoBrick, VideoSource,
 };
-use crate::sources::util::urlencode;
+use crate::sources::util::{is_http_url, urlencode};
 
 /// One author's recent posts, videos among them.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AuthorYield {
     pub bricks: Vec<Brick>,
+}
+
+/// One page of a feed generator: what `get_feed` returned, ready to be cached
+/// and handed to more than one reader of the same page.
+///
+/// The cursor travels WITH the bricks, which is the whole reason this type
+/// exists rather than a bare `AuthorYield`. A feed wall has no snapshot, so the
+/// upstream cursor is the entirety of mason's position in the feed's order, and
+/// it belongs to the exact call that fetched these bricks: a page served from a
+/// cache without it could not be paged past, and a cursor cached apart from its
+/// page could be handed out beside a different one.
+///
+/// Not persisted, so it needs no `Serialize`: sixty seconds in memory is the
+/// whole of a page's life.
+#[derive(Clone)]
+pub struct FeedPage {
+    /// The page's bricks, mapped and moderated, in the feed generator's own
+    /// order.
+    pub yield_: Arc<AuthorYield>,
+    /// Where the page after this one starts. `None` is the end of the feed,
+    /// which is a feed wall's only end condition.
+    pub next: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -65,7 +89,15 @@ const NO_UNAUTHENTICATED: &str = "!no-unauthenticated";
 /// Bluesky shows it to logged-out viewers, so we do too. Labeler labels (the
 /// default moderation service) and self-labels both land in the same `labels`
 /// array, so this one check covers both.
-const HIDDEN_LABELS: [&str; 5] = [
+///
+/// `pub` because it is wire vocabulary as well as an engine rule. The feed
+/// picker reads a feed generator's own labels client-side, so mason never
+/// advertises a feed it would then refuse to lay, and that puts this list on
+/// both sides of the wire. It is pinned rather than copied: `tests/contract.rs`
+/// generates the fixture's `vocab.hiddenLabels` from this array (an integration
+/// test can only see `pub` items) and `contract-check.ts` compares the
+/// TypeScript list to those keys, in both directions.
+pub const HIDDEN_LABELS: [&str; 5] = [
     "!hide",
     NO_UNAUTHENTICATED,
     "porn",
@@ -202,9 +234,7 @@ pub async fn get_image_feed(http: &Http, base: &str, did: &str) -> Result<Author
     author_feed(http, base, did, "posts_with_media", 100).await
 }
 
-/// Shared author-feed read: fetch one page under `filter`, drop reposts and
-/// anything a logged-out viewer must not see, blur the soft-warn tier, and map
-/// the rest to bricks.
+/// Shared author-feed read: fetch one page under `filter` and map it.
 async fn author_feed(
     http: &Http,
     base: &str,
@@ -217,9 +247,59 @@ async fn author_feed(
         urlencode(did)
     );
     let page: AuthorFeed = http.get_json(&url, Bucket::Appview).await?;
+    Ok(AuthorYield {
+        bricks: map_feed_page(page),
+    })
+}
 
-    let bricks = page
-        .feed
+/// One page of a feed generator, and the cursor for the next one.
+///
+/// A feed generator is somebody else's algorithm, so mason pages it and lays
+/// what comes back, in the order it came back. `getFeed` hydrates its results
+/// into the same `PostView` shape `getAuthorFeed` returns, labels and all,
+/// which is why this read shares `map_feed_page` with both author-feed reads
+/// rather than growing a second copy of the moderation filters: a feed wall is
+/// by definition a wall of strangers, and a second copy is a second place for
+/// the `!warn` tier to be forgotten.
+///
+/// The returned cursor is the whole of mason's position in the feed's order,
+/// and `None` is the end of it. `limit` is the caller's, because the mixed
+/// views ask for a page and the image wall asks for `getFeed`'s ceiling.
+pub async fn get_feed(
+    http: &Http,
+    base: &str,
+    feed_uri: &str,
+    cursor: Option<&str>,
+    limit: u32,
+) -> Result<(AuthorYield, Option<String>), HttpError> {
+    let mut url = format!(
+        "{base}/xrpc/app.bsky.feed.getFeed?feed={}&limit={limit}",
+        urlencode(feed_uri)
+    );
+    if let Some(c) = cursor {
+        url.push_str(&format!("&cursor={}", urlencode(c)));
+    }
+    let mut page: AuthorFeed = http.get_json(&url, Bucket::Appview).await?;
+    // taken before the mapper consumes the page it rode in on
+    let next = page.cursor.take();
+    Ok((
+        AuthorYield {
+            bricks: map_feed_page(page),
+        },
+        next,
+    ))
+}
+
+/// The one mapping path every Bluesky feed read shares: drop reposts (`reason
+/// != null`), drop anything a logged-out viewer must not see, blur the
+/// soft-warn tier, and map the rest to bricks.
+///
+/// It is one function rather than one per read because it is where the whole of
+/// mason's post-level moderation lives. An author feed and a feed generator's
+/// page arrive in the same shape, so there is nothing to branch on and no
+/// reason for a second copy to exist and drift.
+fn map_feed_page(page: AuthorFeed) -> Vec<Brick> {
+    page.feed
         .into_iter()
         .filter(|item| item.reason.is_none())
         // drop anything a logged-out viewer must not see at all: an author who
@@ -242,13 +322,18 @@ async fn author_feed(
             }
             Some(brick)
         })
-        .collect();
-    Ok(AuthorYield { bricks })
+        .collect()
 }
 
 #[derive(Deserialize)]
 struct AuthorFeed {
     feed: Vec<FeedItem>,
+    /// Where the next page starts, when there is one. Both author-feed reads
+    /// take a single page and ignore it; a feed wall pages on nothing else.
+    /// Defaulted because the field is optional upstream, and absent means the
+    /// feed has ended rather than the page having failed to parse.
+    #[serde(default)]
+    cursor: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -358,6 +443,40 @@ fn bsky_url(handle: &str, uri: &str) -> String {
     format!("https://bsky.app/profile/{handle}/post/{rkey}")
 }
 
+/// A post's link card, vetted, or nothing at all. Both fields on it are
+/// somebody else's record string and both reach the browser's DOM, so both are
+/// answered here rather than at the far end, where every other third-party URL
+/// in this engine is already answered.
+///
+/// `uri` reaches an `<a href>` in the reader, and an href is a navigation. That
+/// is the exact trip "Outbound safety" says `javascript:`, `data:` and
+/// `vbscript:` must never survive, so a link that is not http(s) takes the
+/// WHOLE embed with it rather than emptying one field: a link card with nowhere
+/// to go is a headline for a page nobody can open, and both renderers already
+/// draw nothing at all for a post with no embed. It also lets the
+/// wall-worthiness check below drop a post that carried nothing else, which is
+/// what a post consisting of one dead link is.
+///
+/// `thumb` reaches an `<img src>`, which is NOT a navigation: no browser runs
+/// script from an image source, so the anchor's reason is not this field's. Its
+/// reason is that the AppView resolves this picture itself and hands back its
+/// own CDN link every time, so anything else is either a picture mason cannot
+/// draw (a blank 1.91:1 hole where a link card should be) or bytes carried
+/// inline past every network rule the page has. The thumb alone goes and the
+/// embed stays: the words and the link are the substance, and card and reader
+/// both already fall back to the text block when a link brought no picture.
+fn external_embed(external: ExternalView) -> Option<ExternalEmbed> {
+    if !is_http_url(&external.uri) {
+        return None;
+    }
+    Some(ExternalEmbed {
+        uri: external.uri,
+        title: external.title,
+        description: external.description,
+        thumb: external.thumb.filter(|thumb| is_http_url(thumb)),
+    })
+}
+
 /// Map a post view to a brick. Posts whose media is a native video become
 /// video bricks; everything else is a post brick.
 fn post_to_brick(post: PostView) -> Option<Brick> {
@@ -409,15 +528,7 @@ fn post_to_brick(post: PostView) -> Option<Brick> {
                         .collect(),
                     None,
                 ),
-                Some(EmbedView::External { external }) => (
-                    Vec::new(),
-                    Some(ExternalEmbed {
-                        uri: external.uri,
-                        title: external.title,
-                        description: external.description,
-                        thumb: external.thumb,
-                    }),
-                ),
+                Some(EmbedView::External { external }) => (Vec::new(), external_embed(external)),
                 _ => (Vec::new(), None),
             };
             // text-only posts with no media and no text are not wall-worthy
@@ -673,6 +784,166 @@ mod tests {
         assert!(bricks.is_empty(), "a hard-hidden post is not laid");
     }
 
+    /// A feed generator's AT-URI, as the reader hands one over.
+    const FEED_URI: &str = "at://did:plc:gen/app.bsky.feed.generator/whats-hot";
+
+    /// The feed generator published the order, so mason lays it in that order
+    /// and hands its cursor back untouched: on a feed wall that cursor is the
+    /// whole of mason's position, there being no snapshot to hold one.
+    #[tokio::test]
+    async fn get_feed_keeps_upstream_order_and_returns_the_cursor() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .and(query_param("feed", FEED_URI))
+            .and(query_param("limit", "24"))
+            .and(query_param("cursor", "page2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "feed": [
+                    post_json("at://did:plc:aa/app.bsky.feed.post/3", serde_json::Value::Null),
+                    post_json("at://did:plc:aa/app.bsky.feed.post/1", serde_json::Value::Null),
+                    post_json("at://did:plc:aa/app.bsky.feed.post/2", serde_json::Value::Null),
+                ],
+                "cursor": "page3"
+            })))
+            .mount(&server)
+            .await;
+
+        let (AuthorYield { bricks, .. }, next) =
+            get_feed(&Http::new(), &server.uri(), FEED_URI, Some("page2"), 24)
+                .await
+                .expect("the feed uri, the limit and the cursor all reach the query");
+        let laid: Vec<&str> = bricks.iter().map(|b| b.id()).collect();
+        assert_eq!(
+            laid,
+            [
+                "at://did:plc:aa/app.bsky.feed.post/3",
+                "at://did:plc:aa/app.bsky.feed.post/1",
+                "at://did:plc:aa/app.bsky.feed.post/2"
+            ],
+            "the feed's own order survives the mapper"
+        );
+        assert_eq!(next.as_deref(), Some("page3"), "and its cursor comes back");
+    }
+
+    /// The end of a feed is upstream sending no cursor, and that is the only
+    /// end condition a feed wall has.
+    #[tokio::test]
+    async fn get_feed_reports_no_cursor_at_the_end() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "feed": [post_json("at://did:plc:aa/app.bsky.feed.post/1", serde_json::Value::Null)]
+            })))
+            .mount(&server)
+            .await;
+
+        let (AuthorYield { bricks, .. }, next) =
+            get_feed(&Http::new(), &server.uri(), FEED_URI, None, 24)
+                .await
+                .unwrap();
+        assert_eq!(bricks.len(), 1, "the last page still lays its bricks");
+        assert!(next.is_none(), "and nothing follows it");
+    }
+
+    /// The shared mapper is the whole point: a feed wall inherits repost
+    /// dropping and the hidden tier without a second copy of either, on a
+    /// surface where every author is a stranger to the reader.
+    #[tokio::test]
+    async fn get_feed_drops_reposts_and_hidden_authors() {
+        let server = MockServer::start().await;
+        let mut repost = post_json(
+            "at://did:plc:bb/app.bsky.feed.post/2",
+            serde_json::Value::Null,
+        );
+        repost["reason"] = serde_json::json!({"$type": "app.bsky.feed.defs#reasonRepost"});
+        let mut opted_out = post_json(
+            "at://did:plc:cc/app.bsky.feed.post/3",
+            serde_json::Value::Null,
+        );
+        opted_out["post"]["author"]["labels"] = serde_json::json!([{"val": "!no-unauthenticated"}]);
+
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "feed": [
+                    post_json("at://did:plc:aa/app.bsky.feed.post/1", serde_json::Value::Null),
+                    repost,
+                    opted_out
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let (AuthorYield { bricks, .. }, _) =
+            get_feed(&Http::new(), &server.uri(), FEED_URI, None, 24)
+                .await
+                .unwrap();
+        assert_eq!(bricks.len(), 1, "only the plain post is laid");
+        assert_eq!(bricks[0].id(), "at://did:plc:aa/app.bsky.feed.post/1");
+    }
+
+    /// And the soft tier too: a `!warn` post is kept behind a reveal rather
+    /// than dropped, exactly as on an author feed.
+    #[tokio::test]
+    async fn get_feed_blurs_warned_posts() {
+        let server = MockServer::start().await;
+        let mut warned = post_json(
+            "at://did:plc:aa/app.bsky.feed.post/1",
+            serde_json::Value::Null,
+        );
+        warned["post"]["labels"] = serde_json::json!([{"val": "!warn"}]);
+
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "feed": [warned] })),
+            )
+            .mount(&server)
+            .await;
+
+        let (AuthorYield { bricks, .. }, _) =
+            get_feed(&Http::new(), &server.uri(), FEED_URI, None, 24)
+                .await
+                .unwrap();
+        assert_eq!(bricks.len(), 1, "a warned post is kept, not dropped");
+        match &bricks[0] {
+            Brick::Post(p) => assert_eq!(
+                p.blur.as_ref().map(|b| b.label.as_str()),
+                Some("!warn"),
+                "its media is covered behind a reveal"
+            ),
+            other => panic!("expected a post brick, got {other:?}"),
+        }
+    }
+
+    /// A feed reference is an untrusted string that reaches an upstream query,
+    /// so it is percent-encoded into one value. `query_param` compares decoded
+    /// values, so a reference carrying `&` matching here (with the limit still
+    /// the one mason asked for) is proof it did not split the query in two and
+    /// rewrite the request.
+    #[tokio::test]
+    async fn get_feed_percent_encodes_the_feed_reference() {
+        let server = MockServer::start().await;
+        let sneaky = "at://did:plc:gen/app.bsky.feed.generator/x&limit=1";
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .and(query_param("feed", sneaky))
+            .and(query_param("limit", "24"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "feed": [post_json("at://did:plc:aa/app.bsky.feed.post/1", serde_json::Value::Null)]
+            })))
+            .mount(&server)
+            .await;
+
+        let (AuthorYield { bricks, .. }, _) =
+            get_feed(&Http::new(), &server.uri(), sneaky, None, 24)
+                .await
+                .expect("the whole reference arrives as one query value");
+        assert_eq!(bricks.len(), 1);
+    }
+
     #[tokio::test]
     async fn get_profile_reads_the_did_and_self_label() {
         let server = MockServer::start().await;
@@ -790,5 +1061,111 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(profile.did, "did:plc:aa");
+    }
+
+    /// One `app.bsky.embed.external#view` as the AppView would report it, with
+    /// whichever of the two strings a case is about.
+    fn external_view(uri: &str, thumb: Option<&str>) -> ExternalView {
+        ExternalView {
+            uri: uri.into(),
+            title: "a headline from the linked page".into(),
+            description: "what the page advertises".into(),
+            thumb: thumb.map(Into::into),
+        }
+    }
+
+    /// One post through the real mapping path, so these cases pin what reaches
+    /// a brick rather than what one helper returns in isolation.
+    fn bricks_from(text: &str, embed: serde_json::Value) -> Vec<Brick> {
+        let mut item = post_json("at://did:plc:aa/app.bsky.feed.post/1", embed);
+        item["post"]["record"]["text"] = serde_json::json!(text);
+        let feed: AuthorFeed = serde_json::from_value(serde_json::json!({"feed": [item]})).unwrap();
+        map_feed_page(feed)
+    }
+
+    fn external_embed_json(uri: &str) -> serde_json::Value {
+        serde_json::json!({
+            "$type": "app.bsky.embed.external#view",
+            "external": {"uri": uri, "title": "click me", "description": ""}
+        })
+    }
+
+    /// The reader renders this uri as an `<a href>`, so a scheme that is not
+    /// http(s) must not get out of `sources/` at all.
+    #[test]
+    fn a_link_that_is_not_http_takes_the_whole_embed_with_it() {
+        for uri in [
+            "javascript:alert(document.domain)",
+            "  JavaScript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+            "vbscript:msgbox",
+            "intent://evil#Intent;scheme=https;end",
+            "//example.com/no-scheme-at-all",
+            "",
+        ] {
+            assert!(
+                external_embed(external_view(uri, Some("https://cdn.test/thumb.jpg"))).is_none(),
+                "{uri} reached a brick"
+            );
+        }
+    }
+
+    #[test]
+    fn an_http_link_arrives_whole() {
+        let embed = external_embed(external_view(
+            "https://example.com/story?utm=1",
+            Some("https://cdn.bsky.app/img/feed_thumbnail/x@jpeg"),
+        ))
+        .expect("an https link is the ordinary case");
+        assert_eq!(embed.uri, "https://example.com/story?utm=1");
+        assert_eq!(embed.title, "a headline from the linked page");
+        assert_eq!(embed.description, "what the page advertises");
+        assert_eq!(
+            embed.thumb.as_deref(),
+            Some("https://cdn.bsky.app/img/feed_thumbnail/x@jpeg")
+        );
+    }
+
+    /// The picture is decoration and the link is the substance, so a thumb that
+    /// is not an AppView CDN link goes on its own and the card still renders,
+    /// through the same path a link that brought no picture already takes.
+    #[test]
+    fn a_thumb_that_is_not_http_goes_without_the_embed() {
+        for thumb in [
+            "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=",
+            "javascript:alert(1)",
+            "//cdn.example.com/og.png",
+        ] {
+            let embed = external_embed(external_view("https://example.com/story", Some(thumb)))
+                .expect("the link itself is fine, so the card stays");
+            assert!(embed.thumb.is_none(), "{thumb} reached an img src");
+            assert_eq!(embed.uri, "https://example.com/story");
+        }
+    }
+
+    #[test]
+    fn a_post_that_says_something_keeps_its_words_and_loses_the_dead_link() {
+        let bricks = bricks_from(
+            "hello wall",
+            external_embed_json("javascript:alert(document.domain)"),
+        );
+        assert_eq!(bricks.len(), 1);
+        match &bricks[0] {
+            Brick::Post(post) => {
+                assert_eq!(post.text, "hello wall");
+                assert!(post.external.is_none(), "a dead link reached the wall");
+            }
+            other => panic!("expected post brick, got {other:?}"),
+        }
+    }
+
+    /// A post whose only content was a link nobody can open has nothing left to
+    /// show, and the wall-worthiness rule catches it for free.
+    #[test]
+    fn a_post_carrying_only_a_dead_link_never_reaches_the_wall() {
+        assert!(
+            bricks_from("", external_embed_json("javascript:alert(1)")).is_empty(),
+            "a post with no text, no images and no openable link is not wall-worthy"
+        );
     }
 }

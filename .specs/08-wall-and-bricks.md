@@ -1,6 +1,6 @@
 # 08 - The Wall and Its Bricks
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley
 
 This page covers what a reader sees and touches: the three wall layouts, the card
 components that render each brick kind, the video player, and the states a wall
@@ -18,13 +18,16 @@ can be in. The state machine driving it is in
 3. Keep the endless scroll moving, and say so honestly when it cannot.
 4. Play video only on an explicit click, one at a time.
 5. Keep DOM order equal to feed order, whatever the visual packing does.
+6. Open any brick in place, at full size, without leaving the wall.
 
 ---
 
 ## Layouts
 
-One control (`LayoutPicker`) offers three walls. `glaze` is also an algorithm:
-picking it sets `mode=glaze` and re-fetches an images-only wall.
+One control (`LayoutPicker`) offers three views, and all three work on either
+wall source. `glaze` is also an algorithm: picking it sets `mode=glaze`, which
+on a graph wall re-fetches an images-only wall and on a feed wall filters the
+feed's own posts to those carrying an image.
 
 | Layout | Component | Packing |
 |---|---|---|
@@ -121,9 +124,26 @@ Details worth pinning:
 - **Icons are inline SVG, never glyphs.** Glyph characters sit on a font baseline
   and render unevenly across platforms; `Icon.svelte` holds every lucide path the
   app draws.
-- **Outbound links** are `target="_blank" rel="noopener noreferrer"` and go
-  through `clientUrl`, which rewrites `bsky.app` to the reader's chosen client and
-  passes everything else through.
+- **Every outbound anchor stays a real link, and the anchor that stands for the
+  brick opens the reader on a plain click.** Anchors keep `target="_blank"` and
+  `rel="noopener noreferrer"`, and the Bluesky ones keep their `clientUrl`
+  rewrite, so middle-click, cmd-click and "copy link address" all still reach
+  the source. A blog anchor points at the publication directly and always did:
+  `clientUrl` rewrites `bsky.app` hostnames and nothing else, so a blog card has
+  never had one to keep. A plain unmodified left click is intercepted
+  (`preventDefault`) and opens the brick reader. Keeping the anchor rather than
+  swapping it for a button is what preserves the browser's own affordances.
+
+  `GlazeCard`'s existing rule that a tap opens the post while a drag scrolls
+  the strip still holds; the tap now opens the reader instead.
+
+  **Which anchor stands for the brick differs by card, and there are three of
+  them.** Only post and blog cards hand `BrickShell` an `href`, so only they
+  have a card-wide link: a video card's one anchor is its watch-at-source link,
+  and a glaze card's are per image. All three call the same
+  `reader.activate(event, brick)`, so the modifier-key rule lives in one place.
+  Intercepting `BrickShell` alone would leave the entire glaze wall and every
+  video brick with no way into the reader.
 
 ### GlazeCard
 
@@ -142,14 +162,103 @@ a 140 ms debounced fallback, and both defer to an in-flight programmatic
 correction. A live region announces "image N of M".
 
 Each image is its own link and the controls sit outside them, so a tap opens the
-post while a drag scrolls the strip and the arrows never trip navigation. At rest
-the card is just the picture; on hover an author pill and the caption fade in.
-Touch has no hover, so there they stay shown.
+brick in the reader while a drag scrolls the strip and the arrows never trip
+navigation. At rest the card is just the picture; on hover an author pill and
+the caption fade in. Touch has no hover, so there they stay shown.
 
 When any image carries a description, the caption bar gains an **ALT** button.
 Opening it behaves like a small dialog: focus moves to the close control, Escape
 or the close button returns focus to the trigger, and the covered strip is
 `inert` while it is up.
+
+---
+
+## The brick reader
+
+`BrickReader` renders one brick at reading width over a dimmed wall. It is
+mounted once in `+layout.svelte`, so the header dims with everything else, and
+it renders nothing at all unless the reader is showing a brick: `page.state.brick`
+naming one the `reader` rune is still holding (see
+[07-web-client.md](07-web-client.md)).
+
+It shows what the card had to leave out. Nothing here is fetched: the reader is
+the same `Brick` the card was given.
+
+It shows that brick and nothing around it. No replies, no thread context, no
+parent post: the reader is one brick, larger. That boundary is what keeps it a
+rendering change rather than a new surface, and it is stated here because a
+reader-shaped overlay is exactly where somebody will assume a conversation
+lives.
+
+| Kind | What the reader adds over the card |
+|---|---|
+| Post | Every image, each at its own aspect ratio, rather than the first one; the full text unclamped; the external embed with its whole description; the timestamp |
+| Post (from glaze) | The same reader. A glaze brick is a post brick, so its filmstrip becomes a stack and every alt text is readable |
+| Video | The poster with a play button that mounts `VideoPlayer` exactly as the card does; title, activity or viewer count, runtime, author |
+| Blog | The cover at full width, the publication chip, the whole description, every tag rather than four, the published date, and "read at <publication>" as the primary control, rendered only when the blog has a canonical URL |
+
+A blog's article body is still not rendered, and the reader is where that
+limit is most visible: the content union of `site.standard.document` is
+platform-specific and mason never parses it (see
+[00-overview.md](00-overview.md)). The reader answers that by making the
+outbound link the primary action on a blog rather than a footnote.
+
+The reader is the one place a post's `external.uri` reaches an `<a href>`, and
+that link is vetted rather than rewritten: `httpUrl` and not `clientUrl` (see
+[07-web-client.md](07-web-client.md)). It is a stranger's link carried inside
+their record, not a url mason built, so the reader's chosen client has no claim
+on it. Sending a `bsky.app` starter pack or hashtag to another client would land
+on a route that client does not serve, while the address printed under the
+headline, and the host `LinkPreview` draws over the picture, still read
+`bsky.app`.
+
+`BlogBrick.url` is legitimately empty (a failed `getRecord` on
+`site.standard.publication` leaves the publication with no base, so
+`canonical_url` answers `""`), and an `<a href="">` resolves to the current
+document. Both surfaces guard on it and neither renders a dead control:
+`BrickShell` gives such a card no anchor at all, and the reader omits the "read
+at" button rather than offering a way out that reopens mason.
+
+### Dialog behaviour
+
+The reader is a modal dialog in the same language as `SwitchWall`:
+`role="dialog"` with `aria-modal="true"`, labelled by the brick's own heading
+or its author line.
+
+- Focus moves into the reader on open and returns to the card that opened it
+  on close, so a keyboard reader lands back where they were on the wall.
+- Escape closes. So does the close control, a click on the scrim, and the back
+  gesture (the reader is a history entry).
+- The layout's content wrapper is `inert` while the reader is up, which is what
+  traps focus. The reader is mounted as that wrapper's **sibling**, not inside
+  it, because `inert` applies to an element and all of its descendants: a reader
+  nested in the wrapper it dims would be unfocusable and invisible to assistive
+  tech the moment it opened.
+- `document.documentElement` gets `overflow: hidden`, which stops the wall
+  scrolling behind the reader. It does not stop the pump: the sentinel's
+  observer stays connected, so bricks may still be appended behind an open
+  reader. That is harmless, because an append never moves a laid brick and the
+  reader locates its own brick by id.
+- Left and right arrows step to the previous and next brick on the wall, and
+  two visible controls do the same. Stepping stops at the ends of the laid
+  wall; the reader never triggers pagination. A step swaps the whole panel, so
+  it keeps focus inside the reader and announces the brick's new position
+  politely. Two mechanisms carry that, and both are load-bearing rather than
+  incidental: the panel scrolls back to its top, because it is the same element
+  across a step and a five-image post would otherwise open the next brick
+  halfway down; and focus is re-homed to the panel whenever a step leaves it
+  outside, which happens when the step disables the control that was focused or
+  crosses into a kind that does not render it. Without the second, focus lands on
+  `body`, outside the dialog, with an inert wall behind it and nothing to tab back
+  into.
+- One video plays at a time, network-wide, unchanged, but the reader must claim
+  the player under **its own id** (`reader:<brick.id>`). A card collapses back
+  to its poster only when `player.activeId` stops matching its own brick id, so
+  a reader claiming the same id would leave the card mounted and playing behind
+  the scrim, two elements and two audio streams. Claiming a distinct id makes
+  the card a loser of the claim and tears it down through the path that already
+  exists. `VideoPlayer` remains the only sanctioned `.play(`, and
+  `just guard-autoplay` still holds over the reader.
 
 ---
 
@@ -198,8 +307,18 @@ it. The hidden tier never reaches the wall at all (see
 [04](04-sources-and-moderation.md)), so anything that gets here can always be
 revealed.
 
-The choice is per brick and forgotten on reload, by design: no storage, no
-lingering "show everything" switch.
+The choice is per brick and keyed by brick id in the `revealed` session set, so
+a brick uncovered on the card is still uncovered in the reader and on a
+re-place. It is forgotten on reload, by design: the set lives in a rune, never
+in storage, so there is no lingering "show everything" switch.
+
+On the post card and on the glaze card's single and grid branches the reveal
+button sits *inside* the card's own anchor, so it stops the click twice:
+`stopPropagation` keeps it away from the reader's activation handler on that
+anchor, and `preventDefault` keeps the anchor's `href` from opening the source,
+which propagation alone cannot reach because the browser gates that navigation
+on `defaultPrevented` rather than on the listener chain. Together they keep
+"show anyway" a reveal and only a reveal.
 
 ---
 
@@ -210,18 +329,31 @@ lingering "show everything" switch.
 | Condition | What the reader sees |
 |---|---|
 | `initialLoad` | A 12-card skeleton grid at the same column count as the real wall |
-| `error` and no items | An error panel: sealed, handle-not-found, or unreachable, each with the right recovery |
+| `error` and no items | An error panel: sealed, handle-not-found, no-such-feed, or unreachable, each with the right recovery |
 | `done` and no items | "this wall has no bricks yet", with a handle box. An empty wall is a site, not a dead end |
 | items present | The wall, plus a sentinel, plus a tail |
 | `error` with items | A retry button: "more bricks did not arrive" |
 | `stalled` | "the wall paused", with a "try for more" button. Scrolling retries too |
 | `warming` or loading or pumping | A 4-card skeleton tail |
+| `warming` with items already laid | The wall the reader was reading, reflowing into the refreshed one, with the usual four-card skeleton tail beneath it. Never the twelve-card initial grid, which is `initialLoad` only and a refresh does not set it |
 | `done` | "that is every brick. the wall is finished." |
 
 Both recoverable errors drop the reader into a handle box, because a wall you
 cannot see is still a door to another one. The typo keeps its text to fix; the
 sealed wall clears it, because there is nothing to correct, only somewhere else
 to go. Both focus and select the input on arrival.
+
+A feed wall changes the chrome, not the wall. `SwitchWall` shows the feed
+generator's avatar and name where it would show the owner's face, and the empty
+state reads "this feed has no bricks yet". Every other state (the skeletons, the
+stall, the ending, the three error panels) is unchanged, and all three views are
+offered.
+
+The fourth panel is the one a feed wall adds, and it deliberately offers neither
+handle box nor retry: a bad feed link is not a mistyped handle, and a retry
+cannot repair a feed that is not there. The way on is the header's switcher,
+which on a feed wall is also the door to the feed picker, plus the demo link
+every panel carries.
 
 ### The scroll pump
 
@@ -264,6 +396,171 @@ freezes it: the wall must stop moving the instant they reach for it.
 | `focusin` anywhere inside the wall | A switch user's way of engaging |
 | `prefers-reduced-motion: reduce` | Freeze before it moves at all: those readers never see the auto-reflow |
 
+### Refreshing
+
+`RefreshWall` sits in the header beside the layout and client pickers: one
+control, no confirmation, no count.
+
+**It does not scroll.** The wall re-lays under the reader, wherever they are.
+
+This is a product choice and not a mechanical necessity, and it is worth being
+precise about which, because the mechanics nearly went the other way. A
+programmatic scroll is indistinguishable from a reader reaching for the wall:
+`window.scrollTo` moves the position synchronously but queues its `scroll`
+event, and that event is delivered *after* the microtask that re-runs the
+freeze effect and arms its listeners. Before the in-flight marker existed, a
+refresh that scrolled therefore froze itself on its own scroll in either call
+order, and committed the pre-refresh wall. The marker removes that: a freeze
+during a refresh is deferred until the flagged preview lands, whoever triggered
+it, so a scroll is now safe.
+
+What is left is the reason the control still does not scroll: the outgoing wall
+stays on screen and reflows into the new one, and that is a thing the reader has
+to be looking at to see. Jumping them to the top is not wrong, it just throws
+the reflow away. The alternative is cheap now, and it is an open question below
+rather than a closed door.
+
+Under `prefers-reduced-motion: reduce` there is no scroll in it at all, and a
+refresh is still exactly one request out: `FeedGrid` freezes the instant
+`warming` flips true, with no listener attached and no scroll event to wait for,
+so a reduced-motion refresh is a cursorless preview carrying the flag plus a
+freeze that the in-flight marker holds until that preview's cursor has been
+adopted. One cursorless request, one refreshed fan-out, and one reflow when the
+preview lands.
+
+The control closes an open reader before it asks for the wall, because a refresh
+replaces `feed.items` wholesale and the reader locates its open brick in that
+list by id. Today no click can reach that line, since an open reader makes the
+content wrapper `inert` and this control sits inside it, so the call is the
+guarantee held for the next trigger rather than a live path.
+
+It is disabled while the feed is loading or warming, and that is the whole rate
+limit: one refresh can be in flight, so a double tap cannot start two
+hundred-author fan-outs. The wall keeps its single polite live region, which
+already says "laying bricks" while warming; a refresh is a warm, so it needs no
+new announcement and `RefreshWall` adds no region of its own. The announcement
+of *new* bricks is suppressed for free, because the region's count resets while
+warming so a reflow's churn never reads as new bricks.
+
+---
+
+## The feed picker
+
+A handle assumes its own answer: it asks the reader who they already want to
+read. The feed picker is mason's other front door, and it is a screen rather
+than a field, standing beside the handle box as a peer.
+
+`FeedPicker` is reached two ways: from the landing page, where it sits under the
+handle box, and from `SwitchWall` on a laid wall, which is already the
+switch-walls affordance. Either way it opens over the current content and is held
+in history state (`pushState('', { picker: 'feeds' })`), so the back gesture
+returns the reader to where they were instead of out of mason.
+
+Five ways to reach a feed, because they answer five different states of knowing
+what you want:
+
+| Section | Source | Shown when |
+|---|---|---|
+| Recent | `mason:feeds` in `localStorage`, most recent first, capped at 12 | The reader has opened a feed before |
+| Search | `app.bsky.unspecced.getPopularFeedGenerators?query=<q>` | The reader types a search term |
+| By creator | `app.bsky.feed.getActorFeeds?actor=<handle>` | The input parses as a handle |
+| Popular | The same popular endpoint with no query | Always, as the resting state |
+| Paste | The value is handed to mortar as `?feed=`, which parses it | The input is a `bsky.app` feed link or an AT-URI |
+
+**All three network questions page**, not only the resting one: whichever of
+search, by creator and popular is showing keeps a `more feeds` control until its
+cursor runs out. The cursor is the picker's own state and never reaches the URL,
+so paging is forgotten the moment the picker closes.
+
+One input serves search, creator and paste: what the reader typed decides which
+question is being asked. That is the same input the handle box takes, and **by
+creator is the bridge between the two front doors**: a handle here means "show me
+the feeds this person made" rather than "show me their wall".
+`getActorFeeds` accepts a bare handle, so it costs no resolution hop.
+
+Each result is a card carrying the feed's avatar, its display name, its
+creator's handle, its description clamped to two lines, and its like count
+(hidden at zero, like every tally on the wall). Activating one opens
+`/?feed=<uri>` and writes it to `mason:feeds`.
+
+**Whichever button activated it**, which costs a second listener rather than
+one: no browser dispatches `click` for a non-primary button, so a middle click,
+the one that opens the wall in a background tab, is an `auxclick` and nothing
+else. A card that only listened for `click` remembered every feed a reader
+cmd-clicked and no feed they middle-clicked. `auxclick` also fires for the right
+button, which opens a context menu and no wall, so the primary and middle
+buttons are the two that count. The path neither listener can see is "open link
+in new tab" chosen from that context menu, which dispatches no event at all; that
+feed is remembered the next time it is opened from a link. The rule lives once,
+in `feeds.rememberFromLink`, because the switcher panel's recent-feed links are
+the same link with the same promise.
+
+**A recents card is keyed by its uri and never by its position**, in the picker
+and in the switcher panel alike, and that is a correctness rule rather than a
+preference. Remembering a feed moves it to the head of the very list the card was
+rendered from, so the list reorders under the click that started it, and Svelte
+flushes in a microtask between one event listener and the next. With a position
+key the clicked anchor is handed a different feed, and its `href` with it, before
+the browser resolves the navigation, so the picker lays the feed that sat one
+place earlier for every card but the first. Nothing says so: the header, the wall
+and `mason:feeds` all agree on the wrong feed, and the reader's own repair (tap
+again, because the feed they wanted is now at the front) makes it read as
+flakiness. `ordered()` already keeps one entry per uri, so a uri key cannot
+repeat. The picker's **results** list is deliberately the opposite, keyed by
+position, and the two are meant to disagree: results are pages of somebody else's
+directory concatenated with no dedupe between them, where a repeated uri throws
+`each_key_duplicate` mid render and takes the whole picker with it, and nothing a
+results card does reorders the results. The general rule, for any list: a link
+whose own handler mutates the list it is rendered from must be keyed by identity.
+
+### The picker reads the AppView directly, and that is chrome rather than moderation
+
+The picker is a directory listing, so it asks the public AppView from the browser
+exactly as `profile` already does for a wall owner's avatar. Content moderation
+stays where it belongs: every brick a chosen feed yields is filtered by mortar
+when the wall is laid.
+
+The picker does owe one check of its own, because a feed generator's own record
+carries labels. A feed whose view or whose creator carries the hidden tier is not
+listed, so mason never advertises a feed it would then refuse to lay properly.
+That puts the hidden-label list on both sides of the wire, which is normally the
+shape of a bug, so it is pinned rather than copied: the contract fixture carries
+`vocab.hiddenLabels` as object keys and `contract-check.ts` asserts the
+TypeScript list equals it, the same mechanism that already keeps the error codes
+and the video sources in step (see [06-wire-contract.md](06-wire-contract.md)).
+
+A second, smaller list (`UNLAYABLE_FEEDS`) covers feeds that rank by *who is
+asking*, which mason has no viewer for: `getFeed` answers 502 or 401 for them
+logged out, so listing one promises a wall that cannot be laid. It applies to
+browse, search, a creator's own list, **and** recents, and against recents it is
+a filter on the way out rather than a delete on the way in: `mason:feeds` keeps
+the entry, and the picker hides it. Removing a name from the list therefore
+brings the card straight back rather than asking a reader to find the feed again,
+which is only true because `remember()` writes the stored list and not the
+filtered one.
+
+### States
+
+| Condition | What the reader sees |
+|---|---|
+| Loading | Six card skeletons at the picker's own column count |
+| A search with no results | "no feeds by that name", and the paste hint |
+| A handle with no feeds | "that person has not made any feeds", with a link to lay their wall instead |
+| The AppView unreachable | Recents and the paste box, plus a quiet line saying browsing is unavailable. Paste is the load-bearing path and always works |
+| A pasted value that will not parse | The input says so in place; nothing navigates |
+| More results left | A `more feeds` control under the list, for whichever question is showing. It goes when a page adds nothing, which is how the picker learns the list ended: the upstream cursor is private, so the end is inferred from a page that yielded no new cards rather than announced |
+
+The picker is a dialog in the same language as mason's other overlays:
+`role="dialog"`, `aria-modal="true"`, focus into the input on open, Escape and
+back to close, `inert` behind it, and the results as a list so a screen reader is
+told how many there are. It mounts as a sibling of the layout's content wrapper,
+beside the brick reader and outside the subtree it dims, and it shares that
+wrapper's `inert` condition rather than adding a second one: the wrapper is
+inert while **either** overlay is open. Opening one closes the other, because
+the picker is a landing surface and the reader is a wall surface, and neither
+has anything to say over the top of the other. Touch targets stay at 44px and
+the cards' hover lift is `motion-safe:`, like a brick's.
+
 ---
 
 ## Accessibility behaviours
@@ -285,9 +582,35 @@ live in components.
   with roving arrow-key focus, Home, End, Escape and click-away, because a native
   `<select>` cannot render the client icons; `SwitchWall` is a dialog with
   Escape, click-away, and a focus-out that closes when focus leaves the whole
-  switcher.
+  switcher, **and it also closes on the click that takes a link inside it**. Its
+  openness is local component state, so a client-side navigation does not touch
+  it: the recent-feed links and the demo link would otherwise leave the dialog
+  and its scrim over the wall that had just laid, dimming it and swallowing every
+  click, with a screen-reader reader still inside a dialog named "Switch wall"
+  over a wall that had already switched. A MODIFIED click leaves the panel up,
+  because it opened a wall somewhere else and this one has not moved, and no link
+  in the panel ever calls `preventDefault`: they stay real links. A middle click
+  leaves it up for a plainer reason, that no `click` is dispatched for it at all,
+  which is also why the recent-feed link listens for `auxclick` as well and
+  remembers the feed there (one rule, both feed links, above). The close takes
+  no focus back either, unlike a dismissal, because the router puts focus at the
+  top of the page it has just laid. `RefreshWall` is a plain `<button>` with an
+  accessible name and a disabled state that is real rather than styled, so a
+  screen-reader user is told the wall is already refreshing instead of pressing
+  a control that silently does nothing.
 - **Touch targets are at least 44px** (`min-h-11`) on every control, including
   the ones that shrink to icons on mobile.
+- **The reader is a real dialog.** `role="dialog"`, `aria-modal="true"`, an
+  accessible name from the brick, focus in on open and back to the opening card
+  on close, Escape and click-away, and `inert` on everything behind it (with the
+  reader mounted outside the inert subtree). Left and right arrows step along
+  the wall from inside it, and they cannot collide with the wall's own
+  navigation-key freeze handler because the two key sets are disjoint: that
+  handler matches the vertical set (`ArrowDown`, `ArrowUp`, `PageDown`,
+  `PageUp`, `Home`, `End`, space) and never the horizontal one. The disjointness
+  is what carries this, not the freeze: `feed.freeze()` is async and does not
+  clear `warming` until its fetch resolves, so the wall's listeners are still
+  attached while the reader mounts.
 - **Motion is gated.** Hover transforms are `motion-safe:` at every call site;
   the brick entrance becomes a crossfade under reduced motion; the layout thumb
   and the filmstrip both stop animating.
@@ -307,11 +630,15 @@ web/src/lib/
     BrickShell.svelte        shared card chrome and accent
     AuthorChip.svelte        avatar, display name, handle
     Sensitive.svelte         the !warn reveal
+    BrickReader.svelte       one brick at reading width, over the wall
     VideoPlayer.svelte       the ONE sanctioned .play()
     LandingWall.svelte       the inert demo wall behind the handle form
+    FeedPicker.svelte        the second front door: browse, search, paste
+    FeedCard.svelte          one feed generator as a result
     HandleForm.svelte        the front door
     SwitchWall.svelte        the owner's face as a wall switcher
     LayoutPicker.svelte      bento / masonry / glaze
+    RefreshWall.svelte       lay this wall again, now
     ClientPicker.svelte      which atmosphere client links open in
     Icon.svelte              every lucide path, inline
     ClientIcon.svelte        per-client marks
@@ -371,3 +698,13 @@ appears and the form still works.
 - *Live region verbosity.* Every pagination batch is announced. On a fast
   connection during a long scroll that is a lot of announcements; whether it
   wants throttling is unmeasured.
+- *Whether a refresh should return the reader to the top.* It does not, and this
+  is a live choice rather than the constraint it started as: the in-flight
+  marker defers any freeze during a refresh, including one a programmatic scroll
+  would trigger, so scrolling is no longer self-defeating. The cost is only that
+  a reader taken to the top does not watch the reflow they asked for. Open: a
+  reader deep in a long wall probably wants the top, and a reader who tapped
+  refresh to see what is new probably does not.
+- *Pull to refresh.* A touch reader's instinct is to drag down, and the wall has
+  nothing there. It competes with the browser's own overscroll refresh and needs
+  a gesture threshold, a rubber band and a reduced-motion path. Open.

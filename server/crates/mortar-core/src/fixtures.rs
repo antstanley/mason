@@ -183,8 +183,53 @@ fn brick(i: usize) -> Brick {
                     vec![]
                 },
                 external: None,
-                blur: None,
+                // exactly one covered brick on the offline wall, so the !warn
+                // reveal has something to reveal without a real upstream label.
+                // Brick 0 is the only index that carries it on every axis: it is
+                // a post, `with_image` above is true for it (and a post with no
+                // image renders no reveal control at all), and it is first on
+                // both the full wall and the glaze wall. This arm builds all 84
+                // posts, so the condition is what keeps it at one.
+                blur: (i == 0).then(|| Blur {
+                    label: "!warn".into(),
+                }),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn blur_label(brick: &Brick) -> Option<&str> {
+        match brick {
+            Brick::Post(b) => b.blur.as_ref().map(|blur| blur.label.as_str()),
+            Brick::Video(b) => b.blur.as_ref().map(|blur| blur.label.as_str()),
+            // a blog never carries one: it comes from a source the Bluesky
+            // labels never reach
+            Brick::Blog(_) => None,
+        }
+    }
+
+    /// The offline wall is the only place the reveal can be seen at all, and it
+    /// wants one covered brick, not a covered wall. The post arm builds 84 of
+    /// the 120 from a single expression, so losing the condition on `i` would
+    /// blur two thirds of the demo.
+    #[test]
+    fn exactly_one_fixture_brick_arrives_covered() {
+        let wall = pool();
+        let covered: Vec<(&str, &str)> = wall
+            .iter()
+            .filter_map(|b| blur_label(b).map(|label| (b.id(), label)))
+            .collect();
+        assert_eq!(covered, vec![("fixture-post-0", "!warn")]);
+    }
+
+    /// The reveal control lives on the covered media, so a covered post with no
+    /// images would render no way to uncover it.
+    #[test]
+    fn the_covered_brick_carries_an_image() {
+        assert!(pool()[0].is_image_post());
     }
 }

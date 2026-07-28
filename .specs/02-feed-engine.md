@@ -1,6 +1,6 @@
 # 02 - Feed Engine
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley
 
 This page covers `mortar-core`: the crate that turns a handle into pages of
 bricks. Scoring and mixing are in [03-grout-and-mixer.md](03-grout-and-mixer.md);
@@ -32,16 +32,22 @@ parsing (`sources/`), or presentation. It never renders and never stores.
 ```rust
 pub async fn handle_feed(
     state: &Arc<AppState>,
-    actor: &str,
+    target: FeedTarget<'_>,
     cursor: Option<&str>,
     mode: Mode,
     intent: FeedIntent,
+    refresh: bool,
 ) -> Result<FeedResponse, AppError>
 ```
 
 Both fronts are thin wrappers around it. `mortar-server`'s axum handler parses
 the query string into these arguments; `mortar-wasm`'s `feed_page` does the same
-from JS strings. Page size is a constant: `PAGE_SIZE = 24`.
+from JS strings.
+
+`FeedTarget` is `Actor(&str)` or `Feed(&str)`, built by each front from the
+query string: `feed` wins when both parameters are present, and neither being
+present is a `bad_request`. Page size is a constant for both:
+`PAGE_SIZE = 24`.
 
 ### Modes
 
@@ -67,12 +73,69 @@ The wasm front polls `Preview` while a wall warms and asks `Freeze` exactly once
 to commit. `Normal` is what a client without a preview loop asks, and it is why
 server mode still opens on a proper mix rather than on nothing but posts.
 
+### Refresh
+
+`?refresh=1` says the reader asked for this wall on purpose. It does two things
+and refuses to do a third.
+
+On a graph wall it is honoured **only on a cursorless request**. A refresh is
+always a first page: mid-scroll it would mean re-reading a hundred author feeds
+to serve page nine, whose bricks were admitted from the old ones anyway. With a
+cursor present the flag is ignored, not an error. A cursor that does not decode
+leaves it alone, because that request is already laying a fresh wall from a
+fresh seed.
+
+On a cursorless request there is already a fresh seed (that is what no cursor
+means), so a refresh always lands on a brand new snapshot id and can never
+disturb the one it replaces. What the flag adds is carried into that snapshot
+and read by its fill: `author_feed` and `image_feed` are re-read from the
+AppView rather than served from cache. Nothing else is. The follow graph, PDS
+endpoints, blog documents, archived streams, the owner's opt-out and the
+per-viewer activity list all stay warm, because none of them is where "new
+posts" lives and every one of them is expensive to re-read (see
+[05](05-caching-and-persistence.md)).
+
+The **fill** honours it and an extension wave never does. A wave asks authors
+this wall has never asked, so there is nothing cached for it to step over, and
+honouring the flag per wave would make a refresh cost more the longer the reader
+scrolls. `fill::fill` passes the snapshot's flag and `fill::extend` passes a
+literal `false`; no signature enforces that, so a test holds it instead.
+
+**A refresh bypasses two of these on a graph wall, and one on a feed wall.**
+`author_feed` and `image_feed` are re-read on a `refresh=1` request; on a feed
+wall it is `feed_pages` instead. Every other cache stays warm. That sentence is
+[05](05-caching-and-persistence.md)'s, word for word, because it is one rule on
+two pages. A feed wall has no snapshot and no author feeds behind it, so that
+one entry is the whole of what "new posts" means there, and the cursorless rule
+does not travel with it: the rule exists because re-reading a hundred
+rate-limited author feeds to serve page nine changes nothing about the pages
+already laid, and a feed page is one AppView call whichever page it names. The
+refreshed answer is inserted as usual, so the freeze behind a refreshed preview
+is still one network read rather than two.
+
+Because the flag rides on snapshot **creation** rather than on each request, it
+is idempotent per wall: `ensure_snapshot` builds a snapshot and spawns its fill
+exactly once, so the preview polls and the freeze that follow a refresh land on
+the already-refreshing snapshot whether or not they repeat the flag. The
+converse is the same rule read the other way, and it is the honest half: a
+request that meets a snapshot somebody else already built inherits **that**
+snapshot's flag. An unflagged request therefore cannot turn off a fill already
+re-reading on a refresh's behalf, and a flagged one cannot make a fill that has
+already gone out re-read anything.
+
+The demo wall ignores it. Its bricks are fixtures compiled into the binary and
+there is nothing to re-read, so the demo arm returns before the flag reaches
+anything.
+
 ### Request flow
 
 ```
-handle_feed(actor, cursor, mode, intent)
+handle_feed(Actor(actor), cursor, mode, intent, refresh)
   │
-  ├─ decode cursor ──▶ Some{seed, offset} | None (garbage decodes to None)
+  ├─ decode cursor ──▶ Some{seed, offset} | None (garbage decodes to None, and
+  │                                               a feed cursor is treated as one)
+  │
+  ├─ refresh &= cursor did not decode   // a refresh is always a first page
   │
   ├─ actor == "demo" ? ──▶ fixture page from compiled-in bricks, return
   │
@@ -81,15 +144,84 @@ handle_feed(actor, cursor, mode, intent)
   ├─ seed = cursor.seed  or  fresh_seed(did)
   │
   ├─ intent == Preview ?
-  │     ensure_snapshot ▸ preview_page(clone of pool) ▸ return {items, cursor(offset 0), warming}
+  │     ensure_snapshot(refresh) ▸ preview_page(clone of pool)
+  │                              ▸ return {items, cursor(offset 0), warming}
   │
-  ├─ get_or_build(did, seed, mode)          // blocks for first paint
+  ├─ get_or_build(did, seed, mode, refresh)  // blocks for first paint
   ├─ get_page(offset, PAGE_SIZE, wait_for_mix = intent == Normal)
   └─ return {items, cursor: has_more ? encode{seed, offset + items.len()} : null}
 ```
 
 A preview's cursor points at the **current** screen (offset 0), not the next
 page, so the freeze that follows commits from there.
+
+---
+
+## A feed wall
+
+A feed generator is an algorithm somebody else published, and mason's job on a
+feed wall is to lay it, not to re-rank it. So a feed wall skips almost the whole
+engine: no snapshot, no pool, no admission caps, no cohort, no extension waves,
+no grout and no mixer.
+
+```
+handle_feed(Feed(ref), cursor, mode, intent, refresh)
+  │
+  ├─ FeedRef::parse(ref) ──▶ AtUri  |  Err(BadRequest)
+  │     a bsky.app feed URL resolves its profile segment to a DID first
+  │
+  ├─ decode cursor ──▶ Some{feed} | None   (a graph cursor here decodes to None:
+  │                                         a fresh wall, not an error)
+  ├─ feed_page_cached(uri, upstream cursor, limit, refresh)
+  │     ──▶ (bricks, next upstream cursor)  |  Err(FeedNotFound | Upstream)
+  │
+  ├─ Mode::Glaze ? ──▶ keep only is_image_post()   (and lay every survivor)
+  ├─ Mode::Wall  ? ──▶ truncate to PAGE_SIZE
+  │
+  └─ intent == Preview ? {items, cursor: the INCOMING cursor, warming: false}
+                       : {items, cursor: next.map(encode)}
+```
+
+Four consequences, and each one is the point:
+
+- **There is nothing to warm.** One AppView call answers a page, so a preview
+  reports itself already settled and echoes the cursor it was given, exactly as
+  the demo wall does. The client freezes on its first poll, and the 60 second
+  `feed_pages` cache makes the freeze that follows a cache hit rather than a
+  second round trip. What it echoes is the position it actually read, re-encoded
+  rather than copied from the request, so a graph cursor handed to a feed wall
+  is dropped here instead of being returned as though it meant something; for a
+  feed cursor the two are byte identical.
+- **The page size follows the view, because glaze's filter is aggressive.** The
+  mixed views ask for `limit = PAGE_SIZE` and may come back a few short, since
+  reposts and moderated posts are dropped after the request; serving short is
+  already normal and the pump retries. Glaze asks for `limit = 100`
+  (`getFeed`'s ceiling) and lays **every** image post that survives, not the
+  first `PAGE_SIZE` of them. Most posts in a general feed carry no image, so
+  asking for 24 and filtering would lay three or four bricks per network call
+  and spend a dozen calls filling one screen. Laying all of them rather than
+  truncating is not an optimisation but a correctness requirement: there is no
+  pool to hold a remainder in, and the cursor mason hands back belongs to the
+  call that fetched them, so a truncated page throws the rest away.
+- **The wall ends when the feed does.** `getFeed` returning no cursor is the
+  whole end condition. There is no `graph_spent`, no `has_more()` and no pool
+  to drain.
+- **Only posts and Bluesky videos can appear.** A feed generator returns post
+  URIs, so blogs and Streamplace bricks are structurally absent from a feed
+  wall. The mix ratio has nothing to balance.
+
+**All three views work on a feed wall, and glaze means something different on
+each source.** A view is the reader's choice about the wall in front of them, so
+it does not depend on where the bricks came from:
+
+| View | Graph wall | Feed wall |
+|---|---|---|
+| Bento, Masonry | Presentation only; one mixed wall packed two ways | Presentation only; one feed packed two ways |
+| Glaze | `Mode::Glaze` re-reads each author deep (`posts_with_media`, 100) and admits image posts alone | `Mode::Glaze` filters the feed's own posts to those carrying an image |
+
+One `mode` value carries both, because `Mode` selects kinds and never a source.
+The layout picker therefore needs no new state, no fourth option and no disabled
+cases: three views, always, whichever door the reader came in through.
 
 ---
 
@@ -113,6 +245,15 @@ The failure direction depends on what is already known:
 
 A flaky profile read must never seal a wall by accident, but an unresolvable
 handle has no wall to lay either way.
+
+A feed wall has no owner to gate. `!no-unauthenticated` is a request about a
+person's own social graph being put on display; a feed generator is a published
+service, and the feed's creator has not asked anybody not to read it. Individual
+posts and their authors are still filtered: a feed wall runs the same post
+mapper as an author feed, which drops a hidden or opted-out author's posts and
+blurs the `!warn` tier (see [04](04-sources-and-moderation.md)). That per-post
+filter is complete coverage on a feed wall, where the cohort filter has nothing
+to do, because a feed cannot yield a blog or a stream.
 
 ---
 

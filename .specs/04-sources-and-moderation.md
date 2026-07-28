@@ -1,6 +1,6 @@
 # 04 - Sources and Moderation
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley
 
 Everything mason reads from the network enters through `sources/`. Each submodule
 reads one upstream and maps it into bricks; `sources/fetch.rs` is the seam the
@@ -31,7 +31,7 @@ or any scoring.
 
 | Source | Base | Endpoints | Bucket |
 |---|---|---|---|
-| Bluesky AppView | `https://public.api.bsky.app` | `app.bsky.actor.getProfile`, `app.bsky.graph.getFollows`, `app.bsky.feed.getAuthorFeed` | `Appview` (rate limited) |
+| Bluesky AppView | `https://public.api.bsky.app` | `app.bsky.actor.getProfile`, `app.bsky.graph.getFollows`, `app.bsky.feed.getAuthorFeed`, `app.bsky.feed.getFeed` | `Appview` (rate limited) |
 | PLC directory | `https://plc.directory` | `GET /<did>` (DID documents) | `Unmetered` |
 | Each author's PDS | resolved per author | `com.atproto.repo.listRecords`, `com.atproto.repo.getRecord`, `com.atproto.sync.getBlob` | `Unmetered` |
 | Streamplace | `https://stream.place` | `place.stream.live.getLiveUsers`, `place.stream.playback.*` | `Unmetered` |
@@ -39,6 +39,13 @@ or any scoring.
 All three bases are fields on `Config` and are overridable, so tests point mortar
 at a wiremock server. In server mode they are additionally overridable by
 `APPVIEW_BASE`, `PLC_BASE` and `STREAMPLACE_BASE` environment variables.
+
+Those three are the whole of the server's upstream configuration. It reads two
+more environment variables that are not upstreams and belong here only so the
+list is complete: `PORT`, which is the port it binds and defaults to 8787, and
+`MASON_ALLOWED_ORIGINS` (see [06](06-wire-contract.md)). Anything unparseable
+falls back to the default rather than failing to start, on the same reasoning as
+the query vocabulary: the safe direction is the default one.
 
 `did:web` identities skip plc.directory and read
 `https://<domain>/.well-known/did.json` instead.
@@ -100,11 +107,39 @@ operator has to reach whoever is generating the traffic.
   included, which the full wall omits), so one request reaches much further back
   and returns far more images than skimming 30 mostly-text posts would.
 
-Both feed reads share one mapping path: drop reposts (`reason != null`), drop
-anything a logged-out viewer must not see, blur the soft-warn tier, then map to
-bricks. A post whose embed is `app.bsky.embed.video#view` becomes a video brick;
-`recordWithMedia` is unwrapped to its media half first; everything else becomes a
-post brick carrying images or an external embed.
+  Both feed reads take a `refresh` argument. When it is set, the cache is not
+  consulted and the AppView answer overwrites whatever was there. A refreshed
+  read that fails *transiently* falls back to the cached yield rather than
+  returning `None`, so a refresh can never lay a thinner wall than the one it
+  replaced: the author did answer, just earlier. A refreshed read with nothing
+  cached behind it behaves exactly like a cold one.
+
+- **`get_feed(feed_uri, cursor, limit)`** pages a feed generator through the
+  AppView and returns `(AuthorYield, Option<String>)`: the mapped bricks and the
+  upstream cursor. It shares the *exact* mapping path with both author-feed
+  reads, which is the whole reason a feed wall inherits moderation, `!warn`
+  blur, video-embed unwrapping and repost dropping without a second
+  implementation of any of them. `getFeed` hydrates its results into the same
+  `PostView` shape `getAuthorFeed` returns, labels included, so the shared
+  mapper needs no branch.
+
+  A 400 or 404 is an unknown or withdrawn feed and becomes `FeedNotFound`. Any
+  other failure is `Upstream`. Unlike an author feed, this is the wall's only
+  source: there is no hundred-author quorum to degrade into, so a failure is
+  the request failing rather than a thin wall.
+
+  This read takes a `refresh` argument too, and steps over its `feed_pages`
+  entry exactly as the two above step over theirs: on a feed wall that entry is
+  the whole of what "new posts" means. What does not carry over is the fallback.
+  There is no hundred-author quorum to degrade into here, so a refreshed read
+  that fails is the request failing, exactly as an unrefreshed one is.
+
+All three feed reads share one mapping path (`map_feed_page`): drop reposts
+(`reason != null`), drop anything a logged-out viewer must not see, blur the
+soft-warn tier, then map to bricks. A post whose embed is
+`app.bsky.embed.video#view` becomes a video brick; `recordWithMedia` is unwrapped
+to its media half first; everything else becomes a post brick carrying images or
+an external embed.
 
 ### PDS resolution (`sources/pds.rs`)
 
@@ -236,13 +271,34 @@ Two classes of untrusted string leave `sources/`, and both are vetted here.
 `is_http_url` accepts only `http://` and `https://`, case-insensitively and after
 trimming. Third-party records carry arbitrary strings in their url fields, and
 `javascript:`, `data:` and `vbscript:` must never survive the trip to the anchor.
-A blog's canonical URL falls back to empty and a live stream's record URL falls
-back to the stream.place watch page.
+A blog's canonical URL falls back to empty, a live stream's record URL falls back
+to the stream.place watch page, and a post's external embed is dropped **whole**
+(`external_embed` in `sources/bluesky.rs`): a link card with nowhere to go is a
+headline for a page nobody can open, and a post carrying nothing else then fails
+the wall-worthiness check and never reaches the wall at all.
+
+That embed's `thumb` is vetted by the same rule for a different reason, since it
+reaches an `<img src>` rather than an anchor and no browser runs script from an
+image source. The AppView resolves that picture itself and hands back its own CDN
+link every time, so anything else is either a picture mason cannot draw or bytes
+carried inline past the page's own network rules. The thumb alone is dropped and
+the embed stays, through the fallback a link that brought no picture already
+takes.
 
 `urlencode` percent-encodes everything outside the RFC 3986 unreserved set for
 any value interpolated into a query string, so a handle, DID or cursor containing
 `&`, `#`, `?` or a space cannot rewrite or truncate the upstream query, or poison
 a cache key derived from it.
+
+A `feed` parameter is a third class of untrusted string: it does not reach an
+anchor, it reaches an *upstream query*. `FeedRef::parse` is what vets it. It
+requires the `at://` scheme and the exact `app.bsky.feed.generator` collection,
+or a `bsky.app` feed URL it rebuilds an AT-URI from, and rejects everything else
+as `bad_request` rather than forwarding it. The result is `urlencode`d into the
+`getFeed` query like every other interpolated value, so a reference carrying
+`&` or `#` cannot rewrite the upstream request or poison the cache key derived
+from it. There is no SSRF surface: the host is always the configured AppView
+base, never anything the reference names.
 
 ### Requests mortar itself makes (SSRF)
 
@@ -279,6 +335,7 @@ wall. But a blip must not be remembered as a fact either.
 | Outcome | Meaning | Cached? | Caller sees |
 |---|---|---|---|
 | Transport error, `RetriesExhausted`, 429, 5xx | Transient | No | `None` from `author_feed_cached` / `image_feed_cached`: the author never answered, so they are not recorded as fanned and a later wave asks again |
+| Transient failure on a refreshed read | Transient | No (the older entry survives) | The previously cached yield, so the refreshed wall is never thinner than the one it replaced |
 | Other 4xx on an author feed | The AppView's honest answer (suspended or deleted repo) | Yes, as an empty yield | An author who genuinely yields nothing |
 | 400/404 on a repo `listRecords` | The collection has never existed here | Yes, empty | "This person does not blog / does not stream" |
 | Any other repo failure | Transient | No | An empty yield this time; the next snapshot asks again |
@@ -298,7 +355,9 @@ a *successful* empty listing ever earns the long negative TTL. See
 server/crates/mortar-core/src/sources/
   mod.rs           the seam's exports: AuthorYield, Follow, StdDocs, LiveStream
   fetch.rs         one fetch-and-cache function per source; the ONLY door algo/ uses
-  bluesky.rs       profile, follows, author feeds, labels, post → brick
+  bluesky.rs       profile, follows, author feeds, feed generator pages, labels,
+                   post → brick
+  feedref.rs       the ?feed= parameter → an AT-URI, or a rejection
   pds.rs           DID document → PDS endpoint, SSRF vetting, blob_url
   standardsite.rs  site.standard.document → BlogBrick, publications, suppression
   streamplace.rs   live list and place.stream.video → VideoBrick, TID timestamps

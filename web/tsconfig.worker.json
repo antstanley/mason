@@ -1,0 +1,41 @@
+{
+	// A SECOND tsc project, for the one file the first one cannot see.
+	//
+	// `svelte-kit sync` writes `../src/service-worker.ts` into the generated
+	// config's `exclude` array (alongside its .js and .d.ts spellings), so the
+	// worker enters no program at all: `tsc -p tsconfig.json` opens every other
+	// .ts in the app and silently skips this one. That is the file holding
+	// mason's only call into the wasm engine, `feed_page`, so until this project
+	// existed nobody was counting its arguments and a call with the wrong number
+	// of them shipped green.
+	//
+	// The empty `exclude` below is the whole mechanism: `extends` merges
+	// `compilerOptions` but REPLACES `include`/`exclude`, so an empty array
+	// overrides the generated one that drops the worker, and `include` then names
+	// the worker itself. The two generated ambient files ride along so this
+	// program holds the same declaration set the app's does ($env, $app, the
+	// `?url` module shapes). Measured: the worker resolves without them today,
+	// through the `/// <reference types="@sveltejs/kit" />` at its head and the
+	// inherited `paths` for $lib. Naming them is what stops that from being
+	// load-bearing.
+	//
+	// What this lane cannot see: order. It counts the arguments and checks their
+	// types, and nothing more. `feed_page`'s tail is a run of optional strings,
+	// so swapping two of them typechecks here and still lays the wrong wall. The
+	// Playwright smoke in `tests/` is what covers order.
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		// a worker has no `document` and no `window`, so drop DOM from the app's
+		// lib list. This makes the project stricter than the app's rather than a
+		// second copy of it: reaching for a browser global from the worker fails
+		// here, where at runtime it would have thrown in the wild.
+		"lib": ["esnext", "webworker"]
+	},
+	"include": [
+		".svelte-kit/ambient.d.ts",
+		".svelte-kit/non-ambient.d.ts",
+		"src/service-worker.ts"
+	],
+	// the generated config drops the worker; this puts it back
+	"exclude": []
+}

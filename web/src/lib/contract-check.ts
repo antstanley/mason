@@ -15,16 +15,16 @@
 // Two mechanisms, because tsc widens JSON string VALUES to `string`:
 // - structure (field names, optionality, null-vs-absent) is checked with
 //   `satisfies` against Wire<T>, the types with literal strings relaxed;
-// - vocabulary (brick kinds, error codes, video sources, query tokens) rides
-//   as fixture object KEYS, which stay literal, and is compared with Equal<>
-//   in both directions.
+// - vocabulary (brick kinds, error codes, video sources, query tokens, the
+//   hidden label tier) rides as fixture object KEYS, which stay literal, and is
+//   compared with Equal<> in both directions.
 //
 // After an intentional wire change on the Rust side, regenerate with:
 //   UPDATE_FIXTURE=1 cargo test -p mortar-core --test contract
 // then update types.ts until this file typechecks again.
 
 import contract from "../../../server/crates/mortar-core/tests/fixtures/contract.json";
-import type { FeedIntent } from "./api";
+import type { FeedIntent, FeedTargetKind } from "./api";
 import type {
   Author,
   BlogBrick,
@@ -33,7 +33,9 @@ import type {
   CaptionTrack,
   ErrorEnvelope,
   FeedMode,
+  FeedRefresh,
   FeedResponse,
+  HiddenLabel,
   MortarErrorCode,
   PostBrick,
   VideoBrick,
@@ -78,8 +80,27 @@ export type BrickKindsMatch = Assert<Equal<keyof typeof contract.bricks, Brick["
 export type ErrorCodesMatch = Assert<Equal<keyof typeof contract.errors, MortarErrorCode>>;
 export type IntentVocabularyMatches = Assert<Equal<keyof typeof contract.query.intent, FeedIntent>>;
 export type ModeVocabularyMatches = Assert<Equal<keyof typeof contract.query.mode, FeedMode>>;
+// the fixture key is the numeric-looking `"1"`, and it is the one place that
+// could have made an Equal<> vacuous. JSON object keys are strings, so tsc
+// types this one as the literal `"1"` rather than widening it to `number` or
+// `string`, and the assertion bites: renaming FeedRefresh fails check:ci here.
+export type RefreshVocabularyMatches = Assert<
+  Equal<keyof typeof contract.query.refresh, FeedRefresh>
+>;
+// FeedTargetKind, not `keyof FeedTarget`: `keyof` across a union of object
+// types yields only the keys they share, so an `{actor} | {feed}` union keyofs
+// to `never` and this assertion would hold vacuously.
+export type TargetVocabularyMatches = Assert<
+  Equal<keyof typeof contract.query.target, FeedTargetKind>
+>;
 export type VideoSourcesMatch = Assert<
   Equal<keyof typeof contract.vocab.videoSource, VideoBrick["source"]>
+>;
+// the one vocabulary the web holds a copy of for its own use rather than to
+// read mortar's output: the feed picker filters a labelled feed generator out
+// of its listing client-side, and must not list a feed mortar would refuse.
+export type HiddenLabelsMatch = Assert<
+  Equal<keyof typeof contract.vocab.hiddenLabels, HiddenLabel>
 >;
 
 // --- field sets: a `full` instance carries EVERY field, so its exact key set

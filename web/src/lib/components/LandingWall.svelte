@@ -13,7 +13,7 @@
 	let bricks = $state<Brick[]>([]);
 
 	$effect(() => {
-		void fetchFeed('demo')
+		void fetchFeed({ actor: 'demo' })
 			.then((page) => (bricks = page.items))
 			.catch(() => {
 				// no wall behind the form; the form still works

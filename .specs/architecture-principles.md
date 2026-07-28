@@ -85,8 +85,11 @@ Rules:
 
 1. **Both fronts are thin.** `mortar-server`'s feed route and `mortar-wasm`'s
    `feed_page` each do the same three things: parse the request into
-   `(actor, cursor, Mode, FeedIntent)`, call `handle_feed`, and shape the result
-   or the error for their transport. No feed logic lives in either.
+   `(FeedTarget, cursor, Mode, FeedIntent, refresh)`, call `handle_feed`, and
+   shape the result or the error for their transport. No feed logic lives in
+   either: the `actor`-or-`feed` precedence is `FeedTarget::from_query` and the
+   refresh token is `refresh_from_query`, both in `mortar-core`, because a rule
+   spelled out in a front is a rule no test can reach.
 2. **Nothing depends on a front.** `mortar-core` names neither axum nor
    wasm-bindgen.
 3. **The web app depends on the wasm pkg, never on the crates.** The pkg is a

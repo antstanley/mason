@@ -15,7 +15,8 @@ use std::time::Duration;
 
 use futures::stream::{self, StreamExt};
 
-use super::{bluesky, pds, standardsite, streamplace};
+use super::{FeedPage, bluesky, pds, standardsite, streamplace};
+use crate::cache::TtlCache;
 use crate::error::AppError;
 use crate::http::HttpError;
 use crate::model::{Author, Brick};
@@ -136,15 +137,49 @@ fn transient(error: &HttpError) -> bool {
     }
 }
 
+/// What a transiently failed feed read hands back, shared by both readers.
+///
+/// A refresh must never make the wall worse than the one it replaced, so a
+/// refreshed read that fails returns the entry it stepped over: the author did
+/// answer, just earlier, and they still count as fanned out. Every ordinary
+/// read, and a refreshed read with nothing cached behind it, yields `None`
+/// instead, which is the cold-read contract the caller already handles.
+///
+/// The lookup lives here, inside the failure arm, rather than beside the
+/// `refresh` check at the top of each reader: a read succeeds far more often
+/// than it fails, and the ordinary path must keep paying exactly one cache
+/// lookup rather than two.
+async fn refresh_fallback(
+    cache: &TtlCache<String, Arc<bluesky::AuthorYield>>,
+    author_did: &str,
+    refresh: bool,
+) -> Option<Arc<bluesky::AuthorYield>> {
+    if !refresh {
+        return None;
+    }
+    // an entry that expired while the failing fetch was in flight is gone by
+    // now, and that is right: a stale yield is no better than a cold read
+    cache.get(&author_did.to_string()).await
+}
+
 /// One author's recent posts. `None` is a transient failure with nothing
 /// cached: the author never answered, so the caller must not count them as
 /// fanned out; a later wave (or the next wall) simply asks again. A refusal
 /// caches as an empty yield, exactly like a genuinely quiet author.
+///
+/// `refresh` is the reader asking for this wall on purpose: the cache is not
+/// consulted and the AppView's answer overwrites whatever was there. A
+/// refreshed read that fails transiently falls back to the cached yield, so a
+/// refresh can never lay a thinner wall than the one it replaced; with nothing
+/// cached behind it, a refreshed read behaves exactly like a cold one.
 pub async fn author_feed_cached(
     state: &Arc<AppState>,
     author_did: &str,
+    refresh: bool,
 ) -> Option<Arc<bluesky::AuthorYield>> {
-    if let Some(cached) = state.caches.author_feed.get(&author_did.to_string()).await {
+    // a refresh steps over the entry rather than serving it: five minutes of
+    // cached posts is precisely what the reader asked to get past
+    if !refresh && let Some(cached) = state.caches.author_feed.get(&author_did.to_string()).await {
         return Some(cached);
     }
     let yield_ =
@@ -154,7 +189,7 @@ pub async fn author_feed_cached(
             // must not be remembered as "this author posts nothing" either
             Err(e) if transient(&e) => {
                 tracing::debug!("author feed {author_did} failed: {e}");
-                return None;
+                return refresh_fallback(&state.caches.author_feed, author_did, refresh).await;
             }
             Err(e) => {
                 tracing::debug!("author feed {author_did} refused: {e}");
@@ -170,15 +205,16 @@ pub async fn author_feed_cached(
 }
 
 /// One author's recent MEDIA posts, read deep for the glaze wall. Same shape as
-/// `author_feed_cached` (including `None` for a transient failure) but a
-/// separate endpoint (`posts_with_media`) and a separate cache, so the image
-/// wall's deeper read never displaces the full wall's shallow one for the same
-/// author.
+/// `author_feed_cached` (including `None` for a transient failure, and the same
+/// `refresh` bypass with the same cached fallback) but a separate endpoint
+/// (`posts_with_media`) and a separate cache, so the image wall's deeper read
+/// never displaces the full wall's shallow one for the same author.
 pub async fn image_feed_cached(
     state: &Arc<AppState>,
     author_did: &str,
+    refresh: bool,
 ) -> Option<Arc<bluesky::AuthorYield>> {
-    if let Some(cached) = state.caches.image_feed.get(&author_did.to_string()).await {
+    if !refresh && let Some(cached) = state.caches.image_feed.get(&author_did.to_string()).await {
         return Some(cached);
     }
     let yield_ =
@@ -186,7 +222,7 @@ pub async fn image_feed_cached(
             Ok(yield_) => Arc::new(yield_),
             Err(e) if transient(&e) => {
                 tracing::debug!("image feed {author_did} failed: {e}");
-                return None;
+                return refresh_fallback(&state.caches.image_feed, author_did, refresh).await;
             }
             Err(e) => {
                 tracing::debug!("image feed {author_did} refused: {e}");
@@ -199,6 +235,77 @@ pub async fn image_feed_cached(
         .insert(author_did.to_string(), Arc::clone(&yield_))
         .await;
     Some(yield_)
+}
+
+/// One page of a feed generator, cached for a minute.
+///
+/// The one CONTENT read on this seam that fails loudly. Every other one is a
+/// single author out of a hundred, so it degrades to an empty yield and the wall
+/// loses a few bricks; a feed wall's whole ingestion is this single call, so
+/// there is no quorum to degrade into and a failure here is the request failing.
+/// A 400 or a 404 is the AppView saying it has no such feed, which is the
+/// reader's reference to fix rather than an outage, so it is its own code.
+///
+/// The sixty second entry is what makes the preview-then-freeze pair one network
+/// read: the freeze arriving a few hundred milliseconds after the preview asks
+/// for the same page, as does a back gesture onto a page just left.
+///
+/// `refresh` is the reader asking for this wall on purpose, and on a feed wall
+/// this entry is the whole of what "new posts" means: there is no author-feed
+/// cache behind a generator's ordering, so the two fast content reads a graph
+/// wall bypasses have no counterpart here. The entry is skipped and the fresh
+/// answer overwrites it, so the freeze behind a refreshed preview is still one
+/// network read. Unlike the author feeds this one has no cached fallback: a feed
+/// wall's whole ingestion is this single call, so there is no quorum to degrade
+/// into and a failure is the request failing, refreshed or not.
+pub async fn feed_page_cached(
+    state: &Arc<AppState>,
+    feed_uri: &str,
+    cursor: Option<&str>,
+    limit: u32,
+    refresh: bool,
+) -> Result<FeedPage, AppError> {
+    // The LIMIT is part of the key, not just the feed and the cursor: the mixed
+    // views ask getFeed for PAGE_SIZE and the glaze wall asks for 100, so a key
+    // of (uri, cursor) alone would serve a glaze request the 24-item page a
+    // mixed request cached a moment earlier and the image wall would silently
+    // run a quarter as deep. The unit separator is what keeps the three parts
+    // apart: the cursor is last and the limit is digits, so only a \u{1f} inside
+    // the feed uri itself could blur two keys into one, and a feed reference is
+    // parsed before it ever reaches here.
+    let key = format!(
+        "{feed_uri}\u{1f}{limit}\u{1f}{}",
+        cursor.unwrap_or_default()
+    );
+    // a refresh steps over the entry rather than serving it: a minute of cached
+    // page is precisely what the reader asked to get past
+    if !refresh && let Some(cached) = state.caches.feed_pages.get(&key).await {
+        return Ok(cached);
+    }
+    let (yield_, next) = bluesky::get_feed(
+        &state.http,
+        &state.config.appview_base,
+        feed_uri,
+        cursor,
+        limit,
+    )
+    .await
+    .map_err(|e| match e {
+        // an unknown or withdrawn generator 400s and a well-formed reference to
+        // nothing 404s; either way the feed is not there. Distinct from
+        // ActorNotFound because the web's repair for that one is a handle box,
+        // which is the wrong thing to hand somebody with a bad feed link.
+        HttpError::Status(400 | 404) => AppError::FeedNotFound(feed_uri.to_string()),
+        other => AppError::Upstream(other.to_string()),
+    })?;
+    let page = FeedPage {
+        yield_: Arc::new(yield_),
+        next,
+    };
+    // cloning a FeedPage clones an Arc and a short cursor, so the entry and the
+    // answer are the same page rather than two copies of it
+    state.caches.feed_pages.insert(key, page.clone()).await;
+    Ok(page)
 }
 
 /// Who is live on Streamplace, network-wide. Viewer-independent by
@@ -427,6 +534,505 @@ mod tests {
         assert!(
             followed_live(&network, &follows).is_empty(),
             "an opted-out friend's stream must not surface to a logged-out wall"
+        );
+    }
+}
+
+// The refresh bypass on the two fast content reads, driven against a wiremock
+// AppView. A SECOND module rather than cases in the one above, because wiremock
+// and tokio's runtime are `cfg(not(target_arch = "wasm32"))` dev dependencies:
+// under the bare `#[cfg(test)]` above they would break the wasm32 build of
+// --all-targets without failing a single test, and `just guard-wasm` is the only
+// gate in the repo that would ever see it.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod refresh_tests {
+    use super::*;
+    use crate::config::Config;
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    const AUTHOR: &str = "did:plc:aa";
+    /// The full wall's skim, and the glaze wall's deep media read. Named here
+    /// so a test can answer one of the two reads and leave the other alone.
+    const SKIM: &str = "posts_no_replies";
+    const DEEP_MEDIA: &str = "posts_with_media";
+
+    fn state_for(server: &MockServer) -> Arc<AppState> {
+        Arc::new(AppState::new(Config {
+            appview_base: server.uri(),
+            ..Default::default()
+        }))
+    }
+
+    /// A brick's id is its at-uri, so an rkey is how a test tells the wall it
+    /// was handed from the wall it asked to replace.
+    fn post_uri(rkey: &str) -> String {
+        format!("at://{AUTHOR}/app.bsky.feed.post/{rkey}")
+    }
+
+    /// One post, under `filter`, until the server is reset.
+    async fn answers_with(server: &MockServer, filter: &str, rkey: &str) {
+        let body = serde_json::json!({"feed": [{
+            "post": {
+                "uri": post_uri(rkey),
+                "author": {"did": AUTHOR, "handle": "a.test"},
+                "record": {"text": "hello wall", "createdAt": "2026-07-10T12:00:00Z"},
+                "likeCount": 0,
+                "repostCount": 0
+            }
+        }]});
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .and(query_param("filter", filter))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(server)
+            .await;
+    }
+
+    /// Every attempt 5xxs, so the three-attempt retry loop hands back a 503 and
+    /// the reader classifies it transient. This is the failure a refresh must
+    /// not let thin the wall.
+    async fn always_5xx(server: &MockServer) {
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getAuthorFeed"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(server)
+            .await;
+    }
+
+    fn only_brick(yield_: &bluesky::AuthorYield) -> &str {
+        assert_eq!(yield_.bricks.len(), 1, "the fixture feed carries one post");
+        yield_.bricks[0].id()
+    }
+
+    /// The whole point of the flag: five minutes of cached posts is exactly what
+    /// a reader asking for a new wall wants to get past, so a refreshed read
+    /// steps over a live entry, reaches the AppView, and leaves the newer answer
+    /// behind it for everyone who reads after.
+    #[tokio::test]
+    async fn a_refreshed_read_reaches_past_a_fresh_cache_entry() {
+        let server = MockServer::start().await;
+        answers_with(&server, SKIM, "1").await;
+        let state = state_for(&server);
+
+        let cold = author_feed_cached(&state, AUTHOR, false)
+            .await
+            .expect("a live AppView answers");
+        assert_eq!(only_brick(&cold), post_uri("1"));
+
+        // the wall moves on; only a refresh may see it
+        server.reset().await;
+        answers_with(&server, SKIM, "2").await;
+
+        let cached = author_feed_cached(&state, AUTHOR, false)
+            .await
+            .expect("the entry is still live");
+        assert_eq!(
+            only_brick(&cached),
+            post_uri("1"),
+            "an ordinary read must still be served from cache, or the flag is doing nothing"
+        );
+
+        let refreshed = author_feed_cached(&state, AUTHOR, true)
+            .await
+            .expect("a refreshed read reaches the AppView");
+        assert_eq!(only_brick(&refreshed), post_uri("2"));
+
+        let after = state
+            .caches
+            .author_feed
+            .get(&AUTHOR.to_string())
+            .await
+            .expect("and the refreshed answer is what stays behind");
+        assert_eq!(
+            only_brick(&after),
+            post_uri("2"),
+            "the AppView answer must overwrite the entry the refresh stepped over"
+        );
+    }
+
+    /// A refresh must never make the wall worse. Returning `None` here would
+    /// drop the author from the wall AND leave them unfanned, so a flaky moment
+    /// during a refresh would visibly thin the wall the reader just asked to
+    /// improve.
+    #[tokio::test]
+    async fn a_refreshed_read_that_fails_falls_back_to_the_cached_yield() {
+        let server = MockServer::start().await;
+        answers_with(&server, SKIM, "1").await;
+        let state = state_for(&server);
+        author_feed_cached(&state, AUTHOR, false)
+            .await
+            .expect("a live AppView answers");
+
+        server.reset().await;
+        always_5xx(&server).await;
+
+        let refreshed = author_feed_cached(&state, AUTHOR, true)
+            .await
+            .expect("a refreshed read that fails falls back rather than vanishing");
+        assert_eq!(
+            only_brick(&refreshed),
+            post_uri("1"),
+            "the author did answer, just earlier"
+        );
+        let survived = state
+            .caches
+            .author_feed
+            .get(&AUTHOR.to_string())
+            .await
+            .expect("and the older entry survives a failed refresh");
+        assert_eq!(only_brick(&survived), post_uri("1"));
+    }
+
+    /// The negative space of the fallback. With nothing behind it there is
+    /// nothing to fall back to, so a refreshed read is a cold read: `None`, the
+    /// author is not counted as fanned out, and the blip is not remembered as
+    /// "this author posts nothing".
+    #[tokio::test]
+    async fn a_refreshed_read_with_nothing_cached_fails_like_a_cold_one() {
+        let server = MockServer::start().await;
+        always_5xx(&server).await;
+        let state = state_for(&server);
+
+        assert!(
+            author_feed_cached(&state, AUTHOR, true).await.is_none(),
+            "a refresh cannot invent a yield it never had"
+        );
+        assert!(
+            state
+                .caches
+                .author_feed
+                .get(&AUTHOR.to_string())
+                .await
+                .is_none(),
+            "and a transient failure is never cached, refreshed or not"
+        );
+    }
+
+    /// The glaze wall's read has both behaviours too, against its OWN cache.
+    /// The two feeds are deliberately kept apart, and a bypass or a fallback
+    /// that reached the wrong one would hand the image wall the full wall's
+    /// skim: text posts on a wall of pictures.
+    #[tokio::test]
+    async fn a_refreshed_image_read_bypasses_and_falls_back_to_its_own_cache() {
+        let server = MockServer::start().await;
+        answers_with(&server, DEEP_MEDIA, "image-1").await;
+        answers_with(&server, SKIM, "skim").await;
+        let state = state_for(&server);
+        image_feed_cached(&state, AUTHOR, false)
+            .await
+            .expect("the deep media read answers");
+        author_feed_cached(&state, AUTHOR, false)
+            .await
+            .expect("and so does the skim, into the other cache");
+
+        server.reset().await;
+        answers_with(&server, DEEP_MEDIA, "image-2").await;
+
+        let refreshed = image_feed_cached(&state, AUTHOR, true)
+            .await
+            .expect("a refreshed image read reaches the AppView");
+        assert_eq!(
+            only_brick(&refreshed),
+            post_uri("image-2"),
+            "the deep media read steps over its live entry too"
+        );
+
+        server.reset().await;
+        always_5xx(&server).await;
+
+        let fell_back = image_feed_cached(&state, AUTHOR, true)
+            .await
+            .expect("a refreshed image read falls back too");
+        assert_eq!(
+            only_brick(&fell_back),
+            post_uri("image-2"),
+            "the image feed falls back to the image cache, not the author feed's"
+        );
+    }
+
+    /// What makes the claim in 05-caching-and-persistence.md true: a refreshed
+    /// read is an insert like any other, so the next persist cycle captures the
+    /// fresher data rather than the data the refresh replaced.
+    #[tokio::test]
+    async fn a_refreshed_read_leaves_the_cache_dirty() {
+        let server = MockServer::start().await;
+        answers_with(&server, SKIM, "1").await;
+        let state = state_for(&server);
+        author_feed_cached(&state, AUTHOR, false)
+            .await
+            .expect("a live AppView answers");
+
+        // stand in for a persist cycle: it takes the flag, leaving the cache
+        // clean, and everything after this is the refresh's own doing
+        assert!(
+            state.caches.author_feed.take_dirty(),
+            "the cold read dirties the cache"
+        );
+
+        server.reset().await;
+        answers_with(&server, SKIM, "2").await;
+        author_feed_cached(&state, AUTHOR, true)
+            .await
+            .expect("a refreshed read reaches the AppView");
+
+        assert!(
+            state.caches.author_feed.is_dirty(),
+            "a refreshed read must dirty the cache, or its newer posts are never persisted"
+        );
+    }
+}
+
+// The feed-page cache, driven against a wiremock AppView. A THIRD module for the
+// same reason there is a second one: wiremock and tokio's runtime are
+// `cfg(not(target_arch = "wasm32"))` dev dependencies, so a bare `#[cfg(test)]`
+// would break the wasm32 build of --all-targets without failing a single test,
+// and `just guard-wasm` is the only gate in the repo that would ever see it.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod feed_page_tests {
+    use super::*;
+    use crate::config::Config;
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// A feed generator's AT-URI, as a parsed reference hands one over.
+    const FEED: &str = "at://did:plc:gen/app.bsky.feed.generator/whats-hot";
+    /// What the mixed views ask a feed for (`PAGE_SIZE`) and what the glaze wall
+    /// asks the same feed for (getFeed's ceiling). The two limits are the reason
+    /// the key carries one.
+    const MIXED: u32 = 24;
+    const GLAZE: u32 = 100;
+
+    fn state_for(server: &MockServer) -> Arc<AppState> {
+        Arc::new(AppState::new(Config {
+            appview_base: server.uri(),
+            ..Default::default()
+        }))
+    }
+
+    /// A brick's id is its at-uri, so an rkey is how a test tells one fixture
+    /// page from another.
+    fn post_uri(rkey: &str) -> String {
+        format!("at://did:plc:aa/app.bsky.feed.post/{rkey}")
+    }
+
+    /// One post under `limit` (and, when `at` is given, only for that incoming
+    /// cursor), followed by `next`.
+    ///
+    /// `expect(1)` on every mock, verified when the server drops: a cache that
+    /// missed shows up here as a second request rather than as a passing
+    /// assertion about identical fixture content.
+    async fn answers(
+        server: &MockServer,
+        limit: u32,
+        at: Option<&str>,
+        rkey: &str,
+        next: Option<&str>,
+    ) {
+        let mut body = serde_json::json!({"feed": [{
+            "post": {
+                "uri": post_uri(rkey),
+                "author": {"did": "did:plc:aa", "handle": "a.test"},
+                "record": {"text": "hello wall", "createdAt": "2026-07-10T12:00:00Z"},
+                "likeCount": 0,
+                "repostCount": 0
+            }
+        }]});
+        if let Some(next) = next {
+            body["cursor"] = serde_json::json!(next);
+        }
+        let mut mock = Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .and(query_param("limit", limit.to_string()));
+        if let Some(at) = at {
+            mock = mock.and(query_param("cursor", at));
+        }
+        mock.respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    /// Every attempt answers `status`. `retry-after: 0` because a retryable
+    /// status (the 500 below) costs three attempts, and a real backoff in the
+    /// middle of a test buys nothing.
+    async fn always(server: &MockServer, status: u16) {
+        Mock::given(method("GET"))
+            .and(path("/xrpc/app.bsky.feed.getFeed"))
+            .respond_with(ResponseTemplate::new(status).insert_header("retry-after", "0"))
+            .mount(server)
+            .await;
+    }
+
+    fn only_brick(page: &FeedPage) -> &str {
+        assert_eq!(
+            page.yield_.bricks.len(),
+            1,
+            "each fixture page carries one post"
+        );
+        page.yield_.bricks[0].id()
+    }
+
+    async fn upstream_reads(server: &MockServer) -> usize {
+        server
+            .received_requests()
+            .await
+            .expect("the mock server records what it was asked")
+            .len()
+    }
+
+    /// The whole point of the cache. A first screen is a preview poll and then a
+    /// freeze over the same page, and a back gesture is a third read of it, so
+    /// without an entry the cheapest wall mason lays would cost three AppView
+    /// calls to show one page.
+    #[tokio::test]
+    async fn the_second_read_of_a_page_never_reaches_the_appview() {
+        let server = MockServer::start().await;
+        answers(&server, MIXED, None, "1", Some("page2")).await;
+        let state = state_for(&server);
+
+        let first = feed_page_cached(&state, FEED, None, MIXED, false)
+            .await
+            .expect("the AppView answers");
+        let second = feed_page_cached(&state, FEED, None, MIXED, false)
+            .await
+            .expect("and the cache answers after it");
+
+        assert_eq!(only_brick(&first), post_uri("1"));
+        assert_eq!(
+            only_brick(&second),
+            post_uri("1"),
+            "the same page comes back"
+        );
+        assert_eq!(
+            second.next.as_deref(),
+            Some("page2"),
+            "cursor and all: a page served without its cursor could not be paged past"
+        );
+        assert_eq!(
+            upstream_reads(&server).await,
+            1,
+            "one page, one upstream read"
+        );
+    }
+
+    /// The limit is in the key because the two views read the same feed to
+    /// different depths. Without it the glaze wall is handed the mixed wall's
+    /// 24-item page, lays the three or four images in it, and runs a quarter as
+    /// deep with nothing anywhere saying so.
+    #[tokio::test]
+    async fn two_limits_of_one_page_do_not_collide() {
+        let server = MockServer::start().await;
+        answers(&server, MIXED, None, "mixed", None).await;
+        answers(&server, GLAZE, None, "glaze", None).await;
+        let state = state_for(&server);
+
+        let mixed = feed_page_cached(&state, FEED, None, MIXED, false)
+            .await
+            .expect("the mixed views ask for a page");
+        let glaze = feed_page_cached(&state, FEED, None, GLAZE, false)
+            .await
+            .expect("and the glaze wall asks the same feed deeper");
+
+        assert_eq!(only_brick(&mixed), post_uri("mixed"));
+        assert_eq!(
+            only_brick(&glaze),
+            post_uri("glaze"),
+            "the deep read must get its own page, not the shallow one cached a moment earlier"
+        );
+        assert_eq!(
+            upstream_reads(&server).await,
+            2,
+            "two depths of one feed are two upstream reads"
+        );
+    }
+
+    /// The cursor is in the key too, which is what lets a reader page: the
+    /// second page of a feed is a different entry from the first, not a hit on
+    /// it.
+    #[tokio::test]
+    async fn a_second_cursor_is_a_second_page() {
+        let server = MockServer::start().await;
+        // the cursor-bearing mock is mounted first: the general one would match
+        // a request carrying a cursor too, and wiremock takes the first match
+        answers(&server, MIXED, Some("page2"), "second", None).await;
+        answers(&server, MIXED, None, "first", Some("page2")).await;
+        let state = state_for(&server);
+
+        let first = feed_page_cached(&state, FEED, None, MIXED, false)
+            .await
+            .expect("a fresh feed wall starts with no cursor");
+        let second = feed_page_cached(&state, FEED, first.next.as_deref(), MIXED, false)
+            .await
+            .expect("and pages on the cursor the first page carried");
+
+        assert_eq!(only_brick(&first), post_uri("first"));
+        assert_eq!(
+            only_brick(&second),
+            post_uri("second"),
+            "paging must reach the next page, not re-serve the first"
+        );
+        assert!(second.next.is_none(), "and this feed has ended");
+    }
+
+    /// An unknown or withdrawn feed generator. `getFeed` 400s on one, and this
+    /// is the reader holding a reference to nothing rather than an outage, so it
+    /// is `FeedNotFound` and the web can offer the picker instead of a handle
+    /// box.
+    #[tokio::test]
+    async fn a_400_is_a_feed_that_is_not_there() {
+        let server = MockServer::start().await;
+        always(&server, 400).await;
+        let state = state_for(&server);
+
+        let failure = feed_page_cached(&state, FEED, None, MIXED, false)
+            .await
+            .err()
+            .expect("a 400 is a failure, not a page");
+        match failure {
+            AppError::FeedNotFound(uri) => assert_eq!(
+                uri, FEED,
+                "the error names the feed the reader actually asked for"
+            ),
+            other => panic!("a 400 must be a missing feed, got {other:?}"),
+        }
+    }
+
+    /// And a 404 the same, so a feed wall reports the same thing whichever of
+    /// the two an AppView chooses for a reference it cannot serve.
+    #[tokio::test]
+    async fn a_404_is_a_feed_that_is_not_there() {
+        let server = MockServer::start().await;
+        always(&server, 404).await;
+        let state = state_for(&server);
+
+        let failure = feed_page_cached(&state, FEED, None, MIXED, false)
+            .await
+            .err()
+            .expect("a 404 is a failure, not a page");
+        match failure {
+            AppError::FeedNotFound(uri) => assert_eq!(uri, FEED),
+            other => panic!("a 404 must be a missing feed, got {other:?}"),
+        }
+    }
+
+    /// The other side of that line. A feed generator is a third-party service
+    /// with its own uptime, and one falling over is not the reader's reference
+    /// being wrong: telling them "no such feed" would send them to fix a link
+    /// that is fine.
+    #[tokio::test]
+    async fn a_500_is_an_upstream_failure() {
+        let server = MockServer::start().await;
+        always(&server, 500).await;
+        let state = state_for(&server);
+
+        let failure = feed_page_cached(&state, FEED, None, MIXED, false)
+            .await
+            .err()
+            .expect("a 500 is a failure, not a page");
+        assert!(
+            matches!(failure, AppError::Upstream(_)),
+            "a server-side failure must not read as a missing feed, got {failure:?}"
         );
     }
 }

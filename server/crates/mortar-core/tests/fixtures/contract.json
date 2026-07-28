@@ -175,12 +175,23 @@
     "bad_request": {
       "server": {
         "error": "bad_request",
-        "message": "missing required parameter: actor"
+        "message": "bad request: actor or feed"
       },
       "wasm": {
         "error": "bad_request",
-        "message": "missing required parameter: actor",
+        "message": "bad request: actor or feed",
         "status": 400
+      }
+    },
+    "feed_not_found": {
+      "server": {
+        "error": "feed_not_found",
+        "message": "feed not found: at://did:plc:nobody/app.bsky.feed.generator/gone"
+      },
+      "wasm": {
+        "error": "feed_not_found",
+        "message": "feed not found: at://did:plc:nobody/app.bsky.feed.generator/gone",
+        "status": 404
       }
     },
     "login_required": {
@@ -382,9 +393,23 @@
     },
     "mode": {
       "glaze": true
+    },
+    "refresh": {
+      "1": true
+    },
+    "target": {
+      "actor": true,
+      "feed": true
     }
   },
   "vocab": {
+    "hiddenLabels": {
+      "!hide": true,
+      "!no-unauthenticated": true,
+      "graphic-media": true,
+      "porn": true,
+      "sexual": true
+    },
     "videoSource": {
       "bluesky": true,
       "streamplace": true

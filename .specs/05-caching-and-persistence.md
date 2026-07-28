@@ -1,6 +1,6 @@
 # 05 - Caching and Persistence
 
-**Status:** Draft · **Date:** 2026-07-25 · **Owner:** Ant Stanley
+**Status:** Draft · **Date:** 2026-07-27 · **Owner:** Ant Stanley
 
 mason has no database. All state is in-memory behind hand-rolled TTL caches,
 because the same engine has to run inside a service worker that a browser may
@@ -76,6 +76,7 @@ just a cache warmer.
 | `activity` | `activity_key(viewer, mode)` | `Vec<String>` (yielding authors, max 300) | 24 h | 1 000 | yes |
 | `live` | the constant `0u8` | `Vec<LiveStream>` | 60 s | 1 | **no** |
 | `snapshots` | `snapshot_id` | `Arc<Snapshot>` | 30 min | 500 | **no** |
+| `feed_pages` | `<feed uri>\u{1f}<limit>\u{1f}<upstream cursor>` | `Arc<AuthorYield>` plus the next cursor | 60 s | 500 | **no** |
 
 Three shapes of TTL, each with a reason:
 
@@ -89,6 +90,17 @@ Three shapes of TTL, each with a reason:
   left alone for a day. Only a *successful* empty listing earns the negative TTL;
   a transient failure is not cached at all.
 
+**A refresh bypasses two of these on a graph wall, and one on a feed wall.**
+`author_feed` and `image_feed` are re-read on a `refresh=1` request; on a feed
+wall it is `feed_pages` instead. Every other cache stays warm. The split is the
+same reasoning the TTLs already encode: identity and repo contents move on a
+scale of days, so re-reading them would spend a hundred PDS round trips to learn
+nothing, while the AppView author feed is precisely the thing that has changed
+since the reader last looked. A refreshed read overwrites its entry and marks
+the cache dirty, so the next persist cycle captures the fresher data rather than
+the data the refresh replaced. `feed_pages` is not persisted at all, so there
+the overwrite buys the next reader a warm entry and nothing more.
+
 The `live` cache is the one thing on the wall with a deadline, so it is the one
 thing barely cached: sixty seconds, and the value stored is `LiveStream`, not
 `Brick`, because what is cached there is true for every viewer and the per-viewer
@@ -97,6 +109,18 @@ filter happens downstream.
 `author_feed` and `image_feed` are kept apart deliberately: the two walls read the
 same author differently (`posts_no_replies&limit=30` versus
 `posts_with_media&limit=100`), and one cache would let each clobber the other's.
+`feed_pages` solves the same problem inside one cache by carrying the limit in
+its key: the mixed views ask a generator for `PAGE_SIZE` and glaze asks for 100,
+so a key of (uri, cursor) alone would serve a glaze request the 24-item page a
+mixed request cached a moment earlier and the image wall would silently run a
+quarter as deep.
+
+A feed page is a ranked view with a deadline, like the live list, so it is
+cached for a minute and never persisted. Sixty seconds is enough to make the
+preview-then-freeze pair one network read and to survive a back/forward, and
+short enough that reopening a feed wall shows the feed's current head. A
+persisted feed page would be laid hours later as though it were fresh ranking,
+which is exactly the lie the persistence layer exists to avoid.
 
 ---
 
@@ -137,6 +161,9 @@ Not persisted:
   it.
 - **Snapshots.** They hold locks and in-flight state, and the seed-carrying cursor
   already rebuilds them deterministically from the warm caches above.
+- **Feed pages.** Somebody else's ranking, sixty seconds from being stale, and
+  one call rebuilds it. `feed_pages` is deliberately absent from
+  `persist::CACHE_NAMES`, so no exporter can reach it by name.
 
 ### Storage layout
 
@@ -145,7 +172,7 @@ Not persisted:
 - Each payload is `{version, entries: [[key, value, expiresUnixMs], …]}`, where
   `version` is `persist::VERSION` (currently 4). A payload written by a different
   version is discarded on import; it is only a cache.
-- `idbSweepStale` deletes the pre-v4 whole-bundle key (`mason-caches-v1`) and any
+- `idbSweepStale` deletes the pre-v4 whole-bundle key (`mortar-caches-v1`) and any
   `mortar-cache:*` key whose cache mortar no longer persists, so a renamed or
   dropped cache does not orphan its key forever.
 

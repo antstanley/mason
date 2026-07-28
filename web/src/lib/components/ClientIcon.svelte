@@ -3,7 +3,7 @@
 	// site. Every icon sits in the same square slot so the rows stay aligned.
 	// `size` is overridable so the trigger can grow the mark on mobile (where it
 	// stands alone) without touching the dropdown rows.
-	import type { ClientId } from '$lib/state/client.svelte';
+	import { CLIENTS, type ClientId } from '$lib/state/client.svelte';
 
 	let {
 		id,
@@ -11,21 +11,46 @@
 		dense = false
 	}: { id: ClientId; size?: string; dense?: boolean } = $props();
 
-	// The butterfly fills its viewBox; the mu wordmark and the blacksky starburst
-	// sit smaller and lighter in theirs, so nudge each up to read at the same
+	// The butterfly fills its viewBox; the mu wordmark, the blacksky starburst and
+	// the witchsky hat sit smaller and lighter in theirs (the hat's ink is 409 of
+	// its 512 units tall, so it lands a fifth short of the butterfly), so nudge each up to read at the same
 	// weight in the same slot. `dense` (the dropdown rows) trims that nudge back
 	// ~10%, where the marks sit alongside their labels and can be a touch smaller.
+	//
+	// A Record keyed by the union rather than a partial map, so a client added to
+	// CLIENTS is a compile error here until somebody has decided what it looks
+	// like, rather than a row that silently renders nothing.
 	const FULL: Record<ClientId, string> = {
 		'bsky.app': '',
 		'mu.social': 'scale-[1.5]',
-		'blacksky.community': 'scale-[1.3]'
+		'blacksky.community': 'scale-[1.3]',
+		'twinkl.social': '',
+		'witchsky.app': 'scale-[1.22]'
 	};
 	const DENSE: Record<ClientId, string> = {
 		'bsky.app': '',
 		'mu.social': 'scale-[1.35]',
-		'blacksky.community': 'scale-[1.17]'
+		'blacksky.community': 'scale-[1.17]',
+		'twinkl.social': '',
+		'witchsky.app': 'scale-[1.12]'
 	};
 	const boost = $derived(dense ? DENSE[id] : FULL[id]);
+
+	// The last resort, for a client mason has no mark for: its own initial in a
+	// chip. Taken from the label rather than from a table, so it needs no upkeep
+	// and a client added to CLIENTS can never render an EMPTY slot, which is the
+	// one failure the branch chain below cannot be made to force. A letter rather
+	// than an invented logo: guessing at somebody's brand is worse than plainly
+	// not having it.
+	const initial = $derived(
+		(CLIENTS.find((c) => c.id === id)?.label ?? '?').charAt(0).toUpperCase()
+	);
+
+	// The gradient in twinkl's mark needs a document-unique id: this component
+	// renders once in the trigger and again for every row, and repeated `id="g"`
+	// attributes make every copy resolve to whichever one the browser saw first.
+	const uid = $props.id();
+	const twinklGradient = `${uid}-twinkl`;
 </script>
 
 <span class="inline-grid shrink-0 place-items-center {size} {boost}" aria-hidden="true">
@@ -60,5 +85,48 @@
 			<path fill="#6060E9" d="M79.0525 75.3259C75.1216 89.9962 83.8276 105.076 98.498 109.006L128.119 116.943L124.547 130.275L94.9267 122.338C80.2564 118.407 65.1772 127.113 61.2463 141.784L53.5643 170.453L41.1837 167.136L48.8654 138.467C52.7963 123.797 44.0902 108.718 29.4199 104.787L-0.201172 96.8497L3.37124 83.5173L32.9923 91.4542C47.6626 95.3851 62.7419 86.679 66.6728 72.0088L74.6098 42.3877L86.9895 45.7048L79.0525 75.3259Z" />
 			<path fill="#6060E9" d="M218.413 71.4229C222.344 86.093 237.423 94.7992 252.094 90.8683L281.715 82.9313L285.287 96.2628L255.666 104.2C240.995 108.131 232.29 123.21 236.22 137.88L243.902 166.55L231.522 169.867L223.841 141.198C219.91 126.528 204.831 117.822 190.16 121.753L160.539 129.69L156.967 116.357L186.588 108.42C201.258 104.49 209.964 89.4103 206.033 74.74L198.096 45.1189L210.476 41.8018L218.413 71.4229Z" />
 		</svg>
+	{:else if id === 'twinkl.social'}
+		<svg
+			class="max-h-full max-w-full"
+			viewBox="0 0 32 32"
+			role="img"
+			xmlns="http://www.w3.org/2000/svg"
+		>
+			<defs>
+				<linearGradient
+					id={twinklGradient}
+					x1="0"
+					y1="0"
+					x2="32"
+					y2="32"
+					gradientUnits="userSpaceOnUse"
+				>
+					<stop stop-color="#ff00ff" />
+					<stop offset="1" stop-color="#00ffff" />
+				</linearGradient>
+			</defs>
+			<path
+				fill="url(#{twinklGradient})"
+				d="M16 1l3.6 8.9L29 12l-7 6.3L23.7 28 16 23.2 8.3 28 10 18.3 3 12l9.4-2.1z"
+			/>
+		</svg>
+	{:else if id === 'witchsky.app'}
+		<svg
+			class="max-h-full max-w-full"
+			viewBox="0 0 512 512"
+			role="img"
+			xmlns="http://www.w3.org/2000/svg"
+		>
+			<path fill="hsl(5, 82%, 60%)" d="M374.473 57.7173C367.666 50.7995 357.119 49.1209 348.441 53.1659C347.173 53.7567 342.223 56.0864 334.796 59.8613C326.32 64.1696 314.568 70.3869 301.394 78.0596C275.444 93.1728 242.399 114.83 218.408 139.477C185.983 172.786 158.719 225.503 140.029 267.661C130.506 289.144 122.878 308.661 117.629 322.81C116.301 326.389 115.124 329.63 114.104 332.478C87.1783 336.42 64.534 341.641 47.5078 348.101C37.6493 351.84 28.3222 356.491 21.0573 362.538C13.8818 368.511 6.00003 378.262 6.00003 391.822C6.00014 403.222 11.8738 411.777 17.4566 417.235C23.0009 422.655 29.9593 426.793 36.871 430.062C50.8097 436.653 69.5275 441.988 90.8362 446.249C133.828 454.846 192.21 460 256.001 460C319.79 460 378.172 454.846 421.164 446.249C442.472 441.988 461.19 436.653 475.129 430.062C482.041 426.793 488.999 422.655 494.543 417.235C500.039 411.862 505.817 403.489 505.996 392.353L506 391.822L505.995 391.188C505.754 377.959 498.012 368.417 490.945 362.534C483.679 356.485 474.35 351.835 464.491 348.095C446.749 341.366 422.906 335.982 394.476 331.987C393.6 330.57 392.633 328.995 391.595 327.273C386.477 318.777 379.633 306.842 372.737 293.115C358.503 264.781 345.757 232.098 344.756 206.636C343.87 184.121 351.638 154.087 360.819 127.789C365.27 115.041 369.795 103.877 373.207 95.9072C374.909 91.9309 376.325 88.7712 377.302 86.6328C377.79 85.5645 378.167 84.7524 378.416 84.2224C378.54 83.9579 378.632 83.7635 378.69 83.643C378.718 83.5829 378.739 83.5411 378.75 83.5181C378.753 83.5108 378.756 83.5049 378.757 83.5015C382.909 74.8634 381.196 64.5488 374.473 57.7173Z" />
+		</svg>
+	{:else}
+		<!-- no mark for this one, so its initial in a chip: it fills the same square
+		     slot the logos do, so the rows stay aligned, and it reads as a
+		     placeholder rather than as somebody's brand. -->
+		<span
+			class="grid size-full place-items-center rounded-[0.3em] bg-ink/10 font-display text-[0.62em] leading-none font-black dark:bg-chalk/15"
+		>
+			{initial}
+		</span>
 	{/if}
 </span>

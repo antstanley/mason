@@ -93,6 +93,14 @@ pub struct Snapshot {
     /// fill's arguments are gone.
     pub viewer: String,
     pub mode: Mode,
+    /// This wall was asked for on purpose, so its fill re-reads the fast
+    /// content caches instead of trusting them.
+    ///
+    /// Set once at construction and never written again, which is why it sits
+    /// out here beside `id` rather than inside `Inner`: there is no state to
+    /// guard, so reading it costs no lock. It is also what makes a refresh
+    /// idempotent per wall (see `ensure_snapshot`).
+    pub refresh: bool,
     /// When this snapshot was created, so the first page's mix wait can be
     /// bounded from the moment the fill began rather than restarted when the
     /// page request lands.
@@ -102,7 +110,7 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    fn new(id: String, viewer: String, seed: u64, mode: Mode) -> Self {
+    fn new(id: String, viewer: String, seed: u64, mode: Mode, refresh: bool) -> Self {
         // glaze reads a single source (Bluesky posts): there are no rare-kind
         // fans to wait for, so its first page never defers laying for a better
         // mix. The full wall waits for the two slow fans (repos and live).
@@ -115,6 +123,7 @@ impl Snapshot {
             seed,
             viewer,
             mode,
+            refresh,
             created: Instant::now(),
             inner: Mutex::new(Inner {
                 pool: Vec::new(),
@@ -343,18 +352,32 @@ pub fn fresh_seed(did: &str) -> u64 {
 /// spawns the background fill; everyone gets the same Arc. No waiting: the
 /// caller decides whether to block for first paint. The preview loop wants this
 /// bare: it returns the current pool the instant it is asked, however thin.
+///
+/// `refresh` is only consulted by the caller that wins the insert, because it
+/// rides on the snapshot and a snapshot is built once. That is what makes a
+/// refresh idempotent per wall: the preview polls and the freeze that follow one
+/// land on the already-refreshing snapshot whether or not they repeat the flag,
+/// and a wall that is NOT a refresh can never turn the flag off under a fill
+/// that is already re-reading on its behalf.
 pub async fn ensure_snapshot(
     state: &Arc<AppState>,
     did: &str,
     seed: u64,
     mode: Mode,
+    refresh: bool,
 ) -> Arc<Snapshot> {
     let id = snapshot_id(did, seed, mode);
     let (snapshot, inserted) = state
         .caches
         .snapshots
         .get_or_insert_with(id.clone(), || {
-            Arc::new(Snapshot::new(id.clone(), did.to_string(), seed, mode))
+            Arc::new(Snapshot::new(
+                id.clone(),
+                did.to_string(),
+                seed,
+                mode,
+                refresh,
+            ))
         })
         .await;
 
@@ -377,8 +400,9 @@ pub async fn get_or_build(
     did: &str,
     seed: u64,
     mode: Mode,
+    refresh: bool,
 ) -> Arc<Snapshot> {
-    let snapshot = ensure_snapshot(state, did, seed, mode).await;
+    let snapshot = ensure_snapshot(state, did, seed, mode, refresh).await;
 
     // first-paint threshold: enough bricks pooled, or deadline
     let deadline = Instant::now() + FIRST_PAINT_DEADLINE;
@@ -615,6 +639,18 @@ pub async fn get_page(
     }
 }
 
+/// A snapshot built straight, with no cache entry behind it and no fill spawned
+/// for it. For the tests of the modules around this one: the ones in
+/// `algo::fill` need a snapshot carrying `refresh`, and no production path hands
+/// one over without also starting the fill it is meant to drive.
+///
+/// `Snapshot::new` itself stays private, so nothing outside this file can build
+/// a wall the snapshot cache has never heard of.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn for_test(id: &str, viewer: &str, seed: u64, mode: Mode, refresh: bool) -> Snapshot {
+    Snapshot::new(id.into(), viewer.into(), seed, mode, refresh)
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
@@ -681,8 +717,11 @@ mod tests {
         }
     }
 
+    /// The in-file shorthand: one viewer, and never a refresh. Nothing in this
+    /// module asks about the flag, and a fill that re-read the AppView would
+    /// only make these tests slower.
     fn test_snapshot(id: &str, seed: u64, mode: Mode) -> Snapshot {
-        Snapshot::new(id.into(), "did:plc:viewer".into(), seed, mode)
+        for_test(id, "did:plc:viewer", seed, mode, false)
     }
 
     /// The root cause of the one-author wall: nothing stopped a chatty account

@@ -10,7 +10,7 @@
 	const label = $derived(`blog post: ${brick.title}`);
 </script>
 
-<BrickShell accent="blog" href={brick.url} {label}>
+<BrickShell accent="blog" href={brick.url} {brick} {label}>
 	{#if brick.coverImage}
 		<img
 			src={brick.coverImage}
@@ -32,7 +32,10 @@
 		{/if}
 		{#if brick.tags.length}
 			<div class="flex flex-wrap gap-1.5">
-				{#each brick.tags.slice(0, 4) as tag (tag)}
+				<!-- keyed by index, never by the tag: document tags arrive undeduped,
+				     and a repeat inside the first four throws each_key_duplicate mid
+				     render, which takes down the whole wall rather than one brick -->
+				{#each brick.tags.slice(0, 4) as tag, i (i)}
 					<span class="rounded-full bg-pop-lime/25 px-2 py-0.5 text-[0.68rem] font-semibold">#{tag}</span>
 				{/each}
 			</div>

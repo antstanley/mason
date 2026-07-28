@@ -4,13 +4,47 @@
 	import { beforeNavigate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { localMode } from '$lib/api';
-	import ClientPicker from '$lib/components/ClientPicker.svelte';
+	import BrickReader from '$lib/components/BrickReader.svelte';
+	import FeedPicker from '$lib/components/FeedPicker.svelte';
+	import Icon from '$lib/components/Icon.svelte';
 	import LayoutPicker from '$lib/components/LayoutPicker.svelte';
+	import RefreshWall from '$lib/components/RefreshWall.svelte';
+	import Settings from '$lib/components/Settings.svelte';
 	import SwitchWall from '$lib/components/SwitchWall.svelte';
+	import { feeds } from '$lib/state/feeds.svelte';
+	import { reader } from '$lib/state/reader.svelte';
+	import { settings } from '$lib/state/settings.svelte';
 
 	let { children } = $props();
 
+	// the two spellings of a wall, and the chrome below is gated on either of
+	// them: a wall opened as /?feed= is still a wall, so it gets the same skip
+	// link, the same pickers and the same bottom padding a graph wall gets.
 	const actor = $derived(page.url.searchParams.get('actor'));
+	const feed = $derived(page.url.searchParams.get('feed'));
+
+	// The document title, derived here rather than written into <title>: svelte
+	// allows only text and expressions inside that element, never a block.
+	// Feed first, because a URL carrying both lays the feed; and since a
+	// generator's own name is not on the wire, a feed wall's tab says what kind
+	// of wall it is rather than pretending to name it.
+	const title = $derived(
+		feed ? 'a feed · mason' : actor ? `@${actor} · mason` : 'mason · one wall, every brick'
+	);
+
+	// Everything under the wrapper below goes inert while an overlay covers the
+	// wall, which is what traps focus inside the overlay: the wrapper rather
+	// than the wall itself, because on the wall the header's pickers would stay
+	// tabbable behind it. One disjunct per in-place surface, and each disjunct
+	// asks that surface itself whether it is up rather than re-deriving the
+	// answer here. Page state alone is wider than the reader (see
+	// reader.showing), and a wrapper made inert on a wider condition than the
+	// overlay renders on leaves the wall frozen under nothing at all.
+	//
+	// ONE expression covering every overlay, widened rather than replaced each
+	// time one arrives: the reader's disjunct is the same one it has always been,
+	// so a screen that went away could not take the reader's inertness with it.
+	const overlayOpen = $derived(reader.isOpen || feeds.isOpen || settings.isOpen);
 
 	// local mode: the wasm service worker IS the feed server.
 	// Always type module: the wasm-bindgen glue contains `import.meta`,
@@ -98,7 +132,7 @@
 </script>
 
 <svelte:head>
-	<title>{actor ? `@${actor} · mason` : 'mason · one wall, every brick'}</title>
+	<title>{title}</title>
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link
@@ -107,8 +141,11 @@
 	/>
 </svelte:head>
 
-<div class="mx-auto min-h-screen max-w-[1800px] px-4 sm:px-6 {actor ? 'pb-24 md:pb-0' : ''}">
-	{#if actor}
+<div
+	inert={overlayOpen}
+	class="mx-auto min-h-screen max-w-[1800px] px-4 sm:px-6 {actor || feed ? 'pb-24 md:pb-0' : ''}"
+>
+	{#if actor || feed}
 		<a
 			href="#wall"
 			class="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-full focus:bg-chalk focus:px-4 focus:py-2 focus:font-semibold dark:focus:bg-kiln"
@@ -122,13 +159,42 @@
 				mason&nbsp;<span aria-hidden="true">🧱</span>
 			</a>
 			<!-- one line, always: the bar never wraps on mobile (nowrap), so every
-			     control has to earn its width at 375px -->
-			<div class="flex flex-nowrap items-center justify-between gap-2 text-sm sm:gap-3 md:flex-wrap md:justify-end">
+			     control has to earn its width at 375px. It carries what changes while
+			     somebody reads and nothing else, which is why the client picker moved
+			     behind the cog: a choice made once a year was spending a phone's width
+			     every time the bar was drawn. -->
+			<div class="flex flex-nowrap items-center justify-between gap-1 text-sm sm:gap-3 md:flex-wrap md:justify-end">
 				<LayoutPicker />
-				<ClientPicker />
-				<SwitchWall actor={actor ?? ''} />
+				<!-- both parameters, because the switcher names the wall that is laid:
+				     passing only the actor made a feed wall's button read "@" with an
+				     aria-label to match, and a URL carrying both name the actor while
+				     the feed is what is on the screen -->
+				<SwitchWall {actor} {feed} />
+				<!-- lay this wall again, in place. Icon-only, because this row never
+				     wraps and the three controls beside it already spend 375px -->
+				<RefreshWall />
+				<!-- last on the bar, which is where a settings control belongs: it is
+				     the one thing here that is not about the wall in front of you. -->
+				<button
+					type="button"
+					onclick={() => settings.openSettings()}
+					aria-haspopup="dialog"
+					aria-expanded={settings.isOpen}
+					aria-label="Settings"
+					class="flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-ink/5 dark:hover:bg-chalk/10"
+				>
+					<Icon name="settings" class="size-5" />
+				</button>
 			</div>
 		</header>
 	{/if}
 	{@render children()}
 </div>
+
+<!-- OUTSIDE the wrapper above, deliberately: that wrapper is the element made
+     inert, and inert covers every descendant, so an overlay mounted inside it
+     would open unfocusable and invisible to assistive tech. Both overlays sit
+     here, side by side, for that one reason. -->
+<BrickReader />
+<FeedPicker />
+<Settings />

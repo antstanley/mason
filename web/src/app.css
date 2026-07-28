@@ -62,6 +62,25 @@
       transform: translateY(0) rotate(0) scale(1);
     }
   }
+
+  /* the brick reader lands in front of the wall rather than on it: the same
+     ease-out-quint hand as a brick, shorter and much shallower, because it
+     arrives over what you were already looking at */
+  --animate-reader-in: reader-in 0.24s cubic-bezier(0.16, 1, 0.3, 1) both;
+  /* the scrim under it never moves, it only ever fades, so it borrows the
+     crossfade the reduced-motion brick entrance already uses */
+  --animate-scrim-in: brick-fade 200ms linear both;
+
+  @keyframes reader-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.99);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
 }
 
 body {
@@ -99,6 +118,14 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .animate-brick-in {
     animation: brick-fade 0.25s linear both;
+  }
+  /* the reader arrives without moving: no rise, no scale, just the panel and
+     its scrim crossfading in together, a touch faster than the full motion */
+  .animate-reader-in {
+    animation: brick-fade 0.15s linear both;
+  }
+  .animate-scrim-in {
+    animation: brick-fade 0.15s linear both;
   }
   .animate-pulse {
     animation: none;

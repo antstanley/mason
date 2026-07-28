@@ -31,7 +31,7 @@ commands and CI gates named here are defined in
 | oxfmt | latest | The TS formatter; not Prettier |
 | knip | latest | Dead-code and unused-dependency analysis |
 | vitest | latest | Web unit tests |
-| Playwright | latest | The service-worker end-to-end smoke, chromium only |
+| Playwright | latest | Five browser specs, chromium only: the service-worker smoke, the brick reader, the feed picker, the refresh control, and repeated blog tags |
 | changesets | latest | Owns the single repo version |
 | jj (jujutsu) | latest | The version-control front end |
 | `just push` | repo-local | The local gate: fmt-check, lint, the guards and test, then `jj git push` |
@@ -346,9 +346,10 @@ changes need none; a forgotten one can be added in a follow-up PR.
   stabilises in TS 7.1, around October 2026. **Do not read a green
   `pnpm check:ci` as coverage of the components.** What holds the component layer
   up, measured rather than assumed: oxlint, which parses `.svelte` but checks
-  style not types; the Playwright smoke, which is 28 lines asserting one brick
-  renders; and review. Not vitest, whose two suites are both `.ts` and neither
-  imports a component. Not the vite build, which strips types without checking
+  style not types; the five Playwright specs, which are the only lane in this repo
+  that renders a component at all and which carry the brick reader, the feed
+  picker and the refresh control between them; and review. Not vitest, whose
+  suites are all `.ts` and none of which imports a component. Not the vite build, which strips types without checking
   them. Write component code as though the flags applied, because they will the
   day `svelte-check` returns, and nothing before then will tell you they did not.
 - **The `.svelte.ts` rune modules ARE checked.** `web/src/lib/state/*.svelte.ts`
@@ -386,8 +387,9 @@ changes need none; a forgotten one can be added in a follow-up PR.
 
 - `vitest run` for unit tests (`just test`), riding the app's own vite config so
   `.svelte.ts` rune modules compile as they do in the build.
-- `playwright test` for the service-worker smoke against the real static build
-  (`just test-e2e`), chromium only.
+- `playwright test` for the five browser specs against the real static build
+  (`just test-e2e`), chromium only: the service-worker smoke, the brick reader,
+  the feed picker, the refresh control, and repeated blog tags.
 - **Determinism.** No wall-clock assertions; `FeedState` tests drive a stubbed
   `fetchFeed`.
 - **Positive and negative space.** Every state-machine happy path is paired with

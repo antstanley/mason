@@ -39,8 +39,10 @@ The browser build reads exactly what the native one reads; there is no
 degraded mode.
 Module service workers required: Chrome 91+, Safari 15+, Firefox 147+.
 
-**server mode:** set `PUBLIC_MASON_SERVER_URL` in `web/.env` and the same SPA
-calls a native mortar over CORS; the path for future authenticated features.
+**server mode:** set the `PUBLIC_MASON_SERVER_URL` environment variable, which
+`just dev-server` does, and the same SPA calls a native mortar over CORS; the
+path for future authenticated features. It is a real environment variable read at
+build time, not a `.env` file.
 
 Either way, mortar builds a per-user **snapshot**: resolve handle → fetch
 follows → sample a cohort of 100 authors (60 known-active + 40 seeded

@@ -315,22 +315,41 @@
     },
 
     "CursorPayload": {
-      "description": "What a decoded cursor carries. Engine-internal: the client never inspects it. mortar emits exactly these two properties and no others, but it ACCEPTS more, which is why this is the one def in the schema that does not close additionalProperties: the decoder ignores unknown keys, so a cursor issued before the snapshot field was dropped still decodes to its seed and offset and a reader mid-scroll across that deploy keeps their place. Do not translate this def into a strict deserializer. Adding serde's deny_unknown_fields to Cursor would drop every in-flight reader onto a fresh wall, and the test named a_cursor_carrying_the_removed_snapshot_key_still_decodes_to_its_seed_and_offset is the only thing in the suite that catches it.",
-      "type": "object",
-      "required": ["seed", "offset"],
-      "additionalProperties": true,
-      "properties": {
-        "seed": {
-          "description": "The seed for the cohort shuffle and the mixer's jitter. Carrying it is what lets an evicted snapshot rebuild deterministically mid-scroll.",
-          "type": "integer",
-          "minimum": 0
+      "description": "What a decoded cursor carries. Engine-internal: the client never inspects it. Two shapes, one per wall source, distinguished structurally rather than by a discriminator field, so a cursor issued before feed walls existed still decodes to the graph shape. NEITHER shape closes additionalProperties, and these are the only defs in the schema that do not: Cursor is an untagged serde enum with no deny_unknown_fields on either variant, so the decoder ignores unknown keys. That is load-bearing on the graph shape, where a cursor issued before the snapshot field was dropped still decodes to its seed and offset and a reader mid-scroll across that deploy keeps their place; the test named a_cursor_carrying_the_removed_snapshot_key_still_decodes_to_its_seed_and_offset is the only thing in the suite that catches it. Do not translate either shape into a strict deserializer. One consequence of leaving both open: a payload carrying feed AND seed AND offset satisfies both branches, so it fails this oneOf while serde resolves it by declared order (Feed is declared first). mason never emits such a payload, and an attacker-written one decodes to a feed cursor.",
+      "oneOf": [
+        {
+          "title": "Feed wall",
+          "description": "Mason's position in a feed generator's own ordering. There is no snapshot to rebuild, so no seed and no offset are carried.",
+          "type": "object",
+          "required": ["feed"],
+          "additionalProperties": true,
+          "properties": {
+            "feed": {
+              "description": "The upstream app.bsky.feed.getFeed cursor, verbatim and opaque. Deliberately no minLength: the engine does not enforce one, and an empty string decodes to a feed cursor that degrades to the feed's head, which is the same fresh wall garbage gets.",
+              "type": "string"
+            }
+          }
         },
-        "offset": {
-          "description": "The next item offset within the snapshot's wall.",
-          "type": "integer",
-          "minimum": 0
+        {
+          "title": "Graph wall",
+          "description": "A position in a snapshot's append-only wall.",
+          "type": "object",
+          "required": ["seed", "offset"],
+          "additionalProperties": true,
+          "properties": {
+            "seed": {
+              "description": "The seed for the cohort shuffle and the mixer's jitter. Carrying it is what lets an evicted snapshot rebuild deterministically mid-scroll.",
+              "type": "integer",
+              "minimum": 0
+            },
+            "offset": {
+              "description": "The next item offset within the snapshot's wall.",
+              "type": "integer",
+              "minimum": 0
+            }
+          }
         }
-      }
+      ]
     },
 
     "FeedMode": {
@@ -343,9 +362,43 @@
       "enum": ["preview", "freeze"]
     },
 
+    "FeedRefresh": {
+      "description": "The ?refresh= request parameter. Exactly the token \"1\" asks for a new wall laid from re-read content caches; any other value, including absent, is no refresh. On a graph wall it is honoured only when cursor is absent, because a refresh is always a first page. Mirrors refresh_from_query in server/crates/mortar-core/src/feed.rs.",
+      "type": "string",
+      "const": "1"
+    },
+
+    "FeedRef": {
+      "description": "The ?feed= request parameter: a pointer to a Bluesky feed generator record. Parsed, never forwarded. Either an AT-URI whose collection is exactly app.bsky.feed.generator, or a bsky.app feed URL whose profile segment mason resolves to a DID. Anything else is bad_request.",
+      "oneOf": [
+        {
+          "$comment": "The DID authority form, which is what mason ultimately queries with.",
+          "type": "string",
+          "pattern": "^at://did:(plc|web):[A-Za-z0-9._:%-]+/app\\.bsky\\.feed\\.generator/[A-Za-z0-9._~-]+$"
+        },
+        {
+          "$comment": "The handle authority form. A legal AT-URI spelling that people do paste; the handle is resolved to a DID before the upstream query.",
+          "type": "string",
+          "pattern": "^at://[A-Za-z0-9.-]+/app\\.bsky\\.feed\\.generator/[A-Za-z0-9._~-]+$"
+        },
+        {
+          "$comment": "A bsky.app feed link, whose profile segment may be a handle or a DID.",
+          "type": "string",
+          "pattern": "^https://bsky\\.app/profile/[A-Za-z0-9._:%-]+/feed/[A-Za-z0-9._~-]+$"
+        }
+      ]
+    },
+
     "MortarErrorCode": {
-      "description": "The machine codes mortar itself emits. The web classifies on these, so they are wire contract rather than cosmetics. The web adds its own out-of-band codes (\"wasm\", \"unknown\") for failures that never reached mortar, which is why ErrorEnvelope.error stays a plain string.",
-      "enum": ["bad_request", "actor_not_found", "login_required", "upstream"]
+      "description": "The machine codes mortar itself emits. Classification reads these, never the message, so they are wire contract. The web adds out-of-band codes of its own (wasm, unknown) for failures that never reached mortar.",
+      "type": "string",
+      "enum": ["bad_request", "actor_not_found", "feed_not_found", "login_required", "upstream"]
+    },
+
+    "HiddenLabel": {
+      "description": "The hidden moderation tier: a subject carrying any of these never reaches the wall. Mirrors HIDDEN_LABELS in server/crates/mortar-core/src/sources/bluesky.rs. It is on the wire only as a pinned vocabulary (vocab.hiddenLabels in the contract fixture), because the feed picker reads a feed generator's own labels client-side and must not list a feed mason would refuse to lay. `nudity` is deliberately absent: Bluesky shows it to logged-out viewers, so mason does too.",
+      "type": "string",
+      "enum": ["!hide", "!no-unauthenticated", "porn", "sexual", "graphic-media"]
     },
 
     "ErrorEnvelope": {
