@@ -476,7 +476,11 @@ test("the switcher on a laid wall is the picker's other way in", async ({ page }
 
 	const switcher = page.getByRole("button", { name: /^Switch wall/ });
 	await switcher.click();
-	await page.getByRole("button", { name: "or pick a feed to lay" }).click();
+	// "pick a feed to lay" here, without the "or": on the panel it is the leading
+	// action rather than the alternative to one, and it is where the panel puts
+	// focus. The landing page's door keeps its "or", where the handle box IS the
+	// question being asked
+	await page.getByRole("button", { name: "pick a feed to lay" }).click();
 
 	await expect(panel(page)).toBeVisible();
 	await expect(query(page)).toBeFocused();

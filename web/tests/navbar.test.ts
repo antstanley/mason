@@ -170,7 +170,8 @@ test.describe("the switcher lists recent feeds", () => {
 
     const links = panel.locator('a[href^="/?feed="]');
     // five and not the twelve the picker keeps: this panel opens upward from a
-    // fixed bar, and every row it adds pushes the "pick a feed" door off screen
+    // fixed bar, so every row it adds is a row nearer the top of the viewport,
+    // and the door now sits above them where a clipped panel would take it first
     await expect(links).toHaveCount(5);
     await expect(links).toHaveText(["Science", "Art", "Blacksky", "Books", "Cats"]);
 
@@ -291,14 +292,49 @@ test.describe("the switcher lists recent feeds", () => {
     expect(page.url()).toContain("actor=demo");
   });
 
-  test("keeps the door to the picker on screen beneath them", async ({ page }) => {
+  // The door leads them rather than following them, and it is where the panel
+  // puts focus. Both halves are the change: somebody opening this panel wants
+  // another wall, a feed is the likelier one, and the recents right under the
+  // door answer the same question it does. The handle box is still here, below
+  // and quieter, and one Tab away from where focus lands.
+  test("the door to the picker leads the panel, and takes focus", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 780 });
     await page.getByRole("button", { name: /Switch wall/ }).click();
     const panel = page.getByRole("dialog", { name: "Switch wall" });
-    const door = panel.getByRole("button", { name: /pick a feed/i });
+    const door = panel.getByRole("button", { name: "pick a feed to lay" });
 
-    const box = await door.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box?.y ?? -1).toBeGreaterThanOrEqual(0);
+    // focus is IN the dialog and it is on the door, not in the handle field:
+    // opening the field opened a keyboard over the list the reader came for
+    await expect(door).toBeFocused();
+
+    const doorBox = await door.boundingBox();
+    const firstRecent = await panel.locator('a[href^="/?feed="]').first().boundingBox();
+    const field = await panel.locator("#switch-handle").boundingBox();
+    expect(doorBox).not.toBeNull();
+    // on screen, whole
+    expect(doorBox?.y ?? -1).toBeGreaterThanOrEqual(0);
+    // above the recents, and above the handle box
+    expect(doorBox?.y ?? 0).toBeLessThan(firstRecent?.y ?? 0);
+    expect(doorBox?.y ?? 0).toBeLessThan(field?.y ?? 0);
+
+    // and it is the panel's only filled control: two would be no hierarchy at
+    // all. The handle submit keeps its words and gives up its fill.
+    const filled = panel.locator("button.bg-pop-pink-deep");
+    await expect(filled).toHaveCount(1);
+    await expect(filled).toHaveText("pick a feed to lay");
+  });
+
+  test("the handle box is still there, one tab from the door", async ({ page }) => {
+    await page.getByRole("button", { name: /Switch wall/ }).click();
+    const panel = page.getByRole("dialog", { name: "Switch wall" });
+
+    await page.keyboard.press("Tab");
+    // the recents come between them only when there are recents to come between
+    // them; this describe block seeds five, so the field is further than one Tab
+    // and what matters is that the panel is walkable at all
+    await expect(panel.locator("#switch-handle")).toBeVisible();
+    await panel.locator("#switch-handle").focus();
+    await expect(panel.locator("#switch-handle")).toBeFocused();
   });
 });
 
