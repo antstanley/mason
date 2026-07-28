@@ -56,6 +56,14 @@ Any Rust change to the engine needs a `just wasm` (or `just dev`/`just build`,
 which run it) before the browser sees it. Try actor `demo` for an offline
 fixture wall.
 
+**`pnpm exec playwright test` does not build.** It starts `vite preview`, which
+SERVES `web/build/`, so running a spec straight after touching `web/src` (or the
+Rust behind the wasm) drives the previous build and answers about code you no
+longer have: green, fast and wrong. `just test-e2e` builds first and never had
+the problem. A `globalSetup` guard now refuses the run when the build is older
+than what it was made from, and names the files, so the shortcut is safe too.
+Editing a spec in `web/tests/` never trips it: specs are not built.
+
 ## Conventions & gotchas
 
 - **Naming is the brand.** brick (a content card), mortar (the feed engine),

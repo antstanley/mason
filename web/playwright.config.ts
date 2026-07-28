@@ -24,6 +24,12 @@ const origin = `http://localhost:${port}`;
 
 export default defineConfig({
 	testDir: "tests",
+	// Refuses to run when web/build/ is older than what it was built from. The
+	// preview server is started first and torn straight back down, so a stale
+	// tree costs a couple of seconds and not a suite. See playwright.setup.ts for
+	// what this looks like WITHOUT the guard, which is a green run against code
+	// that has already been deleted.
+	globalSetup: "./playwright.setup.ts",
 	timeout: 60_000,
 	forbidOnly: !!process.env.CI,
 	retries: process.env.CI ? 1 : 0,
