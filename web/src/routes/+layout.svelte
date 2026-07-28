@@ -8,6 +8,7 @@
 	import FeedPicker from '$lib/components/FeedPicker.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import LayoutPicker from '$lib/components/LayoutPicker.svelte';
+	import PullToRefresh from '$lib/components/PullToRefresh.svelte';
 	import RefreshWall from '$lib/components/RefreshWall.svelte';
 	import Settings from '$lib/components/Settings.svelte';
 	import SwitchWall from '$lib/components/SwitchWall.svelte';
@@ -187,6 +188,13 @@
 				</button>
 			</div>
 		</header>
+		<!-- the wall's other trigger: drag its top down and let go. Gated on the
+		     same pair as the header, because a pull is only a refresh where there
+		     is a wall to lay again, and handed the one overlay expression above
+		     rather than a second copy of it: a window listener sees no `inert`,
+		     so this is the only thing keeping a pull from laying the wall behind
+		     an open screen. -->
+		<PullToRefresh blocked={overlayOpen} />
 	{/if}
 	{@render children()}
 </div>

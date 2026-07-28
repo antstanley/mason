@@ -430,9 +430,11 @@ preview lands.
 
 The control closes an open reader before it asks for the wall, because a refresh
 replaces `feed.items` wholesale and the reader locates its open brick in that
-list by id. Today no click can reach that line, since an open reader makes the
-content wrapper `inert` and this control sits inside it, so the call is the
-guarantee held for the next trigger rather than a live path.
+list by id. No click can reach that line, since an open reader makes the content
+wrapper `inert` and this control sits inside it, so at the button it is a
+guarantee held rather than a live path. The pull below is the trigger it was
+being held for, and there the same call is live: a window listener sees no
+`inert`.
 
 It is disabled while the feed is loading or warming, and that is the whole rate
 limit: one refresh can be in flight, so a double tap cannot start two
@@ -441,6 +443,106 @@ already says "laying bricks" while warming; a refresh is a warm, so it needs no
 new announcement and `RefreshWall` adds no region of its own. The announcement
 of *new* bricks is suppressed for free, because the region's count resets while
 warming so a reflow's churn never reads as new bricks.
+
+### Pulling
+
+The second trigger, and the one a thumb reaches for: drag the top of the wall
+down and let go. It is the same `feed.refresh()` with the same rate limit, never
+a second kind of refresh, and `PullToRefresh` sits beside the header on the same
+`?actor=` or `?feed=` gate the bar does.
+
+**The wall itself moves.** The gesture says the reader has hold of the wall, so
+`main#wall` is what translates, not an indicator floating over a wall that
+stayed still. `main` and not the layout's wrapper: on a phone that wrapper holds
+the fixed control bar, and a transform on it would drag the bar down the screen
+with the bricks. The transition is off while a finger is driving, because a
+transition mid-drag is lag, and on for both glides, where `motion-safe` gates
+it: a reader who asked for less motion gets the wall moved without a glide.
+`will-change: transform` is set only while a finger is on it, so a long wall is
+promoted to its own layer for the drag and hands the memory back after it.
+
+**The wall rests on a shelf while it lays.** A released pull does not send the
+wall home, it settles it 54px open and holds it there until the warm ends. The
+indicator lives in that gap, and the gap closing is what says the refresh
+finished: the reader watches the wall shut rather than reading a word.
+
+This replaces an earlier snap-home, and a recording on a real phone is what
+settled it. With the wall home there is no gap, so for the whole warm (three
+seconds and more on a live wall) the pill sat on top of the first card. It is
+also the behaviour every reader of a phone already knows the gesture by, which
+is worth more here than the 54px of bricks it hides.
+
+The offset is ONE number, `pull.offset`, decided in the rune module: the finger
+while there is a finger, the shelf while the refresh runs, zero otherwise. The
+wall and the indicator both read it, so they cannot disagree about where the top
+of the wall is, and the indicator hangs off the bottom of whatever gap that
+number describes by one rule at every stage. `laying` is set by the trigger from
+`feed.warming` immediately after `refresh()` returns, so it means "the refresh
+took" rather than "a refresh was asked for", and a refusal cannot leave the wall
+propped open with nothing behind it. It is deliberately NOT cleared when a
+gesture resets: the shelf outlives the finger, and a reader who touches a brick
+while their own refresh runs must not have the wall drop out from under the tap.
+
+**The band.** The wall follows the finger 1:1 up to a threshold of 72px, which
+is where it arms, so arming is honest: the reader's own hand is the gauge. Past
+it the band stretches asymptotically towards 120px and never reaches it, so
+there is no point at which the wall stops answering. 72 rather than the ~110 a
+browser's own overscroll refresh uses, because this gesture can only start at
+the very top of a wall, where a downward drag is not a scroll and needs no
+margin to be told apart from one.
+
+**What is a pull, decided once.** A gesture is read in its first 8px of travel
+and the answer holds for the rest of it: downward and more down than across is a
+pull, anything else is handed straight back to the browser and stays handed back
+even if the finger wanders back down through where it started. A pull that eases
+back up unwinds to zero and lays nothing, which is what the threshold is for. A
+second finger, a `touchcancel`, or a screen arriving over the wall cancels it
+outright, whatever the distance.
+
+**The browser's own gesture is turned off**, with `overscroll-behavior-y:
+contain` on `html`. Chrome on Android turns an overscroll at the top into a full
+page reload, which is the worst available answer to "lay this wall again": it
+drops the laid wall, its scroll, the seed behind its arrangement and any playing
+video, then warms a new wall from a cold service worker. mason's own pull does
+what the reader reached for and keeps all of it. `contain` rather than `none`
+leaves the rubber band alone, since that is the feedback that says a scroll has
+reached its end.
+
+The gesture starts only at the top of the wall (`scrollY <= 0`, so an iOS
+document already rubber-banding still counts as the top), on a wall that is not
+already being laid, with nothing open over it, with one finger on the glass, and
+**on the wall itself**: the touch must have landed inside `main#wall`. A window
+listener hears every touch on the page, and the header bar, the switcher's panel
+and the scrim under it all sit over the wall and all bubble to it. The `blocked`
+prop covers the three screens that own the whole viewport; the target check
+covers everything else, and the switcher is the case that needs it, since its
+openness is local component state that nothing outside the component can read.
+The question is asked of the element the touch STARTED on, because a gesture
+belongs to whatever it began on and a finger that wanders off the wall mid-drag
+is still pulling it.
+
+That whole set is the one thing `PullState` cannot see for itself, so the
+component answers it in a single boolean at touch down; the module takes
+coordinates and returns decisions, and names no DOM global, which is what keeps
+it unit tested in node.
+
+While the pull's own warm runs, the indicator stays up in the shelf's gap and
+says "laying bricks". That is not decoration: the four-card skeleton tail that
+says more is coming sits at the *bottom* of the wall, off screen from the top
+where the reader is standing, so without it the gesture would land on nothing
+until the reflow arrived a poll later.
+
+The indicator is `aria-hidden`, and the wall gains no second live region: it is
+a touch affordance narrating a touch gesture, the wall's one polite region
+already says "laying bricks" while warming, and the button remains the named,
+platform-disabled way to ask. The listener is attached to `window` with
+`{ passive: false }` directly rather than through svelte's event attributes,
+because a touch listener on `window` is passive by default in every browser that
+matters, a passive listener's `preventDefault` is ignored, and the wall would
+move under a document that scrolled anyway. `preventDefault` is called only on a
+claimed move and only when the event is cancelable: once a scroll is under way
+iOS hands over uncancelable moves, and the pull rides the platform's rubber band
+there instead of replacing it.
 
 ---
 
@@ -455,6 +557,22 @@ handle box, and from `SwitchWall` on a laid wall, which is already the
 switch-walls affordance. Either way it opens over the current content and is held
 in history state (`pushState('', { picker: 'feeds' })`), so the back gesture
 returns the reader to where they were instead of out of mason.
+
+**The two doors are weighted differently, on purpose.** On the landing page the
+handle box is the question being asked, and the picker is the alternative to it:
+"or pick a feed to lay", under the box, in the same language as the demo link. In
+the switcher panel it leads. It is the first control, the panel's only filled
+one, and the control the panel puts focus on; the recents sit directly under it
+because they answer the same question one tap sooner; and the handle box follows
+below a rule, quieter, with an outline submit and a label that now reads "or
+switch to a handle".
+
+The asymmetry follows from who is standing there. A reader on the landing page
+has arrived with nothing and their own handle is the one thing they certainly
+have. A reader opening the switcher already has a wall and wants a different one,
+and they have one follow graph and thousands of feeds. Focusing the handle field
+also opened a keyboard on every phone that opened this panel, over the list the
+reader was most likely reaching for.
 
 Five ways to reach a feed, because they answer five different states of knowing
 what you want:
@@ -581,8 +699,11 @@ live in components.
   a sliding thumb (arrow keys move the selection); `ClientPicker` is a listbox
   with roving arrow-key focus, Home, End, Escape and click-away, because a native
   `<select>` cannot render the client icons; `SwitchWall` is a dialog with
-  Escape, click-away, and a focus-out that closes when focus leaves the whole
-  switcher, **and it also closes on the click that takes a link inside it**. Its
+  Escape, click-away, a focus-out that closes when focus leaves the whole
+  switcher, and focus placed on its door to the feed picker on open (inside the
+  dialog either way, so which control is a product choice rather than an
+  accessibility one), **and it also closes on the click that takes a link inside
+  it**. Its
   openness is local component state, so a client-side navigation does not touch
   it: the recent-feed links and the demo link would otherwise leave the dialog
   and its scrim over the wall that had just laid, dimming it and swallowing every
@@ -639,6 +760,7 @@ web/src/lib/
     SwitchWall.svelte        the owner's face as a wall switcher
     LayoutPicker.svelte      bento / masonry / glaze
     RefreshWall.svelte       lay this wall again, now
+    PullToRefresh.svelte     the same, asked for by pulling the wall's top down
     ClientPicker.svelte      which atmosphere client links open in
     Icon.svelte              every lucide path, inline
     ClientIcon.svelte        per-client marks
@@ -705,6 +827,13 @@ appears and the form still works.
   a reader taken to the top does not watch the reflow they asked for. Open: a
   reader deep in a long wall probably wants the top, and a reader who tapped
   refresh to see what is new probably does not.
-- *Pull to refresh.* A touch reader's instinct is to drag down, and the wall has
-  nothing there. It competes with the browser's own overscroll refresh and needs
-  a gesture threshold, a rubber band and a reduced-motion path. Open.
+- *Pull to refresh on a trackpad.* The gesture is touch only. A desktop reader
+  overscrolling at the top of the wall with a wheel or a two-finger swipe gets
+  nothing, and the header control is their way to ask. Whether a wheel-driven
+  pull is worth having is open: the button is never more than a glance away
+  there, and a wheel has no equivalent of letting go.
+- *What a pull should do at the end of a long wall.* Nothing, currently: the
+  gesture only starts at the top. Pulling UP at the bottom to ask for the next
+  cohort is the symmetric idea, and the scroll pump already does that job
+  invisibly, so it is unclear the gesture would be telling the reader anything
+  they did not already have.

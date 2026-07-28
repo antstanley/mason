@@ -42,13 +42,12 @@
 		// `reader.close()` reaches `history.back()` one module away, where
 		// feed.test.ts's "names no DOM global" grep could not see it.
 		//
-		// Today no click can reach this line with a reader up: an open reader
-		// makes the layout's content wrapper `inert`, this control sits inside
-		// that wrapper, and this control is the only trigger a refresh has. That
-		// makes the call a guarantee for the NEXT trigger rather than a live path
-		// (a keyboard shortcut, a pull gesture, an auto-refresh nobody has asked
-		// for), and none of those would be inside the wrapper. It is not dead
-		// code, it is the state's invariant held at the one place that can hold it.
+		// No click can reach this line with a reader up: an open reader makes the
+		// layout's content wrapper `inert` and this control sits inside that
+		// wrapper. So here the call is the invariant held rather than a live
+		// path. The trigger it was being held for has since arrived:
+		// `PullToRefresh` listens on `window`, where there is no wrapper and no
+		// `inert`, and it holds the same guard itself for that reason.
 		//
 		// Guarded on `isOpen`, and the guard is load-bearing rather than tidiness:
 		// `close()` pops history only for an entry IT pushed and clears that flag

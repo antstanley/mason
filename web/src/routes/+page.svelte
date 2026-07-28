@@ -4,6 +4,7 @@
 	import type { FeedTarget } from '$lib/api';
 	import { feed } from '$lib/state/feed.svelte';
 	import { layout } from '$lib/state/layout.svelte';
+	import { pull } from '$lib/state/pull.svelte';
 	import FeedGrid from '$lib/components/FeedGrid.svelte';
 	import HandleForm from '$lib/components/HandleForm.svelte';
 
@@ -34,7 +35,28 @@
 </script>
 
 {#if actor || feedUri}
-	<main id="wall" class="pb-8">
+	<!-- The wall itself moves with the pull, because that is what the gesture
+	     says it does: the reader has hold of the wall, not of an indicator over
+	     it. `main` and not the layout's wrapper, so the header stays put; on a
+	     phone that wrapper holds the fixed control bar, and a transform on it
+	     would drag the bar down the screen along with the bricks.
+	     `pull.offset` and not `pull.distance`: on release the wall settles onto a
+	     shelf and stays open for as long as the refresh it asked for runs, so the
+	     indicator has a gap to sit in and the gap closing is what says the wall
+	     is laid. One number, decided in the rune module, so the wall and the
+	     indicator cannot disagree about where its top is.
+	     The transition is off while a finger is driving (a transition mid-drag
+	     is lag) and on for both glides, onto the shelf and home, with
+	     `motion-safe` gating them so a reader who asked for less motion gets
+	     neither. will-change only while a finger is on it: it promotes a long
+	     wall to its own layer for the drag and hands the memory back after. -->
+	<main
+		id="wall"
+		class="pb-8 {pull.pulling ? '' : 'motion-safe:transition-transform motion-safe:duration-200'}"
+		style="transform: translateY({pull.offset}px); will-change: {pull.pulling
+			? 'transform'
+			: 'auto'};"
+	>
 		<!-- when the wall cannot load, FeedGrid raises the failure as the page's
 		     single h1, so the sr-only wall title steps aside to avoid a second one -->
 		{#if !(feed.error && feed.items.length === 0)}
