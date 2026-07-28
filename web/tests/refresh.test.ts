@@ -29,10 +29,11 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 //
 // AND IT DOES NOT ASSERT THE READER CLOSE. `RefreshWall` calls `reader.close()`
 // ahead of `feed.refresh()`, and no click here can reach that line: an open
-// reader makes the layout's content wrapper `inert`, this control sits inside
-// that wrapper, and it is the only trigger a refresh has. The call is the
-// guarantee for the next trigger, not a live path, so a case here could only
-// fake the state it claims to test.
+// reader makes the layout's content wrapper `inert` and this control sits inside
+// that wrapper. At the button the call is the invariant held, not a live path,
+// so a case here could only fake the state it claims to test. The other trigger,
+// the pull, holds the same guard on a live path and is covered in
+// pull-refresh.test.ts.
 
 // 375px, which is the constraint the header bar is written against: it never
 // wraps on mobile, so a control that does not earn its width pushes another one

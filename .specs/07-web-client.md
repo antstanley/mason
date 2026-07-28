@@ -122,6 +122,7 @@ instance, apart from `revealed`, which is a reactive set. Preferences persist to
 | `state/player.svelte.ts` | `player` | The id of the one video allowed to play | none |
 | `state/reader.svelte.ts` | `reader` | The brick being read in place; its position on the wall is derived by id | none (history state) |
 | `state/sensitive.svelte.ts` | `revealed` | Brick ids whose `!warn` media the reader uncovered | none (session set) |
+| `state/pull.svelte.ts` | `pull` | The pull gesture: how far the wall is pulled, whether it is armed | none (lives and dies with one gesture) |
 
 Three of these are worth naming:
 
@@ -266,7 +267,7 @@ reset(target, mode)
       ├─ dedupe against #seen, append, adopt cursor, done = !cursor, #save()
       └─ on error: classify
 
-   refresh()   ← the header control
+   refresh()   ← the header control, or a pull released past its threshold
       ├─ refuses while loading, warming, or with no target
       ├─ drop this (target, mode) from the session cache: back/forward must not
       │  resurrect the wall the reader just replaced
@@ -331,11 +332,13 @@ Three details hold the refresh together:
   for those readers rather than a race.
 - **`FeedState` still touches no DOM.** Nothing in a refresh moves the scroll
   position, which is what keeps the vitest lane running the real module in node
-  and keeps the refresh from freezing itself. The one thing the control does
-  besides calling `refresh()` is close an open reader, and that lives at the
-  control rather than in `FeedState` for the same reason: it reaches
+  and keeps the refresh from freezing itself. The one thing a trigger does
+  besides calling `refresh()` is close an open reader, and that lives at each
+  trigger rather than in `FeedState` for the same reason: it reaches
   `history.back()` a module away, and the reverse import would be a cycle
-  between two singletons.
+  between two singletons. Both triggers hold it: the header control, where no
+  click can reach the line because an open reader makes the wrapper `inert`, and
+  the pull, where it is a live path because a window listener has no wrapper.
 
 Three mechanisms hold the rest of it together:
 
@@ -450,8 +453,8 @@ whose bricks are fixtures compiled into the wasm and need no network at all.
 
 | Lane | Runner | Covers |
 |---|---|---|
-| `web/src/**/*.test.ts` | vitest, node environment | `FeedState` transitions, `api.ts` request shaping and error mapping |
-| `web/tests/*.test.ts` | Playwright, chromium | The real static build, in five specs: the service-worker smoke (the worker intercepts `/api/feed` and lays the demo wall), the brick reader, the feed picker, the refresh control, and a blog carrying the same tag twice. **The only lane in the repo that renders a component at all** |
+| `web/src/**/*.test.ts` | vitest, node environment | `FeedState` transitions, `api.ts` request shaping and error mapping, the pull gesture's decisions |
+| `web/tests/*.test.ts` | Playwright, chromium | The real static build: the service-worker smoke (the worker intercepts `/api/feed` and lays the demo wall), the brick reader, the feed picker, the refresh control, the pull gesture (the one spec that runs on a touch device), the settings screen, the header bar, a link's own picture, and a blog carrying the same tag twice. **The only lane in the repo that renders a component at all** |
 | `pnpm check:ci` | `tsc --noEmit` | Types in `.ts` and `.svelte.ts`, including the wire drift guard. **Not `.svelte` component bodies** |
 
 vitest rides the app's own vite config through `mergeConfig`, so `.svelte.ts`

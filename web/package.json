@@ -19,7 +19,9 @@
 		"fmt:check": "oxfmt --check src",
 		"knip": "knip",
 		"og": "node scripts/render-og.mjs",
-		"icons": "node scripts/render-icons.mjs"
+		"icons": "node scripts/render-icons.mjs",
+		"feeds:audit": "node scripts/audit-feeds.mjs",
+		"//feeds:audit": "re-derives UNLAYABLE_FEEDS in src/lib/state/feeds.svelte.ts against the live appview; talks to the network, so no lane runs it"
 	},
 	"devDependencies": {
 		"@playwright/test": "^1.62.0",

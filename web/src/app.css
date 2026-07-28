@@ -89,6 +89,21 @@ body {
   font-family: var(--font-sans);
 }
 
+/* The wall owns the top of its own scroll. Chrome on Android turns an
+   overscroll at the top into a full page RELOAD, which on this app is the worst
+   possible answer to "lay this wall again": a reload drops the laid wall, its
+   scroll, the seed behind its arrangement and any playing video, and then warms
+   a whole new wall from a cold service worker. mason's own pull does the thing
+   the reader was reaching for and keeps all of that, so the platform's gesture
+   is turned off rather than left to race it.
+
+   `contain` and not `none`: this stops the refresh and stops scroll chaining
+   out of the document, and leaves the rubber band alone, which is the feedback
+   that says a scroll has reached its end. */
+html {
+  overscroll-behavior-y: contain;
+}
+
 /* One focus language everywhere. Lives in @layer base so a component can
    still override the offset with a utility; an unlayered rule would beat
    every Tailwind utility no matter its specificity (cards clip their own

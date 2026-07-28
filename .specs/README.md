@@ -46,7 +46,8 @@ history, including any claim it turned out to get wrong, annotated in place.
 
 No change spec is pending. The three proposed on 2026-07-26 from one batch of
 feature requests all merged, and each names in its own body what it owed the
-other two for merging after them.
+other two for merging after them. The pull gesture that followed was proposed and
+shipped together, so it went straight to `Merged` on the day it was written.
 
 | Merged change spec | Merged | Shipped |
 |---|---|---|
@@ -56,6 +57,7 @@ other two for merging after them.
 | [2026-07-26-read_a_brick_in_place.md](changes/merged/2026-07-26-read_a_brick_in_place.md) | 2026-07-27 | The brick reader: a plain click opens the brick mason already holds, at full size over an inert wall, and the back gesture closes it. The `!warn` reveal became a shared session set |
 | [2026-07-26-lay_a_bluesky_feed.md](changes/merged/2026-07-26-lay_a_bluesky_feed.md) | 2026-07-27 | A wall is a source and a view: `?feed=<at-uri>` lays any Bluesky feed generator in its own order with no snapshot, grout or mixer behind it, all three views apply to either source, and a feed picker became the second front door |
 | [2026-07-26-refresh_the_wall.md](changes/merged/2026-07-26-refresh_the_wall.md) | 2026-07-27 | One control lays the wall again in place: the outgoing wall stays up and reflows, and a `refresh=1` flag makes the fill step over the fast content caches, two of them on a graph wall and `feed_pages` on a feed wall |
+| [2026-07-28-pull_the_wall_down.md](changes/merged/2026-07-28-pull_the_wall_down.md) | 2026-07-28 | The pull gesture: dragging the top of the wall down and letting go asks for the same refresh the header button does, and the browser's own reload-on-overscroll is turned off in the same move |
 
 ## Plans
 
