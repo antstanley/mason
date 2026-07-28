@@ -1,5 +1,229 @@
 # mason
 
+## 0.8.0
+
+### Minor Changes
+
+- [#71](https://github.com/antstanley/mason/pull/71) [`509c6b0`](https://github.com/antstanley/mason/commit/509c6b06504049dee0ac6402b9f8e28377866953) Thanks [@antstanley](https://github.com/antstanley)! - the header bar has room in it again, and a settings screen behind a cog.
+
+  on a phone the layout picker was three segments laid side by side, and it was
+  wide enough that two of its own touch targets had been shaved under 44px to fit
+  a fourth control beside it. it is a dropdown there now, in the same language as
+  the client picker, and every control on the bar is back to a 44px target. from
+  sm up it is the slider it always was.
+
+  the bar reads left to right: layout, the wall switcher, refresh, settings. the
+  switcher's panel now lists the five feeds you opened most recently, as real
+  links, so going back to one is a tap rather than a trip through the picker.
+
+  which client a post opens in has moved to settings, because it is a choice you
+  make once and the bar is for what changes while you read. settings is a screen
+  held in history state like the reader and the picker: the address bar keeps
+  naming the wall behind it and the back gesture closes it.
+
+  two more clients to open posts in: twinkl and witchsky. twinkl spells its
+  profile routes differently from everyone else, so mason rewrites the path rather
+  than only swapping the host, which is the difference between a link that opens
+  and one that 404s.
+
+- [#71](https://github.com/antstanley/mason/pull/71) [`509c6b0`](https://github.com/antstanley/mason/commit/509c6b06504049dee0ac6402b9f8e28377866953) Thanks [@antstanley](https://github.com/antstanley)! - a brick now opens where it lies. a plain click on a card lifts it into a reader
+  over the wall rather than sending you to another app: the same brick mason was
+  already holding, at reading width, with the trip to the source demoted to one
+  control inside it. the back gesture closes it, so does escape, the close button
+  and the scrim, and the wall behind stays dimmed, inert and exactly where you
+  left it. a modified click still goes straight out, because every card is still a
+  real link.
+
+  the sensitive-media reveal now follows the brick instead of the card, so a brick
+  uncovered on the wall is still uncovered one click later in the reader. it is
+  still forgotten on reload.
+
+- [#71](https://github.com/antstanley/mason/pull/71) [`509c6b0`](https://github.com/antstanley/mason/commit/509c6b06504049dee0ac6402b9f8e28377866953) Thanks [@antstanley](https://github.com/antstanley)! - a bluesky feed generator is now a wall mason can lay, and the engine treats it
+  as somebody else's algorithm rather than as more bricks to rank. `?feed=` pages
+  the generator itself, one appview call per page, and lays what comes back in the
+  order it came back: no snapshot, no cohort, no extension waves, no grout and no
+  mixer. the wall ends exactly when the feed does. glaze still works over it, and
+  asks for the generator's full page so an image wall is a wall of images rather
+  than four of them.
+
+  a feed reference is parsed rather than forwarded, in all three spellings people
+  actually paste, and one that names no feed says so in its own words instead of
+  asking you about your handle.
+
+- [#71](https://github.com/antstanley/mason/pull/71) [`509c6b0`](https://github.com/antstanley/mason/commit/509c6b06504049dee0ac6402b9f8e28377866953) Thanks [@antstanley](https://github.com/antstanley)! - a link brings its own picture to the wall.
+
+  when a post links somewhere and attached no image of its own, the wall now lays
+  the linked page's `og:image` instead of a line of grey text, with the host, the
+  headline and the description over the foot of it. an image the poster attached
+  still wins: what somebody chose to show beats what a page happened to advertise.
+
+  no new traffic and nothing new on the wire. the AppView already resolves the
+  Open Graph tags when a link card is made, and mason has been receiving the
+  picture alongside the title and description all along without drawing it.
+
+- [#71](https://github.com/antstanley/mason/pull/71) [`509c6b0`](https://github.com/antstanley/mason/commit/509c6b06504049dee0ac6402b9f8e28377866953) Thanks [@antstanley](https://github.com/antstanley)! - mason has a second front door. beside the handle box, and on the switcher of any
+  laid wall, there is now a feed picker: a screen for finding a bluesky feed and
+  laying it as a mason wall. it browses what the network ranks, remembers the last
+  twelve feeds you opened, and takes one box for all three ways of naming a feed.
+  what you type decides which question is asked: a name searches, a handle lists
+  the feeds that person made, and a pasted feed link or at:// uri lays it. a paste
+  that mason cannot lay says so at the box, and nothing navigates.
+
+  it opens over whatever you were looking at rather than taking you off it, so the
+  back gesture, escape and the close button all put you back where you were, and
+  the address bar keeps showing the wall behind. feeds carrying the hidden
+  moderation tier are never listed, and when the appview will not answer the
+  picker says so quietly and keeps your recents and the paste box, which need it
+  for nothing.
+
+- [#76](https://github.com/antstanley/mason/pull/76) [`07c423a`](https://github.com/antstanley/mason/commit/07c423a80874b9c0dbba643f40547622ff1b3849) Thanks [@antstanley](https://github.com/antstanley)! - the wall pulls on a desktop too. keep scrolling up when it is already at the top
+  and it opens the same way it does under a thumb, with the same line to cross and
+  the same wall staying open while it lays itself. stop scrolling and it lays: a
+  wheel has no letting go, so stopping is how you commit, and the pill says so.
+
+  a flick that merely lands at the top does not refresh anything. the gesture has
+  to start from rest, which is the one thing a momentum tail cannot do, and one
+  stray notch of a mouse wheel moves the wall a little and costs nothing.
+
+- [#71](https://github.com/antstanley/mason/pull/71) [`509c6b0`](https://github.com/antstanley/mason/commit/509c6b06504049dee0ac6402b9f8e28377866953) Thanks [@antstanley](https://github.com/antstanley)! - a feed wall now says whose feed it is: the switcher in the header carries the
+  generator's own avatar and name, read from the appview the way a wall owner's
+  face already is, and falls back to the feed's rkey rather than an empty button
+  when the appview has nothing to say.
+
+  a feed link that names no feed also stops asking you to check your handle. it
+  gets its own panel, reading "no such feed", and an empty feed wall says "this
+  feed has no bricks yet" instead of calling it a wall.
+
+- [#71](https://github.com/antstanley/mason/pull/71) [`509c6b0`](https://github.com/antstanley/mason/commit/509c6b06504049dee0ac6402b9f8e28377866953) Thanks [@antstanley](https://github.com/antstanley)! - a laid wall is no longer final. one control in the header lays it again in
+  place: the bricks you were reading stay on screen and reflow into the new
+  arrangement, rather than collapsing to skeletons or throwing away the engine,
+  the warm caches and any playing video the way a reload does. it does not take
+  you back to the top, because the reflow is the thing you asked to see.
+
+  it is disabled while a wall is being laid, and that is the whole rate limit: one
+  refresh is one burst of upstream requests, so a double tap cannot become two.
+  the wall keeps its single polite announcement, which already says "laying
+  bricks" while it warms, and a refresh is a warm.
+
+  the header bar carries four controls at 375px now, so its gaps and the layout
+  picker's padding are tighter below sm. it fits a 360px phone for the first time
+  too, which it did not before the fourth control arrived.
+
+- [#71](https://github.com/antstanley/mason/pull/71) [`509c6b0`](https://github.com/antstanley/mason/commit/509c6b06504049dee0ac6402b9f8e28377866953) Thanks [@antstanley](https://github.com/antstanley)! - the reader's footer says where it is taking you, on one line.
+
+  "open the post" has moved up onto the line the timestamp and the counts already
+  had, over on the right, and it now names the client it opens: "open in Bluesky",
+  or whichever one is set in settings. it reads the name off the finished link
+  rather than off the setting, so a link that is not a bluesky post and therefore
+  never gets rewritten does not claim it is opening somewhere it is not.
+
+  the brick counter between "previous brick" and "next brick" is gone. it read as
+  progress through the wall and was not: the wall keeps growing while the reader
+  is open, so "4 of 22" quietly became "4 of 31" without the reader having moved.
+  stepping still announces where it landed to a screen reader, which is a
+  different job and the one that number was actually doing.
+
+- [#71](https://github.com/antstanley/mason/pull/71) [`509c6b0`](https://github.com/antstanley/mason/commit/509c6b06504049dee0ac6402b9f8e28377866953) Thanks [@antstanley](https://github.com/antstanley)! - a bluesky feed is a wall: `/?feed=<at-uri>` lays a feed generator with the same
+  header, the same three views and the same chrome a graph wall gets. the client's
+  routing surface is now both parameters, and `feed` wins when a link carries both.
+
+- [#75](https://github.com/antstanley/mason/pull/75) [`baaedf7`](https://github.com/antstanley/mason/commit/baaedf71f3d66ffea75cd8dcbfc2fd6267cd9e69) Thanks [@antstanley](https://github.com/antstanley)! - the wall lays itself again when you pull it. drag the top of the wall down on a
+  touchscreen and let go: it is the same refresh the button in the header asks for,
+  reached the way a thumb reaches for it. the wall follows your finger, stiffens
+  past the point where letting go would lay it, and says which side of that line
+  you are on.
+
+  let go and the wall stays open a crack while it lays itself, then closes: the
+  gap shutting is how you know it is done. a drag that goes up, or sideways, or
+  stops short is a scroll and costs nothing.
+  the browser's own overscroll refresh is turned off on the way, because that one
+  reloads the page: it would throw away the laid wall, its arrangement, where you
+  were in it and anything playing, to fetch what mason already re-reads in place.
+
+- [#71](https://github.com/antstanley/mason/pull/71) [`509c6b0`](https://github.com/antstanley/mason/commit/509c6b06504049dee0ac6402b9f8e28377866953) Thanks [@antstanley](https://github.com/antstanley)! - the drawings match the wall again. the refresh change spec is folded into the
+  canonical pages and moved onto the merged shelf, so nothing is pending: the feed
+  entry point prints the six arguments it actually takes, the snapshot's `refresh`
+  sits with the identity it belongs to rather than in the guarded state table, and
+  the one sentence about which caches a refresh steps over reads the same on both
+  pages that carry it.
+
+  two lane descriptions caught up with the tests behind them: the browser lane is
+  five specs now, not one smoke. and the feed-page cache key admits the limit it
+  has carried since glaze started asking generators for a hundred posts at a time,
+  which is the difference between an image wall and a quarter of one.
+
+- [#75](https://github.com/antstanley/mason/pull/75) [`baaedf7`](https://github.com/antstanley/mason/commit/baaedf71f3d66ffea75cd8dcbfc2fd6267cd9e69) Thanks [@antstanley](https://github.com/antstanley)! - the wall switcher leads with feeds. open it and the door to the feed picker is
+  the first thing in it, the only filled control on it, and where the panel puts
+  your cursor; the feeds you opened recently sit right under it. the handle box is
+  still there, below a rule and quieter, because a handle is still how you reach a
+  person's wall.
+
+  it is a better guess about why the panel was opened: you have one follow graph
+  and thousands of feeds, and on a phone the old panel opened a keyboard over the
+  list you were reaching for. the landing page is unchanged, where your own handle
+  is the question being asked.
+
+- [#71](https://github.com/antstanley/mason/pull/71) [`509c6b0`](https://github.com/antstanley/mason/commit/509c6b06504049dee0ac6402b9f8e28377866953) Thanks [@antstanley](https://github.com/antstanley)! - the brick reader now has something to read: every image at its own aspect rather than the first one, the post's whole text with its line breaks, the external embed's whole description, a blog's cover at full width with every tag and a "read at" control, and a video's poster with a play button that claims the one player slot for itself, so the card behind the scrim goes quiet. left and right arrows step along the laid wall, and two controls do the same, stopping at both ends.
+
+  a blog that used the same tag twice also stops taking the wall down with it. tags arrive from a document record exactly as it wrote them, repeats included, and both tag lists keyed on the tag itself, so a repeat inside a card's first four laid zero bricks at all.
+
+### Patch Changes
+
+- [#76](https://github.com/antstanley/mason/pull/76) [`07c423a`](https://github.com/antstanley/mason/commit/07c423a80874b9c0dbba643f40547622ff1b3849) Thanks [@antstanley](https://github.com/antstanley)! - the control bar stays with you on a desktop. it used to scroll away with the
+  wall, so switching walls or laying this one again meant scrolling back to the
+  top of an endless scroll first. it now sits at the top of the window, veiling
+  the bricks that pass under it, and it is unchanged on a phone, where it has
+  always been at the bottom under your thumb.
+
+- [#74](https://github.com/antstanley/mason/pull/74) [`427668e`](https://github.com/antstanley/mason/commit/427668e7ecd76e564027b3136e1b166db7a67854) Thanks [@antstanley](https://github.com/antstanley)! - a stale build can no longer answer for the tree.
+
+  the browser specs drive the real static site, and the preview server that hosts
+  them only serves what is already in `web/build/`. it never compiles. running one
+  spec straight after a source edit therefore reported on the build before it:
+  green, fast, and about code that no longer existed.
+
+  the run now refuses to start when the build is older than anything it was made
+  from, and names the files. this is developer tooling and changes nothing about
+  the wall itself.
+
+- [#71](https://github.com/antstanley/mason/pull/71) [`509c6b0`](https://github.com/antstanley/mason/commit/509c6b06504049dee0ac6402b9f8e28377866953) Thanks [@antstanley](https://github.com/antstanley)! - the feed picker no longer offers feeds it cannot lay. a feed whose ranking is
+  about who is asking, your mutuals, your mentions, the people you follow who post
+  rarely, has no viewer to be about when nobody is logged in, and tapping its card
+  gave "the wall wouldn't load" rather than a wall. those cards are gone, from
+  browse, from search, from a creator's own list, and from recents.
+
+  feeds are denied by name, because the same viewer-shaped feed ships from several
+  publishers and a list of addresses would hide one copy and leave the rest. where
+  a name is one a working feed could also carry it is pinned to its publisher
+  instead: skyfeed's "Discover" is gone and bluesky's, which is the discover
+  everybody means, is not.
+
+- [#75](https://github.com/antstanley/mason/pull/75) [`baaedf7`](https://github.com/antstanley/mason/commit/baaedf71f3d66ffea75cd8dcbfc2fd6267cd9e69) Thanks [@antstanley](https://github.com/antstanley)! - the feed picker only offers feeds that actually lay a wall. every one of the top
+  fifty popular feeds was asked for a page logged out, and the eleven that answer
+  with an error or a handful of posts are no longer listed: a card that opens onto
+  three bricks reads as broken whether the feed is gated or just quiet.
+
+  it cuts the other way too. two feeds mason was hiding turned out to work fine
+  logged out, and they are back: the rule was keyed to their names, and the names
+  belong to several publishers. now anything that could plausibly work is measured
+  per publisher rather than assumed, and `pnpm feeds:audit` re-derives the whole
+  list against the live directory.
+
+- [#73](https://github.com/antstanley/mason/pull/73) [`f263791`](https://github.com/antstanley/mason/commit/f263791ae1ba30c133faa3a166e061f7c7cc32ac) Thanks [@antstanley](https://github.com/antstanley)! - the session keeps the last twelve walls, not every wall you ever opened.
+
+  mason remembers a laid wall so stepping back to it returns the same arrangement
+  instead of rolling a new one. it remembered every wall, for as long as the tab
+  stayed open, and an entry is a whole wall: every brick, its text, its image
+  urls, and a record of every id it has already laid.
+
+  that was fine when a wall was somewhere you arrived. the feed picker made
+  hopping between them a one tap habit, and nothing ever took an entry away. the
+  last twelve distinct walls are kept now, which is the length of the picker's
+  recents row, so every wall that row can offer you in one tap is one that comes
+  straight back. least recently used is the first out, so returning to a wall
+  keeps it and the one you glanced at once is the one that goes. stepping back and
+  forth between two walls costs two entries however long it goes on.
+
 ## 0.7.0
 
 ### Minor Changes
